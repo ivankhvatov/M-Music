@@ -2,22 +2,38 @@ import SwiftUI
 
 struct AlbumCardView: View {
     let album: Album
-    
+    var zoomNamespace: Namespace.ID? = nil
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            album.artwork
-                .resizable()
-                .aspectRatio(1, contentMode: .fit)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-            
-            Text(album.title)
+            artwork
+
+            Text(album.title + (album.edition != nil ? (" (" + album.edition! + ")") : ""))
                 .font(.system(size: 15))
                 .lineLimit(1)
             
-            Text(album.artist)
+            Text(album.artist.joined(separator: ", "))
                 .font(.caption)
                 .foregroundColor(.gray)
                 .lineLimit(1)
+        }
+    }
+
+    @ViewBuilder
+    private var artwork: some View {
+        let image = album.artwork
+            .resizable()
+            .aspectRatio(1, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.secondary, lineWidth: 0.15)
+            )
+
+        if let zoomNamespace {
+            image.matchedTransitionSource(id: album.id, in: zoomNamespace)
+        } else {
+            image
         }
     }
 }
@@ -27,7 +43,7 @@ struct AlbumCardView: View {
     ZStack {
         
         AlbumCardView(
-            album: TestModels.album
+            album: TestModels.TooFastToDieJP
         )
     }
 }
