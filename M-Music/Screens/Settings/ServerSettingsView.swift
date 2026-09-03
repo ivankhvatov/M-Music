@@ -62,6 +62,7 @@ struct ServerSettingsView: View {
                             }
                         }
                         .disabled(serverURL.isEmpty || username.isEmpty || password.isEmpty || isConnecting)
+                        .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
 
                         if isConnected {
                             Button(role: .destructive) {
@@ -70,6 +71,7 @@ struct ServerSettingsView: View {
                                 Text("Disconnect")
                                     .frame(maxWidth: .infinity)
                             }
+                            .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
                         }
                     }
                 }

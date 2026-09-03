@@ -1,31 +1,40 @@
 import SwiftUI
 
 struct AlbumView: View {
-    let album: Album
+    let album: AlbumID3
     var zoomNamespace: Namespace.ID? = nil
 
+    private let client = SubsonicClient.shared
+
+    @State private var songs: [Child] = []
+    @State private var albumCodec: String?
+    @State private var isLoadingSongs = true
+    @State private var loadError: String?
+
+    @State private var isStarred: Bool
+    @State private var isDownloaded = false
     @State private var backgroundColor: Color
 
-    init(album: Album, zoomNamespace: Namespace.ID? = nil) {
+    init(album: AlbumID3, zoomNamespace: Namespace.ID? = nil) {
         self.album = album
         self.zoomNamespace = zoomNamespace
-        _backgroundColor = State(initialValue: album.artwork.averageColor() ?? Color(.systemBackground))
+        _isStarred = State(initialValue: album.isStarred)
+        _backgroundColor = State(initialValue: Color(.systemBackground))
     }
 
     var body: some View {
-        if let zoomNamespace {
-            navigationContent
-                .navigationTransition(.zoom(sourceID: album.id, in: zoomNamespace))
-        } else {
-            navigationContent
-        }
-    }
-
-    private var navigationContent: some View {
-        NavigationStack {
-            albumList
+        Group {
+            if let zoomNamespace {
+                albumList
+                    .navigationTransition(.zoom(sourceID: album.id, in: zoomNamespace))
+            } else {
+                albumList
+            }
         }
         .preferredColorScheme(.dark)
+        .task {
+            await loadSongs()
+        }
     }
 
     var albumList: some View {
@@ -36,7 +45,7 @@ struct AlbumView: View {
             .listRowSeparator(.hidden)
             .listRowBackground(Color.clear)
 
-            trackList()
+            trackListSection()
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
 
@@ -55,19 +64,53 @@ struct AlbumView: View {
         .tint(.primary)
     }
 
+    private func loadSongs() async {
+        do {
+            let full = try await AlbumDetailsCache.shared.album(id: album.id.raw)
+            await MainActor.run {
+                songs = full.song ?? []
+                albumCodec = full.codec
+                isLoadingSongs = false
+            }
+        } catch {
+            await MainActor.run {
+                loadError = error.localizedDescription
+                isLoadingSongs = false
+            }
+        }
+    }
+
     /// Matches the leading edge of a track row's title: the row's own horizontal padding plus the track number's frame width and its spacing to the title.
     private let trackTitleLeadingInset: CGFloat = 4 + 20 + 12
+
+    @ViewBuilder
+    func trackListSection() -> some View {
+        if isLoadingSongs {
+            ProgressView()
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 24)
+        } else if let loadError {
+            Text(loadError)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+                .multilineTextAlignment(.center)
+                .padding(.vertical, 24)
+        } else {
+            trackList()
+        }
+    }
 
     func trackList() -> some View {
         VStack(spacing: 0) {
             Divider()
                 .overlay(.secondary.opacity(0.75))
-            ForEach(Array(album.tracks.enumerated()), id: \.element.id) { index, track in
+            ForEach(Array(songs.enumerated()), id: \.element.id) { index, track in
                 trackRow(track)
                     .padding(.horizontal, 4)
                     .padding(.vertical, 16)
 
-                if index < album.tracks.count - 1 {
+                if index < songs.count - 1 {
                     Divider()
                         .overlay(.secondary.opacity(0.75))
                         .padding(.leading, trackTitleLeadingInset)
@@ -78,26 +121,24 @@ struct AlbumView: View {
         }
     }
 
-    func trackSeparator() -> some View {
-        Rectangle()
-            .fill(Color.secondary.opacity(0.5))
-            .frame(height: 0.5)
-    }
-
     private var trackCountAndDuration: String {
-        let trackCount = album.tracks.count
-        let totalMinutes = Int(album.duration.components.seconds / 60)
-        let songsText = String(localized: "\(trackCount) songs")
+        let totalMinutes = album.duration / 60
+        let songsText = String(localized: "\(album.songCount) songs")
         let minutesText = String(localized: "\(totalMinutes) minutes")
         return "\(songsText), \(minutesText)"
+    }
+
+    private var recordLabelText: String? {
+        guard let recordLabels = album.recordLabels, !recordLabels.isEmpty else { return nil }
+        return recordLabels.map(\.name).joined(separator: ", ")
     }
 
     func albumFooter() -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(trackCountAndDuration)
 
-            if let label = album.label {
-                Text("Ⓟ " + label)
+            if let recordLabelText {
+                Text("Ⓟ " + recordLabelText)
             }
         }
         .font(.subheadline)
@@ -105,30 +146,24 @@ struct AlbumView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    func trackRow(_ track: Song) -> some View {
+    func trackRow(_ track: Child) -> some View {
         HStack(spacing: 12) {
-            Text(track.trackNumber.map(String.init) ?? "")
+            Text(track.track.map(String.init) ?? "")
                 .font(.body)
                 .foregroundColor(.secondary)
                 .frame(minWidth: 20, alignment: .center)
 
-            VStack (alignment: .leading) {
+            VStack(alignment: .leading) {
                 Text(track.title)
-                
-                if (track.artist != album.artist) {
-                    Text(track.artist.joined(separator: ", "))
+
+                if let trackArtist = track.artist, trackArtist != album.artist {
+                    Text(trackArtist)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
             }
 
             Spacer()
-
-            if track.isDownloaded {
-                Image(systemName: "arrow.down.circle.fill")
-                    .foregroundStyle(.secondary)
-                    .font(.system(size: 12))
-            }
 
             Button {} label: {
                 Image(systemName: "ellipsis")
@@ -139,52 +174,47 @@ struct AlbumView: View {
     }
 
     func albumArtwork() -> some View {
-        album.artwork
-            .resizable()
-            .scaledToFit()
-            .frame(maxWidth: 270, maxHeight: 270)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color.secondary, lineWidth: 0.15)
-            )
-            .shadow(color: .black.opacity(0.5), radius: 20)
+        AsyncImage(url: try? client.coverArtURL(forId: album.coverArt ?? album.id.raw, size: 600)) { phase in
+            if let image = phase.image {
+                image
+                    .resizable()
+                    .scaledToFit()
+                    .onAppear {
+                        if let color = image.averageColor() {
+                            backgroundColor = color
+                        }
+                    }
+            } else {
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.2))
+            }
+        }
+        .frame(maxWidth: 270, maxHeight: 270)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.secondary, lineWidth: 0.15)
+        )
+        .shadow(color: .black.opacity(0.5), radius: 20)
     }
-    
+
     func albumDetails() -> Text {
-        var result: String = ""
-        if (album.genre != nil) {
-            result += album.genre!
-        }
-        if (album.releaseYear != nil) {
-            if (result != "") {
-                result += " • "
-            }
-            result += String(album.releaseYear!)
-        }
-        if (album.codec != nil) {
-            if (result != "") {
-                result += " • "
-            }
-            result += album.codec!
-        }
-        return Text(result)
+        let parts = [album.genre, album.year.map(String.init), albumCodec].compactMap { $0 }
+        return Text(parts.joined(separator: " • "))
             .font(.caption)
             .foregroundColor(.secondary)
     }
-    
+
     func albumHeader() -> some View {
         HStack(alignment: .center) {
             Spacer()
             VStack(alignment: .center, spacing: 6) {
                 albumArtwork()
-                Text(
-                    album.title + (album.edition != nil ? ("\n(" + album.edition! + ")") : "")
-                )
-                .font(.system(size: 24, weight: .semibold))
-                .multilineTextAlignment(.center)
-                .padding(.top, 15)
-                Text(album.artist.joined(separator: ", "))
+                Text(album.name)
+                    .font(.system(size: 24, weight: .semibold))
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 15)
+                Text(album.artist ?? "Unknown Artist")
                     .font(.title3)
                     .multilineTextAlignment(.center)
                 albumDetails()
@@ -218,7 +248,7 @@ struct AlbumView: View {
                         .font(.system(size: 16))
                         .fontWeight(.semibold)
                 }
-                .foregroundStyle(backgroundColor)
+                .foregroundStyle(backgroundColor.darkened())
                 .padding(.horizontal, 20)
                 .frame(height: 48)
                 .background(Color.white)
@@ -226,9 +256,9 @@ struct AlbumView: View {
             }
 
             Button {
-                album.ToggleFavorite()
+                toggleStarred()
             } label: {
-                Image(systemName: album.isFavorite ? "star.fill" : "star")
+                Image(systemName: isStarred ? "star.fill" : "star")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(.primary)
                     .frame(width: 48, height: 48)
@@ -238,16 +268,30 @@ struct AlbumView: View {
         }
         .buttonStyle(.plain)
     }
-    
+
+    private func toggleStarred() {
+        let newValue = !isStarred
+        isStarred = newValue
+        Task {
+            do {
+                if newValue {
+                    try await client.star(albumIds: [album.id.raw])
+                } else {
+                    try await client.unstar(albumIds: [album.id.raw])
+                }
+            } catch {
+                await MainActor.run { isStarred = !newValue }
+            }
+        }
+    }
+
     @ToolbarContentBuilder
         private var downloadButton: some ToolbarContent {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    if (album.isDownloaded == false) {
-                        album.Download()
-                    }
+                    isDownloaded = true
                 } label: {
-                    Image(systemName: album.isDownloaded ? "checkmark" : "arrow.down")
+                    Image(systemName: isDownloaded ? "checkmark" : "arrow.down")
                         .foregroundStyle(.primary)
                 }
             }
@@ -265,7 +309,13 @@ struct AlbumView: View {
 }
 
 #Preview {
-    AlbumView(
-        album: TestModels.Diluvium
-    )
+    NavigationStack {
+        AlbumView(
+            album: AlbumID3(
+                id: "1", name: "Diluvium", artist: "Obscura", artistId: nil,
+                coverArt: nil, songCount: 11, duration: 3243, playCount: nil, created: nil,
+                starred: nil, year: 2018, genre: "Death Metal", userRating: nil
+            )
+        )
+    }
 }

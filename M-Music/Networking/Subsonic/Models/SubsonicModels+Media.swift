@@ -15,7 +15,7 @@ extension License: SubsonicPayload { static let responseKey = "license" }
 /// Represents a single media file. Used for songs everywhere in the API, and also for
 /// folder-style directory entries returned by `getMusicDirectory`/`getIndexes` (Navidrome
 /// simulates a folder tree for those, per its docs).
-struct Child: Decodable, Identifiable, Hashable, Sendable {
+struct Child: Codable, Identifiable, Hashable, Sendable {
     let id: FlexibleID
     let parent: FlexibleID?
     let isDir: Bool
@@ -45,6 +45,10 @@ struct Child: Decodable, Identifiable, Hashable, Sendable {
     let bookmarkPosition: Int?
 
     var isStarred: Bool { starred != nil }
+
+    /// Audio codec/format, e.g. "FLAC", "MP3". Subsonic has no dedicated codec tag — `suffix`
+    /// (the file extension) is the closest thing to it, so that's what this derives from.
+    var codec: String? { suffix?.uppercased() }
 
     enum CodingKeys: String, CodingKey {
         case id, parent, isDir, title, album, artist, track, year, genre, coverArt, size
@@ -165,6 +169,14 @@ struct ArtistsID3: Decodable, Sendable {
 }
 extension ArtistsID3: SubsonicPayload { static let responseKey = "artists" }
 
+/// A record/publishing label credited on an album — the OpenSubsonic `recordLabels` field,
+/// sourced from the album's LABEL/RECORDLABEL tag. Navidrome only exposes this (and
+/// `releaseTypes` below) on albums, never on individual songs, even though the tag itself
+/// lives on the track files — there's no per-song equivalent in the API.
+struct RecordLabel: Codable, Hashable, Sendable {
+    let name: String
+}
+
 struct AlbumID3: Decodable, Identifiable, Hashable, Sendable {
     let id: FlexibleID
     let name: String
@@ -179,6 +191,10 @@ struct AlbumID3: Decodable, Identifiable, Hashable, Sendable {
     let year: Int?
     let genre: String?
     let userRating: Int?
+    /// From the LABEL/RECORDLABEL tag (OpenSubsonic extension).
+    var recordLabels: [RecordLabel]? = nil
+    /// From the RELEASETYPE tag — e.g. "album", "compilation", "ep", "live" (OpenSubsonic extension).
+    var releaseTypes: [String]? = nil
     var isStarred: Bool { starred != nil }
 }
 
@@ -193,7 +209,7 @@ struct ArtistWithAlbumsID3: Decodable, Sendable {
 }
 extension ArtistWithAlbumsID3: SubsonicPayload { static let responseKey = "artist" }
 
-struct AlbumWithSongsID3: Decodable, Sendable {
+struct AlbumWithSongsID3: Codable, Sendable {
     let id: FlexibleID
     let name: String
     let artist: String?
@@ -207,7 +223,15 @@ struct AlbumWithSongsID3: Decodable, Sendable {
     let year: Int?
     let genre: String?
     let userRating: Int?
+    /// From the LABEL/RECORDLABEL tag (OpenSubsonic extension).
+    var recordLabels: [RecordLabel]? = nil
+    /// From the RELEASETYPE tag — e.g. "album", "compilation", "ep", "live" (OpenSubsonic extension).
+    var releaseTypes: [String]? = nil
     let song: [Child]?
+
+    /// The album's audio codec, taken from its first track. Subsonic has no album-level codec
+    /// field — this is derived from the track list, so it's `nil` until `song` is populated.
+    var codec: String? { song?.first?.codec }
 }
 extension AlbumWithSongsID3: SubsonicPayload { static let responseKey = "album" }
 

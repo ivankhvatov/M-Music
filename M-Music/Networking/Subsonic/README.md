@@ -21,7 +21,8 @@ M-Music/Networking/Subsonic/
 │   ├── SubsonicCredentials.swift   credential struct + Keychain/UserDefaults persistence
 │   ├── Keychain.swift              tiny Keychain Services wrapper
 │   ├── SubsonicPayload.swift       generic envelope decoding + error types
-│   └── FlexibleID.swift            id type that accepts server-supplied String or Int
+│   ├── FlexibleID.swift            id type that accepts server-supplied String or Int
+│   └── AlbumDetailsCache.swift     in-memory cache for getAlbum, keyed by album id
 ├── Models/
 │   ├── SubsonicModels+Media.swift   Child (song), Directory, Artist/Album (ID3), search, lists...
 │   └── SubsonicModels+Extras.swift  playlists, lyrics, bookmarks, sharing, radio, users, scanning
@@ -107,6 +108,40 @@ Folder-based browsing (`getMusicFolders`, `getIndexes`, `getMusicDirectory`) als
 per Navidrome's own docs it returns a *simulated* directory tree built from tags, not real
 filesystem folders — prefer the ID3 calls above unless you specifically need folder
 semantics.
+
+`AlbumID3`/`AlbumWithSongsID3` also carry `recordLabels: [RecordLabel]` and
+`releaseTypes: [String]`, sourced from the LABEL/RECORDLABEL and RELEASETYPE tags on the
+album's tracks. These are OpenSubsonic extensions Navidrome only aggregates and exposes at
+the **album** level, never per-song, even though the tags themselves live on the track
+files — there's no `Child`/song equivalent to fetch. A COPYRIGHT tag, if your server parses
+one, is **not** exposed anywhere in the Subsonic/OpenSubsonic API at all (verified against
+Navidrome's own response-builder source) — there's no field this client (or any Subsonic
+client) can read it from; only Navidrome's own web UI can show it, via its separate native
+REST API.
+
+Neither Subsonic nor OpenSubsonic has a dedicated codec tag either. `Child.codec` derives one
+from `suffix` (the file extension, e.g. "flac" → "FLAC"), and `AlbumWithSongsID3.codec` takes
+its first track's — both computed client-side, not decoded from a server field.
+
+`getAlbum` (full album details, including the track list) is fetched often — every time a
+user opens an album — so it's worth caching. `AlbumDetailsCache` wraps it with a keyed-by-id
+cache, backed by an in-memory dictionary and mirrored to disk (`Caches/SubsonicAlbumCache/`),
+so reopening an album already seen — this session *or* a previous one — is instant instead of
+a round trip:
+
+```swift
+let full = try await AlbumDetailsCache.shared.album(id: album.id.raw) // AlbumWithSongsID3
+```
+
+The cache is cleared automatically on `connect`/`disconnect` (switching servers or accounts
+invalidates it, memory and disk), and can be dropped manually with `invalidate(id:)` or
+`invalidateAll()` — e.g. after an edit that could change an album's track list. It never
+expires or evicts on its own otherwise, so a long-lived install accumulates one small JSON
+file per album ever opened; `Caches/` is a directory the OS is free to purge under storage
+pressure, so this is safe to leave unbounded. See it in use in
+[`AlbumView`](../../Screens/AlbumView.swift). Nothing else is cached this way; every other
+endpoint always hits the network, matching `SubsonicClient` itself never caching (see Design
+notes below).
 
 ### Lists & search
 

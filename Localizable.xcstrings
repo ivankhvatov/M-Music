@@ -192,6 +192,29 @@
         }
       }
     },
+    "Connect" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Соединение"
+          }
+        }
+      }
+    },
+    "Connect to your Navidrome server to get started" : {
+
+    },
+    "Disconnect" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Отключение"
+          }
+        }
+      }
+    },
     "Downloads" : {
       "localizations" : {
         "de" : {
@@ -204,6 +227,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Загрузки"
+          }
+        }
+      }
+    },
+    "Enter the address of your Navidrome server, e.g. https://music.example.com or http://192.168.1.10:4533" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Введите адрес вашего сервера Navidrome, например https://music.example.com или http://192.168.1.10:4533"
           }
         }
       }
@@ -224,6 +257,16 @@
         }
       }
     },
+    "https://music.example.com" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "https://music.example.com"
+          }
+        }
+      }
+    },
     "Library" : {
       "localizations" : {
         "de" : {
@@ -236,6 +279,41 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Медиатека"
+          }
+        }
+      }
+    },
+    "Navidrome Server" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Navidrome-Server"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сервер Navidrome"
+          }
+        }
+      }
+    },
+    "No recently played albums yet." : {
+
+    },
+    "Password" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Passwort"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Пароль"
           }
         }
       }
@@ -336,6 +414,16 @@
         }
       }
     },
+    "Reconnect" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Повторное соединение"
+          }
+        }
+      }
+    },
     "Search" : {
       "localizations" : {
         "de" : {
@@ -412,6 +500,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Трек"
+          }
+        }
+      }
+    },
+    "Username" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Username"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Имя пользователя"
           }
         }
       }

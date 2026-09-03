@@ -4,48 +4,23 @@ struct LibraryView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Namespace private var albumZoomNamespace
 
-    let recent: [Album] = [
-        TestModels.TooFastToDieJP,
-        TestModels.Diluvium,
-        TestModels.TooFastToDie,
-        TestModels.Omnivium,
-        TestModels.OmniviumDlx,
-        TestModels.BleedTheFuture
-    ]
+    private let client = SubsonicClient.shared
+
+    @State private var isConnected = SubsonicClient.shared.isConfigured
+    @State private var recentAlbums: [AlbumID3] = []
+    @State private var isLoadingAlbums = false
+    @State private var isFetchingAlbums = false
+    @State private var loadError: String?
+    @State private var hasLoadedOnce = false
 
     var body: some View {
             NavigationStack {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        // MARK: Navigation Rows
-                        VStack(spacing: 0) {
-                            LibraryNavigationRow(title: "Playlists", icon: "music.note.list") {
-                                PlaylistsListView()
-                            }
-                            rowDivider
-                            LibraryNavigationRow(title: "Artists", icon: "music.mic") {
-                                ArtistsListView()
-                            }
-                            rowDivider
-                            LibraryNavigationRow(title: "Albums", icon: "square.stack") {
-                                AlbumsListView()
-                            }
-                            rowDivider
-                            LibraryNavigationRow(title: "Songs", icon: "music.note") {
-                                SongsListView()
-                            }
-                        }
-                        .padding(.horizontal, 16)
-
-                        Text("Recently played")
-                            .font(.system(size: 20))
-                            .padding(.horizontal, 16)
-                            .padding(.top, 16)
-                            .padding(.bottom, 18)
-
-                        recentAlbumsGrid
+                    if isConnected {
+                        libraryContent
+                    } else {
+                        disconnectedContent
                     }
-                    .padding(.top, 8)
                 }
                 .environment(\.colorScheme, colorScheme)
                 .navigationTitle("Library")
@@ -53,9 +28,108 @@ struct LibraryView: View {
                     plusButton
                     settingsButton
                 }
+                .onAppear {
+                    refresh()
+                }
             }
             .environment(\.colorScheme, colorScheme)
         }
+
+    private var libraryContent: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // MARK: Navigation Rows
+            VStack(spacing: 0) {
+                LibraryNavigationRow(title: "Playlists", icon: "music.note.list") {
+                    PlaylistsListView()
+                }
+                rowDivider
+                LibraryNavigationRow(title: "Artists", icon: "music.mic") {
+                    ArtistsListView()
+                }
+                rowDivider
+                LibraryNavigationRow(title: "Albums", icon: "square.stack") {
+                    AlbumsListView()
+                }
+                rowDivider
+                LibraryNavigationRow(title: "Songs", icon: "music.note") {
+                    SongsListView()
+                }
+            }
+            .padding(.horizontal, 16)
+
+            Text("Recently played")
+                .font(.system(size: 20))
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
+                .padding(.bottom, 18)
+
+            recentAlbumsGrid
+        }
+        .padding(.top, 8)
+    }
+
+    private var disconnectedContent: some View {
+        VStack(spacing: 16) {
+            Text("Connect to your Navidrome server to get started")
+                .font(.title3)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 32)
+
+            NavigationLink(destination: ServerSettingsView()) {
+                Text("Connect")
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 10)
+                    .background(Color.red)
+                    .clipShape(Capsule())
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 120)
+    }
+
+    /// Called from `.onAppear`, which fires every time this screen becomes visible again —
+    /// including when popping back from a pushed album. Only the very first load shows the
+    /// spinner and replaces the grid; later calls refetch quietly in the background and just
+    /// update `recentAlbums` in place once done, so the grid's view identity (and the
+    /// ScrollView's scroll position) stays stable instead of being torn down and rebuilt,
+    /// which was also breaking the album's zoom-dismiss transition mid-animation.
+    private func refresh() {
+        isConnected = client.isConfigured
+        guard client.isConfigured else {
+            recentAlbums = []
+            hasLoadedOnce = false
+            return
+        }
+        guard !isFetchingAlbums else { return }
+        isFetchingAlbums = true
+
+        if !hasLoadedOnce {
+            isLoadingAlbums = true
+        }
+        Task {
+            do {
+                let albums = try await client.getAlbumList2(type: .recent, size: 12)
+                await MainActor.run {
+                    recentAlbums = albums
+                    loadError = nil
+                    isLoadingAlbums = false
+                    isFetchingAlbums = false
+                    hasLoadedOnce = true
+                }
+            } catch {
+                await MainActor.run {
+                    if !hasLoadedOnce {
+                        loadError = error.localizedDescription
+                    }
+                    isLoadingAlbums = false
+                    isFetchingAlbums = false
+                }
+            }
+        }
+    }
 
     private var rowDivider: some View {
         Divider()
@@ -67,17 +141,34 @@ struct LibraryView: View {
         GridItem(.flexible(), spacing: 16),
     ]
 
+    @ViewBuilder
     private var recentAlbumsGrid: some View {
-        LazyVGrid(columns: gridColumns, spacing: 16) {
-            ForEach(Array(recent.enumerated()), id: \.offset) { _, album in
-                NavigationLink(destination: AlbumView(album: album, zoomNamespace: albumZoomNamespace)) {
-                    AlbumCardView(album: album, zoomNamespace: albumZoomNamespace)
+        if isLoadingAlbums {
+            ProgressView()
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 24)
+        } else if let loadError {
+            Text(loadError)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 16)
+        } else if recentAlbums.isEmpty {
+            Text("No recently played albums yet.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 16)
+        } else {
+            LazyVGrid(columns: gridColumns, spacing: 16) {
+                ForEach(recentAlbums) { album in
+                    NavigationLink(destination: AlbumView(album: album, zoomNamespace: albumZoomNamespace)) {
+                        AlbumCardView(album: album, zoomNamespace: albumZoomNamespace)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 16)
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 16)
     }
 
     struct LibraryNavigationRow<Destination: View>: View {
