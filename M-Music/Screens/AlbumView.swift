@@ -127,9 +127,7 @@ struct AlbumView: View {
     }
 
     private func playTrack(at index: Int) {
-        guard songs.indices.contains(index) else { return }
-        let remaining = Array(songs[(index + 1)...])
-        player.play(track: songs[index], queue: remaining)
+        player.play(queue: songs, startAt: index)
     }
 
     private var trackCountAndDuration: String {

@@ -4,9 +4,7 @@ import CoreImage
 
 struct PlayerView: View {
     @ObservedObject private var player = PlayerManager.shared
-    private let client = SubsonicClient.shared
 
-    @State private var isFavorite: Bool = false
     @State private var hasTimer: Bool = false
     @State private var showLyrics: Bool = false
     @State private var showQueue: Bool = false
@@ -38,9 +36,6 @@ struct PlayerView: View {
             )
             .task(id: player.artworkURL) {
                 await updateBackgroundColor()
-            }
-            .task(id: player.currentTrack?.id) {
-                isFavorite = player.currentTrack?.isStarred ?? false
             }
         }
 
@@ -96,7 +91,7 @@ struct PlayerView: View {
 
     func PlayerInfo() -> some View {
         VStack (alignment: .leading, spacing: 4) {
-            MarqueeText(text: player.currentTrack?.title ?? "Not Playing")
+            MarqueeText(text: player.currentTrack?.title ?? String(localized: "Not Playing"))
                 .font(.title2)
                 .fontWeight(.semibold)
                 .foregroundStyle(.white)
@@ -172,29 +167,12 @@ struct PlayerView: View {
         return String(format: "%02d:%02d", minutes, seconds)
     }
 
-    private func toggleStarred() {
-        guard let track = player.currentTrack else { return }
-        let newValue = !isFavorite
-        isFavorite = newValue
-        Task {
-            do {
-                if newValue {
-                    try await client.star(ids: [track.id.raw])
-                } else {
-                    try await client.unstar(ids: [track.id.raw])
-                }
-            } catch {
-                await MainActor.run { isFavorite = !newValue }
-            }
-        }
-    }
-
     func PlaybackRow() -> some View {
         HStack{
             Button {
-                toggleStarred()
+                player.toggleStarred()
             } label: {
-                Image(systemName: isFavorite ? "star.fill" : "star")
+                Image(systemName: player.isCurrentTrackStarred ? "star.fill" : "star")
                     .font(.system(size: 22))
                     .contentShape(.rect)
                     .font(.system(size: bottomButtonSize))
@@ -230,7 +208,8 @@ struct PlayerView: View {
                 playPauseBurstID += 1
             } label: {
                 ZStack {
-                    PlayPauseBurst(trigger: playPauseBurstID)
+                    PlayPauseBurst(trigger: playPauseBurstID, endScale: 1.6)
+                        .frame(width: 44, height: 44)
                     // No `.contentTransition(.symbolEffect(.replace))` here: its cross-fade
                     // briefly renders both the play triangle and the pause bars on top of each
                     // other. A plain instant swap plus the bounce pulse reads just as snappy
@@ -281,38 +260,6 @@ struct PlayerView: View {
                 )
                 .contentShape(.rect)
         }
-    }
-}
-
-/// A brief white circle that bursts outward and fades on tap — the same kind of feedback Apple
-/// Music gives its play/pause button. `trigger` increments on every tap; each new value restarts
-/// the animation from scratch (a plain `withAnimation` on a boolean would just interpolate from
-/// wherever the previous burst left off instead of starting over).
-private struct PlayPauseBurst: View {
-    let trigger: Int
-
-    // Both the untapped resting state and the settled-after-burst state need to be invisible —
-    // unlike a single `expanded` toggle, these two independent values let opacity start and end
-    // at 0 while still animating up to 0.55 and back down as the circle expands in between.
-    @State private var scale: CGFloat = 0.6
-    @State private var opacity: Double = 0
-
-    var body: some View {
-        Circle()
-            .fill(Color.white)
-            .frame(width: 44, height: 44)
-            .scaleEffect(scale)
-            .opacity(opacity)
-            .task(id: trigger) {
-                guard trigger > 0 else { return }
-                scale = 0.6
-                opacity = 0.55
-                try? await Task.sleep(for: .seconds(0.01))
-                withAnimation(.easeOut(duration: 0.2)) {
-                    scale = 1.5
-                    opacity = 0
-                }
-            }
     }
 }
 

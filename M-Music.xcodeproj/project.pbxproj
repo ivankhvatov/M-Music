@@ -34,9 +34,22 @@
 		2CEC0DB62FF947BB00DF22A9 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		2CEC0DFF2FF947BB00DF22AA /* Exceptions for "M-Music" folder in "M-Music" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 2CE8FF682FF8D79C0037BA59 /* M-Music */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		2CE8FF6B2FF8D79C0037BA59 /* M-Music */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				2CEC0DFF2FF947BB00DF22AA /* Exceptions for "M-Music" folder in "M-Music" target */,
+			);
 			path = "M-Music";
 			sourceTree = "<group>";
 		};
@@ -415,6 +428,7 @@
 				DEVELOPMENT_ASSET_PATHS = "\"M-Music/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "M-Music/Info.plist";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -443,6 +457,7 @@
 				DEVELOPMENT_ASSET_PATHS = "\"M-Music/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "M-Music/Info.plist";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

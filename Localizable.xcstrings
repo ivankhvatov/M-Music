@@ -160,8 +160,17 @@
         }
       }
     },
+    "All albums" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Все альбомы"
+          }
+        }
+      }
+    },
     "Artist" : {
-      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -193,6 +202,16 @@
         }
       }
     },
+    "Ascending" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "По возрастанию"
+          }
+        }
+      }
+    },
     "Connect" : {
       "localizations" : {
         "ru" : {
@@ -209,6 +228,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Добавьте ваш сервер Navidrome, чтобы начать"
+          }
+        }
+      }
+    },
+    "Descending" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "По убыванию"
           }
         }
       }
@@ -245,6 +274,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Введите адрес вашего сервера Navidrome, например https://music.example.com или http://192.168.1.10:4533"
+          }
+        }
+      }
+    },
+    "Favorite" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Избранное"
+          }
+        }
+      }
+    },
+    "Favorite only" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Только избранные"
+          }
+        }
+      }
+    },
+    "Filter" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Фильтр"
           }
         }
       }
@@ -307,12 +366,48 @@
         }
       }
     },
+    "No albums found." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Альбомы не найдены."
+          }
+        }
+      }
+    },
     "No recently played albums yet." : {
       "localizations" : {
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Нет недавно воспроизведенных альбомов"
+            "value" : "Нет недавно воспроизведенных альбомов."
+          }
+        }
+      }
+    },
+    "Not Playing" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nichts wird wiedergegeben"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не воспроизводится"
+          }
+        }
+      }
+    },
+    "Order" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Порядок"
           }
         }
       }
@@ -455,6 +550,46 @@
         }
       }
     },
+    "Search albums" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Поиск по альбомам"
+          }
+        }
+      }
+    },
+    "Search artists" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Поиск по артистам"
+          }
+        }
+      }
+    },
+    "Search playlists" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Поиск по плейлистам"
+          }
+        }
+      }
+    },
+    "Search songs" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Поиск по песням"
+          }
+        }
+      }
+    },
     "Server" : {
       "localizations" : {
         "de" : {
@@ -503,6 +638,26 @@
         }
       }
     },
+    "Sort by" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сортировать по"
+          }
+        }
+      }
+    },
+    "Title" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Название"
+          }
+        }
+      }
+    },
     "Track" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -532,6 +687,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Имя пользователя"
+          }
+        }
+      }
+    },
+    "Year" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Год"
           }
         }
       }

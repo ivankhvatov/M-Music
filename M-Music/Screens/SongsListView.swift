@@ -8,13 +8,16 @@
 import SwiftUI
 
 struct SongsListView: View {
+    @State private var searchText = ""
+
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 10) {
                 List {
-                    
+
                 }
                 .navigationTitle("Songs")
+                .searchable(text: $searchText, prompt: "Search songs")
             }
             .toolbar {
             }
