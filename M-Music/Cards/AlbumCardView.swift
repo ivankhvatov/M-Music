@@ -21,20 +21,21 @@ struct AlbumCardView: View {
 
     @ViewBuilder
     private var artwork: some View {
-        let image = AsyncImage(url: try? SubsonicClient.shared.coverArtURL(forId: album.coverArt ?? album.id.raw, size: 300)) { phase in
-            if let image = phase.image {
-                image
-                    .resizable()
-                    .aspectRatio(1, contentMode: .fit)
-            } else {
-                Rectangle()
-                    .fill(Color.secondary.opacity(0.15))
-                    .aspectRatio(1, contentMode: .fit)
-                    .overlay {
-                        Image(systemName: "music.note")
-                            .foregroundStyle(.secondary)
-                    }
-            }
+        // Same URL AlbumView requests (original size, no `size` param), so opening this album
+        // reuses the image straight from ImageCache instead of triggering a second fetch —
+        // see CachedAsyncImage.
+        let image = CachedAsyncImage(url: try? SubsonicClient.shared.coverArtURL(forId: album.coverArt ?? album.id.raw)) { image in
+            image
+                .resizable()
+                .aspectRatio(1, contentMode: .fit)
+        } placeholder: {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.15))
+                .aspectRatio(1, contentMode: .fit)
+                .overlay {
+                    Image(systemName: "music.note")
+                        .foregroundStyle(.secondary)
+                }
         }
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(

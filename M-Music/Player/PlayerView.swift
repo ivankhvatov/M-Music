@@ -3,9 +3,8 @@ import UIKit
 import CoreImage
 
 struct PlayerView: View {
-    @State private var time: TimeInterval = 60.0
-    @State private var total: TimeInterval = 226.0
-    @State private var isPlaying: Bool = false
+    @ObservedObject private var player = PlayerManager.shared
+    private let client = SubsonicClient.shared
 
     @State private var isFavorite: Bool = false
     @State private var hasTimer: Bool = false
@@ -14,15 +13,16 @@ struct PlayerView: View {
     @State private var isMoreActive: Bool = false
     @State private var isSettingsActive: Bool = false
 
+    /// Live position while the user is dragging the scrubber; `nil` when not scrubbing, so the
+    /// progress bar follows `player.currentTime` the rest of the time.
+    @State private var scrubTime: TimeInterval?
     @GestureState private var isScrubbing: Bool = false
 
-    @State private var backgroundColor: Color = .gray
+    @State private var backgroundColors: [Color] = [.gray, .gray]
 
     private var bottomButtonSize : CGFloat = 22
-    
-    @State private var cover: Image = Image("cover_placeholder_4")
-    @State private var title: String = "Drone Corpse Aviator"
-    @State private var artist: String = "Archspire"
+
+    private var displayTime: TimeInterval { scrubTime ?? player.currentTime }
 
     var body: some View {
             ScrollView {
@@ -31,41 +31,31 @@ struct PlayerView: View {
             .safeAreaInset(edge: .top, spacing: 0) {
                 MainUI()
             }
-            .background(backgroundColor)
-            .onAppear {
-                backgroundColor = averageColor(image: cover)
+            .background(
+                LinearGradient(colors: backgroundColors, startPoint: .top, endPoint: .bottom)
+            )
+            .task(id: player.artworkURL) {
+                await updateBackgroundColor()
+            }
+            .task(id: player.currentTrack?.id) {
+                isFavorite = player.currentTrack?.isStarred ?? false
             }
         }
 
-    func averageColor(image name: Image, darkenedBy factor: CGFloat = 0.55) -> Color {
-        guard let uiImage = ImageRenderer(content: name).uiImage, let ciImage = CIImage(image: uiImage) else {
-            return .gray
+    private func updateBackgroundColor() async {
+        guard let url = player.artworkURL, let uiImage = await ImageCache.shared.load(url) else {
+            backgroundColors = [.gray, .gray]
+            return
         }
-
-        let parameters: [String: Any] = [
-            kCIInputImageKey: ciImage,
-            kCIInputExtentKey: CIVector(cgRect: ciImage.extent)
-        ]
-        guard let outputImage = CIFilter(name: "CIAreaAverage", parameters: parameters)?.outputImage else {
-            return .gray
+        let dominant = uiImage.dominantColors(count: 2).map { $0.darkened().darkened(by: 0.65) }
+        switch dominant.count {
+        case 2:
+            backgroundColors = dominant
+        case 1:
+            backgroundColors = [dominant[0], dominant[0].darkened(by: 0.7)]
+        default:
+            backgroundColors = [.gray, .gray]
         }
-
-        var bitmap = [UInt8](repeating: 0, count: 4)
-        let context = CIContext(options: [.workingColorSpace: NSNull()])
-        context.render(
-            outputImage,
-            toBitmap: &bitmap,
-            rowBytes: 4,
-            bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
-            format: .RGBA8,
-            colorSpace: nil
-        )
-
-        return Color(
-            red: CGFloat(bitmap[0]) / 255 * factor,
-            green: CGFloat(bitmap[1]) / 255 * factor,
-            blue: CGFloat(bitmap[2]) / 255 * factor
-        )
     }
 
     func MainUI() -> some View {
@@ -77,39 +67,48 @@ struct PlayerView: View {
             Spacer()
             PlayerCover()
             Spacer()
-            PlayerInfo()
-            PlayerProgress()
-            PlaybackRow()
-            BottomButtons()
+            VStack {
+                PlayerInfo()
+                PlayerProgress()
+                PlaybackRow()
+                BottomButtons()
+            }
+            .padding(.horizontal, 4)
         }
-        .padding(.horizontal, 25)
+        .padding(.horizontal, 20)
     }
-    
+
     func PlayerCover() -> some View {
-        cover
-            .resizable()
-            .scaledToFit()
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .shadow(color: .black.opacity(0.7), radius: 20)
-            .padding(.vertical, 0)
+        CachedAsyncImage(url: player.artworkURL) { image in
+            image
+                .resizable()
+                .scaledToFit()
+        } placeholder: {
+            Rectangle()
+                .fill(Color.white.opacity(0.1))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .shadow(color: .black.opacity(0.7), radius: 20)
+        .padding(.vertical, 0)
     }
-    
+
     func PlayerInfo() -> some View {
         HStack (spacing: 12) {
             VStack (alignment: .leading, spacing: 4) {
-                Text(title)
+                Text(player.currentTrack?.title ?? "Not Playing")
                     .font(.title2)
+                    .fontWeight(.semibold)
                     .foregroundStyle(.white)
-                Text(artist)
+                Text(player.currentTrack?.artist ?? "")
                     .font(.subheadline)
                     .foregroundStyle(.transparentWhite)
             }
             .lineLimit(1)
             Spacer(minLength: 0)
         }
-        .padding(.bottom, 10)
+        .padding(.bottom, 6)
     }
-    
+
     func PlayerProgress() -> some View {
         ZStack {
             ProgressTimers()
@@ -118,10 +117,10 @@ struct PlayerView: View {
         }
         .padding(.bottom, 30)
     }
-    
+
     func ProgressBar() -> some View {
         GeometryReader { geo in
-            let progress = total > 0 ? min(max(time / total, 0), 1) : 0
+            let progress = player.duration > 0 ? min(max(displayTime / player.duration, 0), 1) : 0
             let barHeight: CGFloat = isScrubbing ? 12 : 8
 
             ZStack(alignment: .leading) {
@@ -143,18 +142,24 @@ struct PlayerView: View {
                     }
                     .onChanged { value in
                         let newProgress = min(max(value.location.x / geo.size.width, 0), 1)
-                        time = newProgress * total
+                        scrubTime = newProgress * player.duration
+                    }
+                    .onEnded { _ in
+                        if let scrubTime {
+                            player.seek(to: scrubTime)
+                        }
+                        scrubTime = nil
                     }
             )
         }
         .frame(height: 44)
     }
-    
+
     func ProgressTimers() -> some View {
         HStack {
-            Text(formattedTime(time))
+            Text(formattedTime(displayTime))
             Spacer()
-            Text("-\(formattedTime(total - time))")
+            Text("-\(formattedTime(player.duration - displayTime))")
         }
         .font(.caption)
         .foregroundStyle(.transparentWhite)
@@ -168,10 +173,27 @@ struct PlayerView: View {
         return String(format: "%02d:%02d", minutes, seconds)
     }
 
+    private func toggleStarred() {
+        guard let track = player.currentTrack else { return }
+        let newValue = !isFavorite
+        isFavorite = newValue
+        Task {
+            do {
+                if newValue {
+                    try await client.star(ids: [track.id.raw])
+                } else {
+                    try await client.unstar(ids: [track.id.raw])
+                }
+            } catch {
+                await MainActor.run { isFavorite = !newValue }
+            }
+        }
+    }
+
     func PlaybackRow() -> some View {
         HStack{
             Button {
-                isFavorite.toggle()
+                toggleStarred()
             } label: {
                 Image(systemName: isFavorite ? "star.fill" : "star")
                     .font(.system(size: 22))
@@ -192,25 +214,29 @@ struct PlayerView: View {
         }
         .padding(.bottom, 50)
     }
-    
+
     func PlaybackControlButtons() -> some View {
         HStack(spacing: 30) {
-            Button {} label: {
+            Button {
+                player.previous()
+            } label: {
                 Image(systemName: "backward.fill")
                     .contentShape(.rect)
                     .font(.system(size: 28))
             }
             Button {
                 withAnimation(.spring(response: 0.2, dampingFraction: 0.6)) {
-                    isPlaying.toggle()
+                    player.togglePlayPause()
                 }
             } label: {
-                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: 40))
                     .frame(width: 60, height: 60)
                     .contentShape(.rect)
             }
-            Button {} label: {
+            Button {
+                player.next()
+            } label: {
                 Image(systemName: "forward.fill")
                     .contentShape(.rect)
                     .font(.system(size: 28))
@@ -218,7 +244,7 @@ struct PlayerView: View {
         }
         .tint(.white)
     }
-    
+
     func BottomButtons() -> some View {
         HStack (spacing: 32) {
             BottomButton("timer", isActive: $hasTimer)
@@ -238,7 +264,7 @@ struct PlayerView: View {
         } label: {
             Image(systemName: systemName)
                 .font(.system(size: bottomButtonSize))
-                .foregroundStyle(isActive.wrappedValue ? backgroundColor : .white)
+                .foregroundStyle(isActive.wrappedValue ? backgroundColors.first ?? .gray : .white)
                 .frame(width: 40, height: 40)
                 .background(
                     Circle()

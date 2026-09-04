@@ -56,6 +56,7 @@ final class SubsonicClient: @unchecked Sendable {
             let license = try await getLicense()
             try SubsonicCredentialsStore.save(candidate)
             AlbumDetailsCache.shared.invalidateAll()
+            ImageCache.shared.invalidateAll()
             return license
         } catch {
             credentials = previous
@@ -68,6 +69,7 @@ final class SubsonicClient: @unchecked Sendable {
         credentials = nil
         SubsonicCredentialsStore.clear()
         AlbumDetailsCache.shared.invalidateAll()
+        ImageCache.shared.invalidateAll()
     }
 
     // MARK: - URL building

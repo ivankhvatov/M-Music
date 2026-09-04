@@ -111,7 +111,7 @@ struct LibraryView: View {
         }
         Task {
             do {
-                let albums = try await client.getAlbumList2(type: .recent, size: 12)
+                let albums = try await client.getAlbumList2(type: .recent, size: 30)
                 await MainActor.run {
                     recentAlbums = albums
                     loadError = nil
@@ -119,6 +119,10 @@ struct LibraryView: View {
                     isFetchingAlbums = false
                     hasLoadedOnce = true
                 }
+                // Kick off every album's artwork now, before the user has even looked at the
+                // grid, instead of waiting for each card to scroll into view and start its own
+                // fetch — by the time anything is tapped, ImageCache should already have it.
+                prefetchArtwork(for: albums)
             } catch {
                 await MainActor.run {
                     if !hasLoadedOnce {
@@ -128,6 +132,12 @@ struct LibraryView: View {
                     isFetchingAlbums = false
                 }
             }
+        }
+    }
+
+    private func prefetchArtwork(for albums: [AlbumID3]) {
+        for album in albums {
+            ImageCache.shared.prefetch(try? client.coverArtURL(forId: album.coverArt ?? album.id.raw))
         }
     }
 

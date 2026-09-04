@@ -5,6 +5,7 @@ struct AlbumView: View {
     var zoomNamespace: Namespace.ID? = nil
 
     private let client = SubsonicClient.shared
+    @ObservedObject private var player = PlayerManager.shared
 
     @State private var songs: [Child] = []
     @State private var albumCodec: String?
@@ -109,6 +110,10 @@ struct AlbumView: View {
                 trackRow(track)
                     .padding(.horizontal, 4)
                     .padding(.vertical, 16)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        playTrack(at: index)
+                    }
 
                 if index < songs.count - 1 {
                     Divider()
@@ -119,6 +124,12 @@ struct AlbumView: View {
             Divider()
                 .overlay(.secondary.opacity(0.75))
         }
+    }
+
+    private func playTrack(at index: Int) {
+        guard songs.indices.contains(index) else { return }
+        let remaining = Array(songs[(index + 1)...])
+        player.play(track: songs[index], queue: remaining)
     }
 
     private var trackCountAndDuration: String {
@@ -147,18 +158,25 @@ struct AlbumView: View {
     }
 
     func trackRow(_ track: Child) -> some View {
-        HStack(spacing: 12) {
-            Text(track.track.map(String.init) ?? "")
-                .font(.body)
-                .foregroundColor(.secondary)
-                .frame(minWidth: 20, alignment: .center)
+        let isCurrent = player.currentTrack?.id == track.id
+        return HStack(spacing: 12) {
+            Group {
+                if isCurrent {
+                    PlayingIndicator(isPlaying: player.isPlaying)
+                } else {
+                    Text(track.track.map(String.init) ?? "")
+                        .font(.body)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .frame(minWidth: 20, alignment: .center)
 
             VStack(alignment: .leading) {
                 Text(track.title)
 
                 if let trackArtist = track.artist, trackArtist != album.artist {
                     Text(trackArtist)
-                        .font(.subheadline)
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -174,20 +192,21 @@ struct AlbumView: View {
     }
 
     func albumArtwork() -> some View {
-        AsyncImage(url: try? client.coverArtURL(forId: album.coverArt ?? album.id.raw, size: 600)) { phase in
-            if let image = phase.image {
-                image
-                    .resizable()
-                    .scaledToFit()
-                    .onAppear {
-                        if let color = image.averageColor() {
-                            backgroundColor = color
-                        }
+        // Same URL AlbumCardView requests (original size, no `size` param), so this reuses the
+        // image straight from ImageCache instead of re-fetching — the whole point being no lag
+        // when this view opens.
+        CachedAsyncImage(url: try? client.coverArtURL(forId: album.coverArt ?? album.id.raw)) { image in
+            image
+                .resizable()
+                .scaledToFit()
+                .onAppear {
+                    if let color = image.averageColor() {
+                        backgroundColor = color
                     }
-            } else {
-                Rectangle()
-                    .fill(Color.secondary.opacity(0.2))
-            }
+                }
+        } placeholder: {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.2))
         }
         .frame(maxWidth: 270, maxHeight: 270)
         .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -240,7 +259,9 @@ struct AlbumView: View {
                     .clipShape(Circle())
             }
 
-            Button {} label: {
+            Button {
+                playTrack(at: 0)
+            } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "play.fill")
                         .font(.system(size: 20))
@@ -254,6 +275,7 @@ struct AlbumView: View {
                 .background(Color.white)
                 .clipShape(Capsule())
             }
+            .disabled(songs.isEmpty)
 
             Button {
                 toggleStarred()

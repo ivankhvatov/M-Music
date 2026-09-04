@@ -1,0 +1,198 @@
+import SwiftUI
+
+/// Cache for downloaded images, backed by both an in-memory `NSCache` and disk
+/// (`Caches/SubsonicImageCache/`), so artwork already fetched once — this session or a
+/// previous one — is available without a network round trip.
+///
+/// `SubsonicClient.url(for:_:)` signs every request with a freshly-randomized salt/token (see
+/// its token-auth scheme), so calling `coverArtURL(forId:)` twice for the *same* album returns
+/// two *different* URLs. Caching by the raw URL would essentially never hit. Instead,
+/// everything here is keyed by a stable form of the URL with the volatile auth query items
+/// (`u`, `t`, `s`, `v`, `c`, `f`) stripped out, leaving just what actually identifies the
+/// image (host, path, and whatever's left in the query — `id`, `size`, ...).
+final class ImageCache: @unchecked Sendable {
+    static let shared = ImageCache()
+
+    private let memory = NSCache<NSString, UIImage>()
+    private let fileManager = FileManager.default
+    private let directory: URL?
+
+    private let lock = NSLock()
+    /// Requests in flight, keyed the same stable way, so a prefetch and a view's own load (or
+    /// several views wanting the same image at once) share one fetch instead of racing
+    /// duplicate ones.
+    private var inFlightTasks: [String: Task<UIImage?, Never>] = [:]
+
+    init() {
+        if let caches = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first {
+            let dir = caches.appendingPathComponent("SubsonicImageCache", isDirectory: true)
+            try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+            directory = dir
+        } else {
+            directory = nil
+        }
+    }
+
+    /// In-memory-only lookup, synchronous — used by `CachedAsyncImage` at init so a warm
+    /// in-memory hit can render on the very first frame. Doesn't consult disk; use `load(_:)`
+    /// for the full memory → disk → network lookup.
+    func image(for url: URL) -> UIImage? {
+        memory.object(forKey: stableKey(for: url) as NSString)
+    }
+
+    /// Returns the cached image for `url` if present (memory, then disk), otherwise downloads
+    /// it and caches the result both ways.
+    @discardableResult
+    func load(_ url: URL) async -> UIImage? {
+        let key = stableKey(for: url)
+        if let cached = memory.object(forKey: key as NSString) { return cached }
+
+        let (task, isNew) = inFlightTaskOrRegister(forKey: key, url: url)
+        let result = await task.value
+        if isNew {
+            clearInFlightTask(forKey: key)
+        }
+        return result
+    }
+
+    /// Returns the in-flight task for `key` if one's already running, otherwise creates,
+    /// registers, and returns a new one — atomically, so two concurrent callers for the same
+    /// key can't both decide to start their own fetch. Synchronous (unlike `load` itself) so
+    /// the locking stays a plain, provably-safe critical section instead of straddling
+    /// `async` suspension points.
+    private func inFlightTaskOrRegister(forKey key: String, url: URL) -> (task: Task<UIImage?, Never>, isNew: Bool) {
+        lock.withLock {
+            if let existing = inFlightTasks[key] {
+                return (existing, false)
+            }
+            let task = Task<UIImage?, Never> { [weak self] in
+                await self?.fetch(url, key: key)
+            }
+            inFlightTasks[key] = task
+            return (task, true)
+        }
+    }
+
+    private func clearInFlightTask(forKey key: String) {
+        lock.withLock { inFlightTasks[key] = nil }
+    }
+
+    private func fetch(_ url: URL, key: String) async -> UIImage? {
+        if let onDisk = diskImage(forKey: key) {
+            memory.setObject(onDisk, forKey: key as NSString)
+            return onDisk
+        }
+        guard let data = try? await URLSession.shared.data(from: url).0, let image = UIImage(data: data) else { return nil }
+        memory.setObject(image, forKey: key as NSString)
+        writeToDisk(data, forKey: key)
+        return image
+    }
+
+    /// Starts downloading `url` in the background if it isn't already cached (or already in
+    /// flight), without waiting for the result. Fire-and-forget.
+    func prefetch(_ url: URL?) {
+        guard let url else { return }
+        Task { await load(url) }
+    }
+
+    /// Drops every cached entry (memory and disk), e.g. when switching to a different server.
+    func invalidateAll() {
+        memory.removeAllObjects()
+        guard let directory else { return }
+        try? fileManager.removeItem(at: directory)
+        try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+    }
+
+    // MARK: - Stable cache key
+
+    private func stableKey(for url: URL) -> String {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return url.absoluteString
+        }
+        let volatileParams: Set<String> = ["u", "t", "s", "v", "c", "f"]
+        components.queryItems = components.queryItems?
+            .filter { !volatileParams.contains($0.name) }
+            .sorted { $0.name < $1.name }
+        return components.url?.absoluteString ?? url.absoluteString
+    }
+
+    // MARK: - Disk layer
+
+    private func diskURL(forKey key: String) -> URL? {
+        guard let directory else { return nil }
+        return directory.appendingPathComponent(SubsonicClient.md5Hex(key)).appendingPathExtension("img")
+    }
+
+    private func diskImage(forKey key: String) -> UIImage? {
+        guard let fileURL = diskURL(forKey: key), let data = try? Data(contentsOf: fileURL) else { return nil }
+        return UIImage(data: data)
+    }
+
+    private func writeToDisk(_ data: Data, forKey key: String) {
+        guard let fileURL = diskURL(forKey: key) else { return }
+        try? data.write(to: fileURL, options: .atomic)
+    }
+}
+
+/// A drop-in replacement for `AsyncImage(url:content:placeholder:)` that checks `ImageCache`
+/// first — synchronously, at init — so a cache hit renders on the very first frame instead of
+/// flashing the placeholder while a redundant fetch happens.
+struct CachedAsyncImage<Content: View, Placeholder: View>: View {
+    private let url: URL?
+    private let content: (Image) -> Content
+    private let placeholder: () -> Placeholder
+
+    @State private var uiImage: UIImage?
+    /// The url `uiImage` was actually loaded for, so a changed `url` on an otherwise-identical
+    /// view (e.g. the mini player swapping tracks) is recognized as needing a reload — `@State`
+    /// survives across re-inits of this struct, so checking `uiImage == nil` alone would leave
+    /// the previous track's artwork on screen forever once one image had loaded.
+    @State private var loadedURL: URL?
+
+    init(
+        url: URL?,
+        @ViewBuilder content: @escaping (Image) -> Content,
+        @ViewBuilder placeholder: @escaping () -> Placeholder
+    ) {
+        self.url = url
+        self.content = content
+        self.placeholder = placeholder
+        let cached = url.flatMap(ImageCache.shared.image(for:))
+        _uiImage = State(initialValue: cached)
+        _loadedURL = State(initialValue: cached != nil ? url : nil)
+    }
+
+    var body: some View {
+        Group {
+            if let uiImage {
+                content(Image(uiImage: uiImage))
+            } else {
+                placeholder()
+            }
+        }
+        .task(id: url) {
+            await load()
+        }
+    }
+
+    private func load() async {
+        guard let url else {
+            uiImage = nil
+            loadedURL = nil
+            return
+        }
+        guard loadedURL != url else { return }
+        if let cached = ImageCache.shared.image(for: url) {
+            uiImage = cached
+            loadedURL = url
+            return
+        }
+        guard let image = await ImageCache.shared.load(url) else { return }
+        await MainActor.run {
+            if self.url == url {
+                uiImage = image
+                loadedURL = url
+            }
+        }
+    }
+}

@@ -161,6 +161,7 @@
       }
     },
     "Artist" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -203,7 +204,14 @@
       }
     },
     "Connect to your Navidrome server to get started" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Добавьте ваш сервер Navidrome, чтобы начать"
+          }
+        }
+      }
     },
     "Disconnect" : {
       "localizations" : {
@@ -300,7 +308,14 @@
       }
     },
     "No recently played albums yet." : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Нет недавно воспроизведенных альбомов"
+          }
+        }
+      }
     },
     "Password" : {
       "localizations" : {
@@ -489,6 +504,7 @@
       }
     },
     "Track" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {

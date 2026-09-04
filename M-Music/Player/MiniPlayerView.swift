@@ -1,21 +1,24 @@
 import SwiftUI
 
 struct MiniPlayerView: View {
+    @ObservedObject private var player = PlayerManager.shared
+
     var body: some View {
-        HStack (spacing: 11) {
-            PlayerCover(.init(width: 36, height: 36), .init(6))
+        HStack (spacing: 8) {
+            PlayerCover(.init(width: 32, height: 32), .init(4))
             PlayerInfo()
             Spacer(minLength: 0)
             Button {
-                
+                player.togglePlayPause()
             } label: {
-                Image(systemName: "play.fill")
+                Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 20))
                     .contentShape(.rect)
                     .tint(.mainText)
             }
             .padding(.trailing, 10)
             Button {
-                
+                player.next()
             } label: {
                 Image(systemName: "forward.fill")
                     .contentShape(.rect)
@@ -24,21 +27,27 @@ struct MiniPlayerView: View {
         }
         .padding(.horizontal, 17)
     }
-    
+
     func PlayerCover(_ size: CGSize, _ radius: CGFloat) -> some View {
-        Image("cover_placeholder")
-            .resizable()
-            .scaledToFit()
-            .frame(width: size.width, height: size.height)
-            .clipShape(RoundedRectangle(cornerRadius: radius))
+        CachedAsyncImage(url: player.artworkURL) { image in
+            image
+                .resizable()
+                .scaledToFit()
+        } placeholder: {
+            Image("cover_placeholder")
+                .resizable()
+                .scaledToFit()
+        }
+        .frame(width: size.width, height: size.height)
+        .clipShape(RoundedRectangle(cornerRadius: radius))
     }
-    
+
     func PlayerInfo() -> some View {
         HStack (spacing: 12) {
-            VStack (alignment: .leading, spacing: 4) {
-                Text("Track")
-                    .font(.callout)
-                Text("Artist")
+            VStack (alignment: .leading, spacing: 2) {
+                Text(player.currentTrack?.title ?? "Not Playing")
+                    .font(.system(size: 14))
+                Text(player.currentTrack?.artist ?? "")
                     .font(.caption2)
                     .foregroundStyle(.gray)
             }

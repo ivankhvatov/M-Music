@@ -180,6 +180,38 @@ returns the original file — use it for an offline-download feature. If you nee
 in memory instead of a URL, `downloadData(forId:)` and `coverArtData(forId:size:)` are the
 `async` equivalents.
 
+For artwork, prefer [`CachedAsyncImage`](../../Extensions/CachedAsyncImage.swift) over plain
+`AsyncImage` — same `url:content:placeholder:` shape, but backed by `ImageCache`: an
+in-memory + disk (`Caches/SubsonicImageCache/`) cache shared across every `CachedAsyncImage`,
+so artwork already fetched once — this session or a previous one — renders instantly instead
+of flashing the placeholder while it re-fetches or re-downloads.
+
+`SubsonicClient.url(for:_:)` signs *every* request with a freshly-randomized salt/token (see
+Design notes below), so two calls to `coverArtURL(forId:)` for the exact same album return two
+different URLs — caching by the raw URL would essentially never hit. `ImageCache` instead
+keys everything by a stable form of the URL with the volatile auth query items stripped out
+(`u`/`t`/`s`/`v`/`c`/`f`), leaving whatever actually identifies the image — host, path, `id`,
+`size` if you pass one. That still means two call sites requesting the *same* artwork need to
+agree on everything else, though: [`AlbumCardView`](../../Cards/AlbumCardView.swift) and
+[`AlbumView`](../../Screens/AlbumView.swift) both fetch `coverArtURL(forId:)` with no `size`
+(the original file, no server-side resizing) specifically so they land on the same cache key;
+if you ever add a `size`, keep every call site for the same artwork on the same value.
+
+A cache only helps once something's actually in it, though — a grid card's own
+`CachedAsyncImage` doesn't start fetching until that card renders (and `LazyVGrid` doesn't
+render off-screen cards at all), so tapping into an album before its card has had time to
+load would still be a cache miss. `ImageCache.shared.prefetch(url)` starts a download in the
+background without waiting for it, so a screen that already knows what it's about to show —
+like `LibraryView` fetching its "recently played" list — can kick off every album's artwork
+the moment that list arrives, well before the grid even renders, let alone before anything's
+tapped. `load(_:)` and `prefetch(_:)` share one in-flight-request map (keyed the same stable
+way), so a prefetch and a view's own load for the same image (or several views wanting it at
+once) coalesce into a single fetch rather than racing duplicate ones.
+
+Like `AlbumDetailsCache`, `ImageCache` is cleared automatically on `connect`/`disconnect` and
+never expires or evicts on its own otherwise — safe to leave unbounded since `Caches/` is a
+directory the OS can purge under storage pressure.
+
 ### Favorites, ratings, scrobbling
 
 ```swift
