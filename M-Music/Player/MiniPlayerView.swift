@@ -43,15 +43,12 @@ struct MiniPlayerView: View {
     }
 
     func PlayerInfo() -> some View {
-        HStack (spacing: 12) {
-            VStack (alignment: .leading, spacing: 2) {
-                Text(player.currentTrack?.title ?? "Not Playing")
-                    .font(.system(size: 14))
-                Text(player.currentTrack?.artist ?? "")
-                    .font(.caption2)
-                    .foregroundStyle(.gray)
-            }
-            .lineLimit(1)
+        VStack (alignment: .leading, spacing: 2) {
+            MarqueeText(text: player.currentTrack?.title ?? "Not Playing")
+                .font(.system(size: 14))
+            MarqueeText(text: player.currentTrack?.artist ?? "")
+                .font(.caption2)
+                .foregroundStyle(.gray)
         }
     }
 }

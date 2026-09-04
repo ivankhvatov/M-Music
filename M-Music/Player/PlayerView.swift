@@ -19,6 +19,8 @@ struct PlayerView: View {
     @GestureState private var isScrubbing: Bool = false
 
     @State private var backgroundColors: [Color] = [.gray, .gray]
+    /// Bumped on every play/pause tap to restart `PlayPauseBurst`'s animation from scratch.
+    @State private var playPauseBurstID = 0
 
     private var bottomButtonSize : CGFloat = 22
 
@@ -93,19 +95,16 @@ struct PlayerView: View {
     }
 
     func PlayerInfo() -> some View {
-        HStack (spacing: 12) {
-            VStack (alignment: .leading, spacing: 4) {
-                Text(player.currentTrack?.title ?? "Not Playing")
-                    .font(.title2)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.white)
-                Text(player.currentTrack?.artist ?? "")
-                    .font(.subheadline)
-                    .foregroundStyle(.transparentWhite)
-            }
-            .lineLimit(1)
-            Spacer(minLength: 0)
+        VStack (alignment: .leading, spacing: 4) {
+            MarqueeText(text: player.currentTrack?.title ?? "Not Playing")
+                .font(.title2)
+                .fontWeight(.semibold)
+                .foregroundStyle(.white)
+            MarqueeText(text: player.currentTrack?.artist ?? "")
+                .font(.subheadline)
+                .foregroundStyle(.transparentWhite)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.bottom, 6)
     }
 
@@ -222,24 +221,33 @@ struct PlayerView: View {
             } label: {
                 Image(systemName: "backward.fill")
                     .contentShape(.rect)
-                    .font(.system(size: 28))
+                    .font(.system(size: 26))
             }
             Button {
-                withAnimation(.spring(response: 0.2, dampingFraction: 0.6)) {
+                withAnimation(.spring(response: 0.15, dampingFraction: 0.6)) {
                     player.togglePlayPause()
                 }
+                playPauseBurstID += 1
             } label: {
-                Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 40))
-                    .frame(width: 60, height: 60)
-                    .contentShape(.rect)
+                ZStack {
+                    PlayPauseBurst(trigger: playPauseBurstID)
+                    // No `.contentTransition(.symbolEffect(.replace))` here: its cross-fade
+                    // briefly renders both the play triangle and the pause bars on top of each
+                    // other. A plain instant swap plus the bounce pulse reads just as snappy
+                    // without that overlap.
+                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 42))
+                        .symbolEffect(.bounce, value: player.isPlaying)
+                }
+                .frame(width: 60, height: 60)
+                .contentShape(.rect)
             }
             Button {
                 player.next()
             } label: {
                 Image(systemName: "forward.fill")
                     .contentShape(.rect)
-                    .font(.system(size: 28))
+                    .font(.system(size: 26))
             }
         }
         .tint(.white)
@@ -258,7 +266,7 @@ struct PlayerView: View {
 
     func BottomButton(_ systemName: String, isActive: Binding<Bool>) -> some View {
         Button {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+            withAnimation(.spring(response: -0.1, dampingFraction: 0.75)) {
                 isActive.wrappedValue.toggle()
             }
         } label: {
@@ -273,6 +281,38 @@ struct PlayerView: View {
                 )
                 .contentShape(.rect)
         }
+    }
+}
+
+/// A brief white circle that bursts outward and fades on tap — the same kind of feedback Apple
+/// Music gives its play/pause button. `trigger` increments on every tap; each new value restarts
+/// the animation from scratch (a plain `withAnimation` on a boolean would just interpolate from
+/// wherever the previous burst left off instead of starting over).
+private struct PlayPauseBurst: View {
+    let trigger: Int
+
+    // Both the untapped resting state and the settled-after-burst state need to be invisible —
+    // unlike a single `expanded` toggle, these two independent values let opacity start and end
+    // at 0 while still animating up to 0.55 and back down as the circle expands in between.
+    @State private var scale: CGFloat = 0.6
+    @State private var opacity: Double = 0
+
+    var body: some View {
+        Circle()
+            .fill(Color.white)
+            .frame(width: 44, height: 44)
+            .scaleEffect(scale)
+            .opacity(opacity)
+            .task(id: trigger) {
+                guard trigger > 0 else { return }
+                scale = 0.6
+                opacity = 0.55
+                try? await Task.sleep(for: .seconds(0.01))
+                withAnimation(.easeOut(duration: 0.2)) {
+                    scale = 1.5
+                    opacity = 0
+                }
+            }
     }
 }
 
