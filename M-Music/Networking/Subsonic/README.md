@@ -123,6 +123,25 @@ Neither Subsonic nor OpenSubsonic has a dedicated codec tag either. `Child.codec
 from `suffix` (the file extension, e.g. "flac" → "FLAC"), and `AlbumWithSongsID3.codec` takes
 its first track's — both computed client-side, not decoded from a server field.
 
+**ALBUMVERSION** is a different kind of gotcha: Navidrome, server-side, has an
+`AppendAlbumVersion` config option that — when enabled — bakes this tag straight into the
+display name it returns (`Album.FullName()`/`MediaFile.FullAlbumName()` in its own source,
+via a helper that wraps the tag in parentheses, e.g. `"Diluvium" + "Deluxe Edition"` →
+`"Diluvium (Deluxe Edition)"`), while *also* reporting the clean value separately as
+`AlbumID3.version` (an OpenSubsonic extension). `AlbumID3`/`AlbumWithSongsID3` decode `version`
+and use it to strip that exact suffix back off `name`, so both fields end up clean regardless
+of whether the admin has that config on. `AlbumWithSongsID3` goes one step further and applies
+the same correction to every song in its `song` array (`Child.album`/`Child.albumVersion`),
+since it already knows their shared album's exact version value.
+
+A standalone `Child` — from `search3`, `getRandomSongs`, a playlist, now-playing, anywhere
+`AlbumWithSongsID3` isn't the source — has no such correction and no separate field to derive
+one from, so `album` is whatever the server sent, version suffix and all, and `albumVersion`
+stays `nil`. This is deliberate, not an oversight: without a known version value to check
+against, splitting one out would mean guessing based on trailing parentheses, and plenty of
+albums/songs legitimately end in "(Live)", "(1975)", etc. without ever having gone through
+Navidrome's `appendSuffix`. See `AlbumVersionParsing` for the exact (reusable) logic.
+
 `getAlbum` (full album details, including the track list) is fetched often — every time a
 user opens an album — so it's worth caching. `AlbumDetailsCache` wraps it with a keyed-by-id
 cache, backed by an in-memory dictionary and mirrored to disk (`Caches/SubsonicAlbumCache/`),

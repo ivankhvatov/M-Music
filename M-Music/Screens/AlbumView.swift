@@ -7,10 +7,17 @@ struct AlbumView: View {
     private let client = SubsonicClient.shared
     @ObservedObject private var player = PlayerManager.shared
 
+    /// Zoom transition for the "Other versions" / "More by artist" cards below — separate from
+    /// the incoming `zoomNamespace` param, which only matches this view's own entry transition.
+    @Namespace private var relatedAlbumZoomNamespace
+
     @State private var songs: [Child] = []
     @State private var albumCodec: String?
     @State private var isLoadingSongs = true
     @State private var loadError: String?
+
+    @State private var otherVersions: [AlbumID3] = []
+    @State private var moreByArtist: [AlbumID3] = []
 
     @State private var isStarred: Bool
     @State private var isDownloaded = false
@@ -36,6 +43,9 @@ struct AlbumView: View {
         .task {
             await loadSongs()
         }
+        .task {
+            await loadRelatedAlbums()
+        }
     }
 
     var albumList: some View {
@@ -44,20 +54,31 @@ struct AlbumView: View {
                 albumHeader()
             }
             .listRowSeparator(.hidden)
-            .listRowBackground(Color.clear)
+            .listRowBackground(backgroundColor.darkened())
 
             trackListSection()
                 .listRowSeparator(.hidden)
-                .listRowBackground(Color.clear)
+                .listRowBackground(backgroundColor.darkened())
 
             albumFooter()
                 .listRowSeparator(.hidden)
-                .listRowBackground(Color.clear)
+                .listRowBackground(backgroundColor.darkened())
                 .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 16, trailing: 16))
+
+            relatedAlbumsSection()
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(relatedSectionBackground)
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        .background(backgroundColor.darkened())
+        // Only shows through the gap below the last row when content is shorter than the screen —
+        // matches the related-albums section's own shade, since that's always the bottommost row.
+        // `.basedOnSize` stops the list from bouncing/scrolling past that gap in the first place
+        // when content already fills (or overflows) the screen, so this never has to paper over
+        // an artificially-extended scroll area either.
+        .background(relatedSectionBackground.ignoresSafeArea())
+        .scrollBounceBehavior(.basedOnSize)
         .toolbar {
             downloadButton
             moreButton
@@ -77,6 +98,66 @@ struct AlbumView: View {
             await MainActor.run {
                 loadError = error.localizedDescription
                 isLoadingSongs = false
+            }
+        }
+    }
+
+    /// Fetches the rest of this album's artist catalog and splits it into "other versions" of
+    /// this same album (same title, different `version` tag) and everything else by that artist.
+    /// Supplementary content — fails silently rather than surfacing an error for it.
+    private func loadRelatedAlbums() async {
+        guard let artistId = album.artistId?.raw else { return }
+        do {
+            let artist = try await client.getArtist(id: artistId)
+            let others = artist.album.filter { $0.id != album.id && $0.name == album.name }
+            let more = artist.album.filter { $0.name != album.name }
+            await MainActor.run {
+                otherVersions = others
+                moreByArtist = more
+            }
+        } catch {
+            // Ignored — see doc comment above.
+        }
+    }
+
+    /// A shade darker than the main artwork-derived background, so this section reads as visually
+    /// distinct from the tracklist above it.
+    private var relatedSectionBackground: Color {
+        backgroundColor.darkened().darkened(by: 0.7)
+    }
+
+    @ViewBuilder
+    private func relatedAlbumsSection() -> some View {
+        if !otherVersions.isEmpty || !moreByArtist.isEmpty {
+            VStack(alignment: .leading, spacing: 24) {
+                if !otherVersions.isEmpty {
+                    albumCarousel(title: String(localized: "Other versions"), albums: otherVersions)
+                }
+                if !moreByArtist.isEmpty {
+                    albumCarousel(title: String(localized: "More by \(album.artist ?? "")"), albums: moreByArtist)
+                }
+            }
+            .padding(.vertical, 20)
+        }
+    }
+
+    private func albumCarousel(title: String, albums: [AlbumID3]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.system(size: 20, weight: .semibold))
+                .padding(.horizontal, 16)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 16) {
+                    ForEach(albums) { relatedAlbum in
+                        NavigationLink(destination: AlbumView(album: relatedAlbum, zoomNamespace: relatedAlbumZoomNamespace)) {
+                            AlbumCardView(album: relatedAlbum, zoomNamespace: relatedAlbumZoomNamespace)
+                                .frame(width: 160)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16)
             }
         }
     }
@@ -207,9 +288,9 @@ struct AlbumView: View {
                 .fill(Color.secondary.opacity(0.2))
         }
         .frame(maxWidth: 270, maxHeight: 270)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 10)
                 .stroke(Color.secondary, lineWidth: 0.15)
         )
         .shadow(color: .black.opacity(0.5), radius: 20)
@@ -227,7 +308,9 @@ struct AlbumView: View {
             Spacer()
             VStack(alignment: .center, spacing: 6) {
                 albumArtwork()
-                Text(album.name)
+                Text(
+                    album.name + (album.version != nil ? ("\n(" + album.version! + ")") : "")
+                )
                     .font(.system(size: 24, weight: .semibold))
                     .multilineTextAlignment(.center)
                     .padding(.top, 15)

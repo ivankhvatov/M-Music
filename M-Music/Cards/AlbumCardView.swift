@@ -8,7 +8,9 @@ struct AlbumCardView: View {
         VStack(alignment: .leading, spacing: 6) {
             artwork
 
-            Text(album.name)
+            Text(
+                album.name + (album.version != nil ? (" (" + album.version! + ")") : "")
+            )
                 .font(.system(size: 15))
                 .lineLimit(1)
 
@@ -37,9 +39,9 @@ struct AlbumCardView: View {
                         .foregroundStyle(.secondary)
                 }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 8)
                 .stroke(Color.secondary, lineWidth: 0.15)
         )
 

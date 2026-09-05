@@ -20,7 +20,13 @@ struct Child: Codable, Identifiable, Hashable, Sendable {
     let parent: FlexibleID?
     let isDir: Bool
     let title: String
-    let album: String?
+    /// The parent album's title. Navidrome bakes an ALBUMVERSION tag into this string server-side
+    /// (see `AlbumVersionParsing`) with no separate field to split it back out from on its own —
+    /// `albumVersion` below is only ever populated when this `Child` came from an
+    /// `AlbumWithSongsID3` response, which does report the version separately and lets it be
+    /// split precisely. A song fetched standalone (search, random, a playlist, ...) keeps
+    /// whatever `album` string the server sent, version suffix and all.
+    var album: String?
     let artist: String?
     let track: Int?
     let year: Int?
@@ -43,6 +49,11 @@ struct Child: Codable, Identifiable, Hashable, Sendable {
     let artistId: FlexibleID?
     let type: String?
     let bookmarkPosition: Int?
+    /// The album's ALBUMVERSION tag (e.g. "Deluxe Edition"), split out of `album` — see its doc
+    /// comment. Not a real server field: only ever set by `AlbumWithSongsID3`'s decoding, never
+    /// present in the raw JSON for a standalone song. `var` (not `let`) so `withAlbumTitle`
+    /// below can produce a corrected copy.
+    var albumVersion: String?
 
     var isStarred: Bool { starred != nil }
 
@@ -54,6 +65,7 @@ struct Child: Codable, Identifiable, Hashable, Sendable {
         case id, parent, isDir, title, album, artist, track, year, genre, coverArt, size
         case contentType, suffix, duration, bitRate, path, isVideo, userRating, averageRating
         case playCount, discNumber, created, starred, albumId, artistId, type, bookmarkPosition
+        case albumVersion
     }
 
     init(from decoder: Decoder) throws {
@@ -85,6 +97,17 @@ struct Child: Codable, Identifiable, Hashable, Sendable {
         artistId = try c.decodeIfPresent(FlexibleID.self, forKey: .artistId)
         type = try c.decodeIfPresent(String.self, forKey: .type)
         bookmarkPosition = try c.decodeIfPresent(Int.self, forKey: .bookmarkPosition)
+        albumVersion = try c.decodeIfPresent(String.self, forKey: .albumVersion)
+    }
+
+    /// Returns a copy with `album`/`albumVersion` overridden. Used by `AlbumWithSongsID3`'s
+    /// decoding, which knows the exact ALBUMVERSION value for every song in it (from the sibling
+    /// `version` field) and can split each song's `album` precisely — see `AlbumVersionParsing`.
+    func withAlbumTitle(_ album: String?, version: String?) -> Child {
+        var copy = self
+        copy.album = album
+        copy.albumVersion = version
+        return copy
     }
 }
 extension Child: SubsonicPayload { static let responseKey = "song" }
@@ -177,8 +200,48 @@ struct RecordLabel: Codable, Hashable, Sendable {
     let name: String
 }
 
+/// Mirrors Navidrome's `appendSuffix` helper — used server-side to bake an ALBUMVERSION tag
+/// into an album's display name (`name`/`FullName()`) and each of its songs' album name
+/// (`FullAlbumName()`) when the admin has `AppendAlbumVersion` enabled — so a title it applied
+/// that transform to can be split back into a clean title and the version.
+///
+/// This only works given the *exact* version value to look for, which Navidrome does report
+/// separately (`AlbumID3`'s `version` field, an OpenSubsonic extension) — so there's no
+/// guessing involved, just checking whether the one suffix that value would produce is
+/// actually there. There's no equivalent for a standalone song with no known album version to
+/// check against (see `Child.album`'s doc comment); this is deliberately not a general
+/// "strip anything that looks bracketed" heuristic, since plenty of legitimate titles
+/// legitimately end in "(Live)", "(1975)", and the like without ever having gone through
+/// `appendSuffix` at all.
+enum AlbumVersionParsing {
+    /// From Navidrome's `model/mediafile.go`: `var bracketPairs = map[byte]byte{'(': ')', '[': ']', '{': '}', '<': '>'}`.
+    private static let bracketPairs: [Character: Character] = ["(": ")", "[": "]", "{": "}", "<": ">"]
+
+    /// Removes the exact suffix `appendSuffix(_, version)` would have produced, if `fullTitle`
+    /// actually ends with it. Returns `fullTitle` unchanged otherwise (including when `version`
+    /// is `nil`/empty).
+    static func strippingSuffix(forVersion version: String?, from fullTitle: String) -> String {
+        guard let version, !version.isEmpty else { return fullTitle }
+        let suffix = appendedSuffix(for: version)
+        guard fullTitle.count > suffix.count, fullTitle.hasSuffix(suffix) else { return fullTitle }
+        return String(fullTitle.dropLast(suffix.count))
+    }
+
+    /// Reimplementation of Navidrome's `appendSuffix(_, version)`, minus the base title (i.e.
+    /// just the part it adds after it).
+    private static func appendedSuffix(for version: String) -> String {
+        let trimmed = version.trimmingCharacters(in: .whitespaces)
+        if trimmed.count >= 2, let first = trimmed.first, let last = trimmed.last, bracketPairs[first] == last {
+            return " " + trimmed
+        }
+        return " (" + trimmed + ")"
+    }
+}
+
 struct AlbumID3: Decodable, Identifiable, Hashable, Sendable {
     let id: FlexibleID
+    /// Clean album title — any ALBUMVERSION suffix Navidrome may have appended (server config
+    /// `AppendAlbumVersion`) is split out into `version` below instead.
     let name: String
     let artist: String?
     let artistId: FlexibleID?
@@ -195,7 +258,64 @@ struct AlbumID3: Decodable, Identifiable, Hashable, Sendable {
     var recordLabels: [RecordLabel]? = nil
     /// From the RELEASETYPE tag — e.g. "album", "compilation", "ep", "live" (OpenSubsonic extension).
     var releaseTypes: [String]? = nil
+    /// From the ALBUMVERSION tag (OpenSubsonic `version` field) — e.g. "Deluxe Edition",
+    /// "Remastered". `nil` if the album has no ALBUMVERSION tag.
+    let version: String?
     var isStarred: Bool { starred != nil }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, artist, artistId, coverArt, songCount, duration, playCount, created
+        case starred, year, genre, userRating, recordLabels, releaseTypes, version
+    }
+
+    /// A custom `Decodable.init(from:)` (below) suppresses Swift's automatic memberwise init,
+    /// so this restates it explicitly — used for previews/tests, never for real server data.
+    init(
+        id: FlexibleID, name: String, artist: String?, artistId: FlexibleID?, coverArt: String?,
+        songCount: Int, duration: Int, playCount: Int?, created: String?, starred: String?,
+        year: Int?, genre: String?, userRating: Int?,
+        recordLabels: [RecordLabel]? = nil, releaseTypes: [String]? = nil, version: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.artist = artist
+        self.artistId = artistId
+        self.coverArt = coverArt
+        self.songCount = songCount
+        self.duration = duration
+        self.playCount = playCount
+        self.created = created
+        self.starred = starred
+        self.year = year
+        self.genre = genre
+        self.userRating = userRating
+        self.recordLabels = recordLabels
+        self.releaseTypes = releaseTypes
+        self.version = version
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(FlexibleID.self, forKey: .id)
+        artist = try c.decodeIfPresent(String.self, forKey: .artist)
+        artistId = try c.decodeIfPresent(FlexibleID.self, forKey: .artistId)
+        coverArt = try c.decodeIfPresent(String.self, forKey: .coverArt)
+        songCount = try c.decode(Int.self, forKey: .songCount)
+        duration = try c.decode(Int.self, forKey: .duration)
+        playCount = try c.decodeIfPresent(Int.self, forKey: .playCount)
+        created = try c.decodeIfPresent(String.self, forKey: .created)
+        starred = try c.decodeIfPresent(String.self, forKey: .starred)
+        year = try c.decodeIfPresent(Int.self, forKey: .year)
+        genre = try c.decodeIfPresent(String.self, forKey: .genre)
+        userRating = try c.decodeIfPresent(Int.self, forKey: .userRating)
+        recordLabels = try c.decodeIfPresent([RecordLabel].self, forKey: .recordLabels)
+        releaseTypes = try c.decodeIfPresent([String].self, forKey: .releaseTypes)
+
+        let rawName = try c.decode(String.self, forKey: .name)
+        let rawVersion = try c.decodeIfPresent(String.self, forKey: .version)?.trimmingCharacters(in: .whitespaces)
+        version = (rawVersion?.isEmpty ?? true) ? nil : rawVersion
+        name = AlbumVersionParsing.strippingSuffix(forVersion: version, from: rawName)
+    }
 }
 
 struct ArtistWithAlbumsID3: Decodable, Sendable {
@@ -211,6 +331,7 @@ extension ArtistWithAlbumsID3: SubsonicPayload { static let responseKey = "artis
 
 struct AlbumWithSongsID3: Codable, Sendable {
     let id: FlexibleID
+    /// Clean album title — see `AlbumID3.name`'s doc comment; same deal here.
     let name: String
     let artist: String?
     let artistId: FlexibleID?
@@ -227,11 +348,57 @@ struct AlbumWithSongsID3: Codable, Sendable {
     var recordLabels: [RecordLabel]? = nil
     /// From the RELEASETYPE tag — e.g. "album", "compilation", "ep", "live" (OpenSubsonic extension).
     var releaseTypes: [String]? = nil
+    /// From the ALBUMVERSION tag (OpenSubsonic `version` field). `nil` if the album has none.
+    let version: String?
+    /// Each song's `album`/`albumVersion` are corrected to match `name`/`version` above — see
+    /// `Child.withAlbumTitle`. Since this type knows the exact version value, that correction is
+    /// precise, unlike the general case for a standalone `Child`.
     let song: [Child]?
 
     /// The album's audio codec, taken from its first track. Subsonic has no album-level codec
     /// field — this is derived from the track list, so it's `nil` until `song` is populated.
     var codec: String? { song?.first?.codec }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, artist, artistId, coverArt, songCount, duration, playCount, created
+        case starred, year, genre, userRating, recordLabels, releaseTypes, version, song
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(FlexibleID.self, forKey: .id)
+        artist = try c.decodeIfPresent(String.self, forKey: .artist)
+        artistId = try c.decodeIfPresent(FlexibleID.self, forKey: .artistId)
+        coverArt = try c.decodeIfPresent(String.self, forKey: .coverArt)
+        songCount = try c.decode(Int.self, forKey: .songCount)
+        duration = try c.decode(Int.self, forKey: .duration)
+        playCount = try c.decodeIfPresent(Int.self, forKey: .playCount)
+        created = try c.decodeIfPresent(String.self, forKey: .created)
+        starred = try c.decodeIfPresent(String.self, forKey: .starred)
+        year = try c.decodeIfPresent(Int.self, forKey: .year)
+        genre = try c.decodeIfPresent(String.self, forKey: .genre)
+        userRating = try c.decodeIfPresent(Int.self, forKey: .userRating)
+        recordLabels = try c.decodeIfPresent([RecordLabel].self, forKey: .recordLabels)
+        releaseTypes = try c.decodeIfPresent([String].self, forKey: .releaseTypes)
+
+        let rawName = try c.decode(String.self, forKey: .name)
+        let rawVersion = try c.decodeIfPresent(String.self, forKey: .version)?.trimmingCharacters(in: .whitespaces)
+        let version = (rawVersion?.isEmpty ?? true) ? nil : rawVersion
+        self.version = version
+        name = AlbumVersionParsing.strippingSuffix(forVersion: version, from: rawName)
+
+        let rawSongs = try c.decodeIfPresent([Child].self, forKey: .song)
+        guard let version, let rawSongs else {
+            song = rawSongs
+            return
+        }
+        song = rawSongs.map { track in
+            guard let album = track.album else { return track }
+            let cleaned = AlbumVersionParsing.strippingSuffix(forVersion: version, from: album)
+            guard cleaned != album else { return track }
+            return track.withAlbumTitle(cleaned, version: version)
+        }
+    }
 }
 extension AlbumWithSongsID3: SubsonicPayload { static let responseKey = "album" }
 

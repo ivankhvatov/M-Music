@@ -350,6 +350,22 @@
         }
       }
     },
+    "More by %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mehr von %@"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Больше от %@"
+          }
+        }
+      }
+    },
     "Navidrome Server" : {
       "localizations" : {
         "de" : {
@@ -408,6 +424,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Порядок"
+          }
+        }
+      }
+    },
+    "Other versions" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Andere Versionen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Другие версии"
           }
         }
       }
