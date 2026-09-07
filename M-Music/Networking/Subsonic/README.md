@@ -142,6 +142,15 @@ against, splitting one out would mean guessing based on trailing parentheses, an
 albums/songs legitimately end in "(Live)", "(1975)", etc. without ever having gone through
 Navidrome's `appendSuffix`. See `AlbumVersionParsing` for the exact (reusable) logic.
 
+`Child.replayGain` decodes the OpenSubsonic `ReplayGain` extension — `trackGain`/`albumGain`
+(dB), `trackPeak`/`albumPeak` (positive linear amplitude), `baseGain`, and `fallbackGain`, all
+optional. There's no separate album-level field for this one either: a song's `albumGain`/
+`albumPeak` are its *album's* values, just repeated on every track in it. `PlayerManager`
+applies it during playback via `ReplayGainSettings.linearGain(for:)` (see
+[`ReplayGainSettings`](../../Preferences/ReplayGainSettings.swift)), which mirrors the formula
+Navidrome's own web player uses (`ui/src/utils/calculateReplayGain.js`):
+`10^((gain + preAmp) / 20)`, optionally capped at `1/peak` so it never clips.
+
 `getAlbum` (full album details, including the track list) is fetched often — every time a
 user opens an album — so it's worth caching. `AlbumDetailsCache` wraps it with a keyed-by-id
 cache, backed by an in-memory dictionary and mirrored to disk (`Caches/SubsonicAlbumCache/`),

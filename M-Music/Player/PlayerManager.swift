@@ -105,6 +105,37 @@ final class PlayerManager: ObservableObject {
         }
     }
 
+    /// Inserts `track` right after the currently playing one, so it plays next — or starts
+    /// playing it immediately if nothing is queued yet.
+    func playNext(_ track: Child) {
+        guard let currentIndex else {
+            play(queue: [track], startAt: 0)
+            return
+        }
+        queue.insert(track, at: currentIndex + 1)
+        // The prepared item (if any) was built for whatever used to sit at `currentIndex + 1`,
+        // which has now shifted one slot later — rebuild it against the newly-inserted track.
+        clearPreparedItem()
+        prepareNextItem()
+        persistState()
+    }
+
+    /// Appends `track` to the end of the queue — or starts playing it immediately if nothing is
+    /// queued yet.
+    func addToQueue(_ track: Child) {
+        guard currentIndex != nil else {
+            play(queue: [track], startAt: 0)
+            return
+        }
+        queue.append(track)
+        // The queue may have just been exhausted (nothing left to prepare), in which case this
+        // newly-appended track is now the one that should be buffering ahead of time.
+        if preparedItem == nil {
+            prepareNextItem()
+        }
+        persistState()
+    }
+
     func seek(to time: TimeInterval) {
         let clamped = min(max(time, 0), duration)
         currentTime = clamped

@@ -10,6 +10,21 @@ struct License: Decodable, Sendable {
 }
 extension License: SubsonicPayload { static let responseKey = "license" }
 
+/// ReplayGain tags (OpenSubsonic extension), reported per-song even for the album gain/peak
+/// values — a song's `albumGain`/`albumPeak` are its *album's* values, repeated on every track
+/// in it, since there's no separate album-level ReplayGain field in the API. All values are in
+/// dB except the peaks, which are positive linear amplitudes.
+struct ReplayGain: Codable, Hashable, Sendable {
+    let trackGain: Double?
+    let albumGain: Double?
+    let trackPeak: Double?
+    let albumPeak: Double?
+    let baseGain: Double?
+    /// A fallback gain the server suggests when the mode-appropriate gain above is missing —
+    /// checked before `ReplayGainSettings.defaultGain` in `ReplayGainSettings.linearGain(for:)`.
+    let fallbackGain: Double?
+}
+
 // MARK: - Child (a song, or a browse-by-folder directory entry)
 
 /// Represents a single media file. Used for songs everywhere in the API, and also for
@@ -54,6 +69,9 @@ struct Child: Codable, Identifiable, Hashable, Sendable {
     /// present in the raw JSON for a standalone song. `var` (not `let`) so `withAlbumTitle`
     /// below can produce a corrected copy.
     var albumVersion: String?
+    /// ReplayGain tags (OpenSubsonic extension) — track and album gain/peak, plus optional
+    /// base/fallback values. `nil` if the file has no ReplayGain metadata at all.
+    let replayGain: ReplayGain?
 
     var isStarred: Bool { starred != nil }
 
@@ -65,7 +83,7 @@ struct Child: Codable, Identifiable, Hashable, Sendable {
         case id, parent, isDir, title, album, artist, track, year, genre, coverArt, size
         case contentType, suffix, duration, bitRate, path, isVideo, userRating, averageRating
         case playCount, discNumber, created, starred, albumId, artistId, type, bookmarkPosition
-        case albumVersion
+        case albumVersion, replayGain
     }
 
     init(from decoder: Decoder) throws {
@@ -98,6 +116,7 @@ struct Child: Codable, Identifiable, Hashable, Sendable {
         type = try c.decodeIfPresent(String.self, forKey: .type)
         bookmarkPosition = try c.decodeIfPresent(Int.self, forKey: .bookmarkPosition)
         albumVersion = try c.decodeIfPresent(String.self, forKey: .albumVersion)
+        replayGain = try c.decodeIfPresent(ReplayGain.self, forKey: .replayGain)
     }
 
     /// Returns a copy with `album`/`albumVersion` overridden. Used by `AlbumWithSongsID3`'s

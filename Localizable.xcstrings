@@ -4,6 +4,58 @@
     "-%@" : {
 
     },
+    "%lld dB" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld dB"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld dB"
+                }
+              }
+            }
+          }
+        },
+        "ru" : {
+          "variations" : {
+            "plural" : {
+              "few" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld дБ"
+                }
+              },
+              "many" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld дБ"
+                }
+              },
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld дБ"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld дБ"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld minutes" : {
       "localizations" : {
         "de" : {
@@ -144,6 +196,170 @@
         }
       }
     },
+    "64 kbps" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "64 kbit/s"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "64 кбит/с"
+          }
+        }
+      }
+    },
+    "96 kbps" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "96 kbit/s"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "96 кбит/с"
+          }
+        }
+      }
+    },
+    "128 kbps" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "128 kbit/s"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "128 кбит/с"
+          }
+        }
+      }
+    },
+    "192 kbps" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "192 kbit/s"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "192 кбит/с"
+          }
+        }
+      }
+    },
+    "256 kbps" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "256 kbit/s"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "256 кбит/с"
+          }
+        }
+      }
+    },
+    "320 kbps" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "320 kbit/s"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "320 кбит/с"
+          }
+        }
+      }
+    },
+    "AAC" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AAC"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AAC"
+          }
+        }
+      }
+    },
+    "Add to Favorites" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Добавить в избранное"
+          }
+        }
+      }
+    },
+    "Add to queue" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Добавить в очередь"
+          }
+        }
+      }
+    },
+    "Adjusts playback volume so tracks and albums sound equally loud, using ReplayGain tags from your library." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Passt die Wiedergabelautstärke an, damit Titel und Alben gleich laut klingen, basierend auf ReplayGain-Tags aus deiner Mediathek."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Регулирует громкость воспроизведения, чтобы треки и альбомы звучали одинаково громко, используя теги ReplayGain из вашей медиатеки."
+          }
+        }
+      }
+    },
+    "Album" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Album"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Альбом"
+          }
+        }
+      }
+    },
     "Albums" : {
       "localizations" : {
         "de" : {
@@ -156,6 +372,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Альбомы"
+          }
+        }
+      }
+    },
+    "All" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alle"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Все"
           }
         }
       }
@@ -212,6 +444,38 @@
         }
       }
     },
+    "Bitrate" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bitrate"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Битрейт"
+          }
+        }
+      }
+    },
+    "Cellular" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mobile Daten"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сотовая связь"
+          }
+        }
+      }
+    },
     "Connect" : {
       "localizations" : {
         "ru" : {
@@ -228,6 +492,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Добавьте ваш сервер Navidrome, чтобы начать"
+          }
+        }
+      }
+    },
+    "Default gain" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Standardverstärkung"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Усиление по умолчанию"
           }
         }
       }
@@ -268,6 +548,38 @@
         }
       }
     },
+    "Enable ReplayGain" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ReplayGain aktivieren"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Включить ReplayGain"
+          }
+        }
+      }
+    },
+    "Enable transcoding" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Transkodierung aktivieren"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Включить транскодирование"
+          }
+        }
+      }
+    },
     "Enter the address of your Navidrome server, e.g. https://music.example.com or http://192.168.1.10:4533" : {
       "localizations" : {
         "ru" : {
@@ -298,12 +610,44 @@
         }
       }
     },
+    "Files to transcode" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zu transkodierende Dateien"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Файлы для транскодирования"
+          }
+        }
+      }
+    },
     "Filter" : {
       "localizations" : {
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Фильтр"
+          }
+        }
+      }
+    },
+    "Format" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Format"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Формат"
           }
         }
       }
@@ -350,6 +694,38 @@
         }
       }
     },
+    "Lossless only" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nur verlustfrei"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Только без потерь"
+          }
+        }
+      }
+    },
+    "Mode" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Modus"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Режим"
+          }
+        }
+      }
+    },
     "More by %@" : {
       "localizations" : {
         "de" : {
@@ -361,7 +737,23 @@
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Больше от %@"
+            "value" : "%@: еще"
+          }
+        }
+      }
+    },
+    "MP3" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MP3"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MP3"
           }
         }
       }
@@ -414,6 +806,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Не воспроизводится"
+          }
+        }
+      }
+    },
+    "Opus" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Opus"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Opus"
           }
         }
       }
@@ -476,6 +884,16 @@
         }
       }
     },
+    "Play next" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Воспроизвести далее"
+          }
+        }
+      }
+    },
     "Playback" : {
       "localizations" : {
         "de" : {
@@ -504,6 +922,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Плейлисты"
+          }
+        }
+      }
+    },
+    "Pre-amp" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vorverstärkung"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Предусиление"
+          }
+        }
+      }
+    },
+    "Prevent clipping" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Übersteuerung verhindern"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Предотвращать клиппинг"
           }
         }
       }
@@ -562,6 +1012,32 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Повторное соединение"
+          }
+        }
+      }
+    },
+    "Remove from Favorites" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удалить из избранного"
+          }
+        }
+      }
+    },
+    "ReplayGain" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ReplayGain"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ReplayGain"
           }
         }
       }
@@ -691,7 +1167,6 @@
       }
     },
     "Track" : {
-      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -703,6 +1178,54 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Трек"
+          }
+        }
+      }
+    },
+    "Transcode over" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Transkodieren über"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Транскодировать через"
+          }
+        }
+      }
+    },
+    "Transcoded tracks use less bandwidth and storage, at the cost of some audio quality." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Transkodierte Titel benötigen weniger Bandbreite und Speicherplatz, auf Kosten der Klangqualität."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Транскодированные треки используют меньше трафика и места на диске за счёт некоторого снижения качества звука."
+          }
+        }
+      }
+    },
+    "Transcoding" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Transkodierung"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Транскодирование"
           }
         }
       }
@@ -719,6 +1242,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Имя пользователя"
+          }
+        }
+      }
+    },
+    "Wi-Fi" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wi-Fi"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wi-Fi"
+          }
+        }
+      }
+    },
+    "Wi-Fi + Cellular" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wi-Fi + Mobile Daten"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wi-Fi и сотовая связь"
           }
         }
       }

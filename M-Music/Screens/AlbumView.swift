@@ -6,6 +6,7 @@ struct AlbumView: View {
 
     private let client = SubsonicClient.shared
     @ObservedObject private var player = PlayerManager.shared
+    @Environment(\.displayScale) private var displayScale
 
     /// Zoom transition for the "Other versions" / "More by artist" cards below — separate from
     /// the incoming `zoomNamespace` param, which only matches this view's own entry transition.
@@ -15,13 +16,23 @@ struct AlbumView: View {
     @State private var albumCodec: String?
     @State private var isLoadingSongs = true
     @State private var loadError: String?
+    /// Per-track starred state, overriding `Child.isStarred` (`Child.starred` is server-decoded
+    /// and immutable) once the user stars/unstars a track from its context menu. Keyed by track
+    /// id; a track with no entry here just falls back to its own `isStarred`.
+    @State private var trackStarOverrides: [String: Bool] = [:]
 
     @State private var otherVersions: [AlbumID3] = []
     @State private var moreByArtist: [AlbumID3] = []
+    @State private var hasRelatedAlbums: Bool = false
 
     @State private var isStarred: Bool
     @State private var isDownloaded = false
     @State private var backgroundColor: Color
+
+    /// How far the list is scrolled from its top edge — drives a smooth blend between the artwork
+    /// color and the related-albums section's darker shade as the top of the list nears the
+    /// translucent nav bar (see `listBackground`).
+    @State private var scrollEdgeOffsets = ScrollEdgeOffsets()
 
     init(album: AlbumID3, zoomNamespace: Namespace.ID? = nil) {
         self.album = album
@@ -72,12 +83,14 @@ struct AlbumView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        // Only shows through the gap below the last row when content is shorter than the screen —
-        // matches the related-albums section's own shade, since that's always the bottommost row.
-        // `.basedOnSize` stops the list from bouncing/scrolling past that gap in the first place
-        // when content already fills (or overflows) the screen, so this never has to paper over
-        // an artificially-extended scroll area either.
-        .background(relatedSectionBackground.ignoresSafeArea())
+        .background(
+            hasRelatedAlbums ? listBackground.ignoresSafeArea() : backgroundColor.darkened().ignoresSafeArea()
+        )
+        .onScrollGeometryChange(for: ScrollEdgeOffsets.self) { geometry in
+            ScrollEdgeOffsets(fromTop: geometry.contentOffset.y)
+        } action: { _, newValue in
+            scrollEdgeOffsets = newValue
+        }
         .scrollBounceBehavior(.basedOnSize)
         .toolbar {
             downloadButton
@@ -113,8 +126,9 @@ struct AlbumView: View {
             let more = artist.album.filter { $0.name != album.name }
             await MainActor.run {
                 otherVersions = others
-                moreByArtist = more
+                moreByArtist = more.reversed()
             }
+            hasRelatedAlbums = !others.isEmpty || !more.isEmpty
         } catch {
             // Ignored — see doc comment above.
         }
@@ -123,7 +137,15 @@ struct AlbumView: View {
     /// A shade darker than the main artwork-derived background, so this section reads as visually
     /// distinct from the tracklist above it.
     private var relatedSectionBackground: Color {
-        backgroundColor.darkened().darkened(by: 0.7)
+        backgroundColor.darkened().darkened(by: 0.8)
+    }
+
+    /// Blends from the artwork color to `relatedSectionBackground` as the list scrolls within
+    /// 50pt of its top edge, so the area behind the translucent nav bar transitions smoothly
+    /// alongside the scroll instead of snapping between the two colors.
+    private var listBackground: Color {
+        let fraction = min(max(scrollEdgeOffsets.fromTop / 50, 0), 1)
+        return backgroundColor.darkened().interpolated(to: relatedSectionBackground, fraction: fraction)
     }
 
     @ViewBuilder
@@ -137,7 +159,7 @@ struct AlbumView: View {
                     albumCarousel(title: String(localized: "More by \(album.artist ?? "")"), albums: moreByArtist)
                 }
             }
-            .padding(.vertical, 20)
+            .padding(.vertical, 16)
         }
     }
 
@@ -185,26 +207,51 @@ struct AlbumView: View {
 
     func trackList() -> some View {
         VStack(spacing: 0) {
-            Divider()
-                .overlay(.secondary.opacity(0.75))
+            trackSeparator()
             ForEach(Array(songs.enumerated()), id: \.element.id) { index, track in
-                trackRow(track)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 16)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        playTrack(at: index)
-                    }
-
-                if index < songs.count - 1 {
-                    Divider()
-                        .overlay(.secondary.opacity(0.75))
-                        .padding(.leading, trackTitleLeadingInset)
+                // A `Button` (rather than `.onTapGesture` on the row) so the trailing `Menu`'s own
+                // taps take priority correctly — `.onTapGesture` on a container is a separate
+                // gesture recognizer that can swallow taps meant for a nested interactive control
+                // like `Menu`, whereas nesting an actual button-like control inside a `Button`'s
+                // label is a configuration SwiftUI resolves hit-testing for correctly.
+                Button {
+                    playTrack(at: index)
+                } label: {
+                    trackRow(track, at: index)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 16)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                // Anchored to this row's own bottom edge rather than being a separate sibling in
+                // the VStack — a sibling's position depends on the cumulative height of every row
+                // above it, which made it fragile (and apparently still is even with an explicit,
+                // fixed-size separator view) specifically once several rows in a row are taller
+                // for showing a displayed artist name. Deriving the separator from this row's own
+                // resolved geometry instead means it can't be affected by its neighbors.
+                .overlay(alignment: .bottom) {
+                        if index < songs.count - 1 {
+                            trackSeparator()
+                                .padding(.leading, trackTitleLeadingInset)
+                        }
+                    }
             }
-            Divider()
-                .overlay(.secondary.opacity(0.75))
+            trackSeparator()
         }
+    }
+
+    /// A fixed-height rule rather than a plain `Divider()` — `Divider()` intermittently fails to
+    /// render between two rows of different heights (e.g. a row with a displayed artist name
+    /// next to one without), since its own height then has to be inferred rather than being
+    /// explicit. The height is exactly one physical pixel — a fractional point value like 0.5
+    /// lands on a non-integer pixel boundary at most scale factors, so antialiasing spreads it
+    /// over a variable number of pixels depending on where it falls, making the line look
+    /// thicker (and inconsistently so row to row) rather than a crisp hairline.
+    private func trackSeparator() -> some View {
+        Rectangle()
+            .fill(Color.secondary.opacity(0.75))
+            .frame(height: 1 / displayScale)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private func playTrack(at index: Int) {
@@ -236,7 +283,7 @@ struct AlbumView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    func trackRow(_ track: Child) -> some View {
+    func trackRow(_ track: Child, at index: Int) -> some View {
         let isCurrent = player.currentTrack?.id == track.id
         return HStack(spacing: 12) {
             Group {
@@ -262,10 +309,65 @@ struct AlbumView: View {
 
             Spacer()
 
-            Button {} label: {
-                Image(systemName: "ellipsis")
-                    .foregroundStyle(.primary)
-                    .font(.system(size: 18))
+            trackMenu(track, at: index)
+        }
+    }
+
+    private func trackMenu(_ track: Child, at index: Int) -> some View {
+        let starred = isStarred(track)
+        return Menu {
+            // Not a `ControlGroup`/`.palette` row: that style is icon-only by design (no way to
+            // opt back into showing titles), which would hide the label text these need.
+            Button {
+                toggleStarred(track)
+            } label: {
+                Label(
+                    starred ? "Remove from Favorites" : "Add to Favorites",
+                    systemImage: starred ? "star.slash.fill" : "star.fill"
+                )
+            }
+
+            Button {
+                player.playNext(track)
+            } label: {
+                Label("Play next", systemImage: "text.line.first.and.arrowtriangle.forward")
+            }
+            Button {
+                player.addToQueue(track)
+            } label: {
+                Label("Add to queue", systemImage: "text.line.last.and.arrowtriangle.forward")
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .foregroundStyle(.primary)
+                .font(.system(size: 18))
+                // Enlarges the tappable area well past the glyph itself (Apple's ~44pt minimum
+                // tap target) without changing how it looks.
+                .frame(height: 20)
+                .contentShape(Rectangle())
+        }
+    }
+
+    private func isStarred(_ track: Child) -> Bool {
+        trackStarOverrides[track.id.raw] ?? track.isStarred
+    }
+
+    /// Stars/unstars a single track from its context menu — separate from `AlbumView`'s own
+    /// `toggleStarred()` (the album-level star button), and from `PlayerManager.toggleStarred()`
+    /// (only ever the currently-playing track), since this can act on any track in the list
+    /// regardless of what's playing.
+    private func toggleStarred(_ track: Child) {
+        let newValue = !isStarred(track)
+        trackStarOverrides[track.id.raw] = newValue
+        Task {
+            do {
+                if newValue {
+                    try await client.star(ids: [track.id.raw])
+                } else {
+                    try await client.unstar(ids: [track.id.raw])
+                }
+            } catch {
+                await MainActor.run { trackStarOverrides[track.id.raw] = !newValue }
             }
         }
     }
@@ -409,6 +511,12 @@ struct AlbumView: View {
                 }
             }
         }
+}
+
+/// How far `AlbumView`'s list is scrolled from its top edge, in points — `0` means flush against
+/// the top.
+private struct ScrollEdgeOffsets: Equatable {
+    var fromTop: CGFloat = 0
 }
 
 #Preview {
