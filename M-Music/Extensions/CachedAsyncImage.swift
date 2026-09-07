@@ -82,7 +82,7 @@ final class ImageCache: @unchecked Sendable {
             memory.setObject(onDisk, forKey: key as NSString)
             return onDisk
         }
-        guard let data = try? await URLSession.shared.data(from: url).0, let image = UIImage(data: data) else { return nil }
+        guard let data = try? await URLSession.shared.data(from: url).0, let image = decodedImage(from: data) else { return nil }
         memory.setObject(image, forKey: key as NSString)
         writeToDisk(data, forKey: key)
         return image
@@ -125,12 +125,39 @@ final class ImageCache: @unchecked Sendable {
 
     private func diskImage(forKey key: String) -> UIImage? {
         guard let fileURL = diskURL(forKey: key), let data = try? Data(contentsOf: fileURL) else { return nil }
-        return UIImage(data: data)
+        return decodedImage(from: data)
     }
 
     private func writeToDisk(_ data: Data, forKey key: String) {
         guard let fileURL = diskURL(forKey: key) else { return }
         try? data.write(to: fileURL, options: .atomic)
+    }
+
+    /// Fully decodes `data` into a plain device-RGB bitmap, off the main thread, right away —
+    /// rather than handing back a `UIImage` that lazily decodes (via ImageIO's newer block-based
+    /// decoder) whenever UIKit/SwiftUI first draws it. That lazy path has a real, filed Apple bug
+    /// (rdar://143602439, logged as "kCGImageBlockFormatBGRx8 is called for 24-bpp (8-bpc)
+    /// image") that can hang the *main* thread mid-decode for certain JPEGs — which read as a
+    /// random app freeze, since it only fires whenever some particular image happens to first
+    /// scroll/switch into view. Forcing the real decode here, on a background task, means the
+    /// image handed to SwiftUI is already a plain bitmap with nothing left to lazily (and
+    /// buggily) decode on the main thread.
+    private func decodedImage(from data: Data) -> UIImage? {
+        guard let source = UIImage(data: data), let cgImage = source.cgImage else { return nil }
+        let width = cgImage.width
+        let height = cgImage.height
+        guard width > 0, height > 0, let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return source }
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        guard let normalized = context.makeImage() else { return source }
+        return UIImage(cgImage: normalized, scale: source.scale, orientation: .up)
     }
 }
 

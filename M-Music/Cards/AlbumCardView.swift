@@ -4,6 +4,13 @@ struct AlbumCardView: View {
     let album: AlbumID3
     var zoomNamespace: Namespace.ID? = nil
 
+    /// Computed once per `album.id` and cached, rather than inline in `artwork` — `coverArtURL`
+    /// signs every call with a fresh random token, so recomputing it on every body evaluation
+    /// (e.g. every time a `LazyVGrid` re-renders this cell) makes `CachedAsyncImage` see a "new"
+    /// URL each time and re-run its load task, even though `ImageCache` itself dedupes by a
+    /// token-stripped key underneath. At grid scale that's a lot of redundant task churn.
+    @State private var artworkURL: URL?
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             artwork
@@ -19,6 +26,9 @@ struct AlbumCardView: View {
                 .foregroundColor(.gray)
                 .lineLimit(1)
         }
+        .task(id: album.id) {
+            artworkURL = try? SubsonicClient.shared.coverArtURL(forId: album.coverArt ?? album.id.raw)
+        }
     }
 
     @ViewBuilder
@@ -26,7 +36,7 @@ struct AlbumCardView: View {
         // Same URL AlbumView requests (original size, no `size` param), so opening this album
         // reuses the image straight from ImageCache instead of triggering a second fetch —
         // see CachedAsyncImage.
-        let image = CachedAsyncImage(url: try? SubsonicClient.shared.coverArtURL(forId: album.coverArt ?? album.id.raw)) { image in
+        let image = CachedAsyncImage(url: artworkURL) { image in
             image
                 .resizable()
                 .aspectRatio(1, contentMode: .fit)

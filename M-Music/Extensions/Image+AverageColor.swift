@@ -127,6 +127,14 @@ extension Color {
         return Color(hue: hue, saturation: saturation, brightness: brightness * factor)
     }
 
+    /// Scales saturation up by `factor`, clamped to fully saturated — makes a color more vivid
+    /// without touching its hue or brightness.
+    func saturated(by factor: CGFloat) -> Color {
+        var hue: CGFloat = 0, saturation: CGFloat = 0, brightness: CGFloat = 0, alpha: CGFloat = 0
+        UIColor(self).getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
+        return Color(hue: hue, saturation: min(saturation * factor, 1), brightness: brightness)
+    }
+
     /// Linearly blends towards `other` in RGB space — `fraction` is clamped to 0...1, where 0 is
     /// this color and 1 is `other`.
     func interpolated(to other: Color, fraction: CGFloat) -> Color {
@@ -141,5 +149,25 @@ extension Color {
             blue: b1 + (b2 - b1) * t,
             opacity: a1 + (a2 - a1) * t
         )
+    }
+}
+
+extension [Color] {
+    /// Pulls every color toward the group's average by `fraction` (0 = untouched, 1 = all
+    /// collapse to the same average color) — softens how starkly different the picked colors
+    /// look next to each other in the gradient, without losing the overall palette.
+    func reducedContrast(by fraction: CGFloat) -> [Color] {
+        guard count > 1 else { return self }
+        var totalRed: CGFloat = 0, totalGreen: CGFloat = 0, totalBlue: CGFloat = 0
+        for color in self {
+            var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+            UIColor(color).getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+            totalRed += red
+            totalGreen += green
+            totalBlue += blue
+        }
+        let n = CGFloat(count)
+        let average = Color(red: totalRed / n, green: totalGreen / n, blue: totalBlue / n)
+        return map { $0.interpolated(to: average, fraction: fraction) }
     }
 }

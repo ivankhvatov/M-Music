@@ -29,6 +29,12 @@ struct AlbumView: View {
     @State private var isDownloaded = false
     @State private var backgroundColor: Color
 
+    /// Computed once (`.task`, not inline in `albumArtwork()`) and cached — `coverArtURL` signs
+    /// every call with a fresh random token, and this view re-renders on every `PlayerManager`
+    /// tick (it's `@ObservedObject`), so recomputing inline would hand `CachedAsyncImage` a "new"
+    /// URL on every body evaluation and re-run its load task needlessly.
+    @State private var artworkURL: URL?
+
     /// How far the list is scrolled from its top edge — drives a smooth blend between the artwork
     /// color and the related-albums section's darker shade as the top of the list nears the
     /// translucent nav bar (see `listBackground`).
@@ -56,6 +62,9 @@ struct AlbumView: View {
         }
         .task {
             await loadRelatedAlbums()
+        }
+        .task(id: album.id) {
+            artworkURL = try? client.coverArtURL(forId: album.coverArt ?? album.id.raw)
         }
     }
 
@@ -376,7 +385,7 @@ struct AlbumView: View {
         // Same URL AlbumCardView requests (original size, no `size` param), so this reuses the
         // image straight from ImageCache instead of re-fetching — the whole point being no lag
         // when this view opens.
-        CachedAsyncImage(url: try? client.coverArtURL(forId: album.coverArt ?? album.id.raw)) { image in
+        CachedAsyncImage(url: artworkURL) { image in
             image
                 .resizable()
                 .scaledToFit()
