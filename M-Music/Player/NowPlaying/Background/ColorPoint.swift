@@ -27,9 +27,24 @@ extension ColorPoint {
         ColorPoint(position: .zero, color: .black.opacity(0))
     }
 
-    static func random(withColor color: Color) -> ColorPoint {
-        ColorPoint(
-            position: UnitPoint(x: CGFloat.random(in: 0 ..< 1), y: CGFloat.random(in: 0 ..< 1)),
+    /// Places this point at `index`'s slot in the golden-angle sequence (successive indices land
+    /// ~137.5° apart around the center), rotated by a shared `rotationOffset` so the whole
+    /// arrangement still looks different on every reshuffle.
+    ///
+    /// Fully independent random positions can land close together by chance — with only 3 real
+    /// colors active at a time, that reads as the background collapsing toward a single
+    /// near-solid color. The golden angle is the standard low-discrepancy trick for this: any
+    /// prefix of the sequence (1, 2, 3, ... points) stays well spread, so it doesn't matter how
+    /// many of the 8 slots actually carry a real color.
+    static func spread(withColor color: Color, index: Int, rotationOffset: Double) -> ColorPoint {
+        let goldenAngle = 137.50776
+        let degrees = Double(index) * goldenAngle + rotationOffset + .random(in: -12 ... 12)
+        let angle = degrees * .pi / 180
+        let radius = CGFloat.random(in: 0.26 ... 0.44)
+        let x = 0.5 + radius * cos(angle)
+        let y = 0.5 + radius * sin(angle)
+        return ColorPoint(
+            position: UnitPoint(x: x.clamped(to: 0 ... 1), y: y.clamped(to: 0 ... 1)),
             color: color
         )
     }
@@ -116,15 +131,16 @@ extension ColorPoints {
     }
 
     var shuffled: ColorPoints {
-        ColorPoints(
-            point0: .random(withColor: point0.color),
-            point1: .random(withColor: point1.color),
-            point2: .random(withColor: point2.color),
-            point3: .random(withColor: point3.color),
-            point4: .random(withColor: point4.color),
-            point5: .random(withColor: point5.color),
-            point6: .random(withColor: point6.color),
-            point7: .random(withColor: point7.color)
+        let rotationOffset = Double.random(in: 0 ..< 360)
+        return ColorPoints(
+            point0: .spread(withColor: point0.color, index: 0, rotationOffset: rotationOffset),
+            point1: .spread(withColor: point1.color, index: 1, rotationOffset: rotationOffset),
+            point2: .spread(withColor: point2.color, index: 2, rotationOffset: rotationOffset),
+            point3: .spread(withColor: point3.color, index: 3, rotationOffset: rotationOffset),
+            point4: .spread(withColor: point4.color, index: 4, rotationOffset: rotationOffset),
+            point5: .spread(withColor: point5.color, index: 5, rotationOffset: rotationOffset),
+            point6: .spread(withColor: point6.color, index: 6, rotationOffset: rotationOffset),
+            point7: .spread(withColor: point7.color, index: 7, rotationOffset: rotationOffset)
         )
     }
 

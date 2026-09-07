@@ -3,7 +3,7 @@ import SwiftUI
 
 @Observable
 final class ColorfulBackgroundModel {
-    static let animationDuration: Double = 20
+    static let animationDuration: Double = 40
     var points: ColorPoints = .zero.shuffled
 
     private var colors: [Color] = []
@@ -36,7 +36,13 @@ final class ColorfulBackgroundModel {
                 points = animatedData.colored(colors: colors)
             }
         } else {
-            points = animatedData.colored(colors: colors)
+            // Before the first `animate()` runs, `animatedData` is still its placeholder `.zero`
+            // — every position (0, 0) — so colored(colors:) would put all 3 real colors on top
+            // of each other in the corner, and the very first `animate()` call would then spend
+            // its whole 20s linear animation slowly separating them, reading as a near-solid
+            // color for a good stretch of the opening. `points` already holds real, spread-out
+            // positions from `.zero.shuffled` at init, so color those instead.
+            points = points.colored(colors: colors)
         }
     }
 

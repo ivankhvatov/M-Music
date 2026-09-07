@@ -20,8 +20,14 @@ struct PlayerButton<Content: View>: View {
             .scaleEffect(pressed ? 0.9 : 1)
             .frame(width: config.size, height: config.size)
             .foregroundStyle(color)
-            .background(showCircle ? config.tint : .clear)
-            .clipShape(Ellipse())
+            .background {
+                // A separate, smaller circle rather than filling the whole `config.size` frame
+                // (which is also the tap target) — that let the highlight read as oversized next
+                // to the icon it's behind.
+                Circle()
+                    .fill(showCircle ? config.tint : .clear)
+                    .frame(width: config.size * config.circleScale, height: config.size * config.circleScale)
+            }
             .scaleEffect(pressed ? 0.85 : 1)
             .contentShape(.circle)
             .onPressGesture(
@@ -65,6 +71,9 @@ extension EnvironmentValues {
 struct PlayerButtonConfig {
     let updateInterval: TimeInterval
     let size: CGFloat
+    /// The pressed-state highlight circle's diameter, as a fraction of `size` (the tap target
+    /// itself is unaffected).
+    let circleScale: CGFloat
     let labelColor: Color
     let tint: Color
     let pressedColor: Color
@@ -73,6 +82,7 @@ struct PlayerButtonConfig {
     init(
         updateInterval: TimeInterval = 0.1,
         size: CGFloat = 68,
+        circleScale: CGFloat = 0.7,
         labelColor: Color = .init(UIColor.label),
         tint: Color = .init(UIColor.tintColor),
         pressedColor: Color = .init(UIColor.secondaryLabel),
@@ -80,6 +90,7 @@ struct PlayerButtonConfig {
     ) {
         self.updateInterval = updateInterval
         self.size = size
+        self.circleScale = circleScale
         self.labelColor = labelColor
         self.tint = tint
         self.pressedColor = pressedColor

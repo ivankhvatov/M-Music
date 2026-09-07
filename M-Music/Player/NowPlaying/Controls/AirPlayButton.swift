@@ -3,6 +3,7 @@ import SwiftUI
 import UIKit
 
 struct AirPlayButton: View {
+    var size: CGFloat = 24
     @State private var presenter = AirPlayPresenter()
 
     var body: some View {
@@ -17,7 +18,7 @@ struct AirPlayButton: View {
                 action: { presenter.presentAirPlayPicker() },
                 label: {
                     Image(systemName: "airplayaudio")
-                        .font(.system(size: 24))
+                        .font(.system(size: size))
                 }
             )
         }

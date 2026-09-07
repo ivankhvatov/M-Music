@@ -6,11 +6,11 @@ struct RegularNowPlaying: View {
     var size: CGSize
     var colors: [Color]
     var animationNamespace: Namespace.ID
+    var onCollapse: () -> Void
 
     var body: some View {
         VStack(spacing: 12) {
             grip
-                .blendMode(.overlay)
 
             artwork
                 .matchedGeometryEffect(id: PlayerMatchedGeometry.artwork, in: animationNamespace)
@@ -32,8 +32,11 @@ private extension RegularNowPlaying {
 
     var grip: some View {
         Capsule()
-            .fill(.white.secondary)
-            .frame(width: 40, height: 5)
+            .fill(.white.opacity(0.3))
+            .frame(width: 70, height: 5)
+            .padding(.vertical, 12)
+            .contentShape(.rect)
+            .onTapGesture(perform: onCollapse)
     }
 
     @ViewBuilder

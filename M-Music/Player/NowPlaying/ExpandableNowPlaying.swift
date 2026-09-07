@@ -56,7 +56,7 @@ private extension ExpandableNowPlaying {
                 // and briefly leave both mounted, which crashes with "Multiple inserted views in
                 // matched geometry group ... isSource: true".
                 if expanded {
-                    RegularNowPlaying(size: size, colors: colors, animationNamespace: animationNamespace)
+                    RegularNowPlaying(size: size, colors: colors, animationNamespace: animationNamespace, onCollapse: collapse)
                         .transition(.opacity)
                 } else {
                     CompactNowPlaying(expanded: $expanded, animationNamespace: animationNamespace)
@@ -94,15 +94,27 @@ private extension ExpandableNowPlaying {
         guard expanded else { return }
         let translation = max(value.translation.height, 0)
         let velocity = value.velocity.height / 5
-        withAnimation(.playerExpandAnimation) {
-            if (translation + velocity) > (viewSize.height * 0.3) {
-                expanded = false
-                resetStackedWithAnimation()
-            } else {
+        if (translation + velocity) > (viewSize.height * 0.3) {
+            collapse()
+        } else {
+            withAnimation(.playerExpandAnimation) {
                 stacked(progress: 1, withAnimation: true)
+                offsetY = 0
             }
+        }
+    }
+
+    /// Same collapse the drag-to-dismiss gesture performs past its threshold — shared so tapping
+    /// the grip does the identical animated transition instead of just flipping `expanded`, which
+    /// would leave `progressTrackState` (and so `isFullyCollapsed`/hit-testing) stuck as if still
+    /// expanded. Self-contained (wraps its own animation) so it works the same regardless of
+    /// caller context.
+    func collapse() {
+        withAnimation(.playerExpandAnimation) {
+            expanded = false
             offsetY = 0
         }
+        resetStackedWithAnimation()
     }
 
     func stacked(progress: CGFloat, withAnimation: Bool) {
