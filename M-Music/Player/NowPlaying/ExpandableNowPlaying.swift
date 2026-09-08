@@ -102,14 +102,34 @@ private extension ExpandableNowPlaying {
                 // independently-mounted sources for the same id crashes SwiftUI with "Multiple
                 // inserted views in matched geometry group ... isSource: true"). Swapped on
                 // `expanded` directly (not the delayed material threshold above) so the handoff
-                // runs across the full collapse, in step with the pill's own shape. No
-                // `.transition()` here — matchedGeometryEffect handles its own continuity
-                // (position/size only, no alpha), so the swap itself can just be instant and the
-                // artwork never disappears, even for a frame.
+                // runs across the full collapse, in step with the pill's own shape.
+                //
+                // `.transition(.scale(scale: 1))` on both branches — a transition that is, by
+                // construction, visually a no-op (scaling by a factor of 1 changes nothing) but is
+                // still a *real* `AnyTransition`, unlike `.identity`. That distinction matters:
+                //
+                // - Leaving no explicit `.transition()` falls back to SwiftUI's default, which is
+                //   `.opacity`. That fought `matchedGeometryEffect`: the outgoing view's removal
+                //   got cut short (SwiftUI doesn't keep a matchedGeometryEffect source around to
+                //   finish fading), so the artwork vanished instantly at the start of a collapse,
+                //   then the incoming view's own fade-in played out normally on top of the
+                //   geometry handoff — an instant disappear followed by a fade back in.
+                // - Switching to `.transition(.identity)` removed that opacity ramp, but also
+                //   dropped this mount/unmount out of the animated transaction entirely — SwiftUI
+                //   treats `.identity` as "nothing to animate here" and applies it immediately,
+                //   which took `matchedGeometryEffect`'s own position/size interpolation down with
+                //   it, so the artwork snapped straight to its expanded/collapsed frame instead of
+                //   morphing.
+                // - `.scale(scale: 1)` keeps the view inside the animated transaction (so
+                //   `matchedGeometryEffect` still has an animation to interpolate across) while
+                //   never actually changing how the view looks at any point, so there's no opacity
+                //   or scale artifact layered on top of the geometry handoff.
                 if expanded {
                     RegularArtwork(size: size, animationNamespace: animationNamespace)
+                        .transition(.scale(scale: 1))
                 } else {
                     CompactArtwork(animationNamespace: animationNamespace)
+                        .transition(.scale(scale: 1))
                 }
                 ProgressTracker(progress: progressTrackState)
             }
