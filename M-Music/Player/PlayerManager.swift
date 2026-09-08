@@ -227,11 +227,50 @@ final class PlayerManager: ObservableObject {
 
     private func loadCurrentItem(autoplay: Bool, startTime: TimeInterval = 0) {
         configureAudioSessionIfNeeded()
-        guard let track = currentTrack, let url = try? client.streamURL(forId: track.id.raw) else {
+        guard let track = currentTrack, let url = try? streamURL(for: track) else {
             isPlaying = false
             return
         }
         installItem(AVPlayerItem(url: url), autoplay: autoplay, startTime: startTime)
+    }
+
+    /// Codecs that store audio without loss — the only ones worth transcoding under
+    /// `TranscodeFileScope.losslessOnly`, since re-encoding an already-lossy file only loses more
+    /// quality without the bandwidth win that matters for lossless sources.
+    private static let losslessCodecs: Set<String> = ["flac", "alac", "wav", "aiff", "aif", "ape", "wv", "dsf", "dff"]
+
+    private func shouldTranscode(_ track: Child) -> Bool {
+        guard TranscodingSettings.isEnabled else { return false }
+        if TranscodingSettings.fileScope == .losslessOnly {
+            guard let suffix = track.suffix?.lowercased(), Self.losslessCodecs.contains(suffix) else { return false }
+        }
+        switch TranscodingSettings.network {
+        case .both: return true
+        case .wifi: return NetworkMonitor.shared.isOnWiFi
+        case .cellular: return NetworkMonitor.shared.isOnCellular
+        }
+    }
+
+    /// A playable URL for `track` per the current transcoding settings — source quality if
+    /// transcoding is off, doesn't apply to this file scope, or the current network doesn't match.
+    private func streamURL(for track: Child) throws -> URL {
+        guard shouldTranscode(track) else {
+            return try client.streamURL(forId: track.id.raw)
+        }
+        return try client.streamURL(
+            forId: track.id.raw, maxBitRate: TranscodingSettings.bitrate.rawValue, format: TranscodingSettings.format.rawValue
+        )
+    }
+
+    /// The player-wide volume for `track`'s ReplayGain adjustment. Applied via `AVPlayer.volume`
+    /// rather than a per-item `AVAudioMix`: an audio mix needs the item's audio track loaded
+    /// asynchronously before it takes effect, and in practice that's too easy to lose the race
+    /// against playback starting — even building the item a whole track ahead of time
+    /// (`prepareNextItem`) wasn't reliably enough lead time. `player.volume` takes effect
+    /// synchronously and instantly, at the cost of only being able to attenuate: values above 1
+    /// are clamped to no change, since this can't express a boost the way a mix could.
+    private func replayGainVolume(for track: Child) -> Float {
+        Float(min(ReplayGainSettings.linearGain(for: track), 1))
     }
 
     private func installItem(_ item: AVPlayerItem, autoplay: Bool, startTime: TimeInterval) {
@@ -253,6 +292,9 @@ final class PlayerManager: ObservableObject {
             timeObserverToken = newPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
                 Task { @MainActor in self?.handleTimeUpdate(time.seconds) }
             }
+        }
+        if let track = currentTrack {
+            player?.volume = replayGainVolume(for: track)
         }
 
         duration = TimeInterval(currentTrack?.duration ?? 0)
@@ -283,8 +325,10 @@ final class PlayerManager: ObservableObject {
         guard let currentIndex else { return }
         let nextIndex = currentIndex + 1
         guard queue.indices.contains(nextIndex), preparedIndex != nextIndex else { return }
-        guard let url = try? client.streamURL(forId: queue[nextIndex].id.raw) else { return }
-        preparedItem = AVPlayerItem(url: url)
+        let nextTrack = queue[nextIndex]
+        guard let url = try? streamURL(for: nextTrack) else { return }
+        let item = AVPlayerItem(url: url)
+        preparedItem = item
         preparedIndex = nextIndex
     }
 
