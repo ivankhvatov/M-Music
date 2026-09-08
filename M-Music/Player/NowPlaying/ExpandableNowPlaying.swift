@@ -57,14 +57,22 @@ private extension ExpandableNowPlaying {
                 // matched geometry group ... isSource: true".
                 if expanded {
                     RegularNowPlaying(size: size, colors: colors, animationNamespace: animationNamespace, onCollapse: collapse)
-                        .transition(.opacity)
+                        .transition(.scale(scale: 0.7, anchor: .bottom).combined(with: .opacity))
                 } else {
                     CompactNowPlaying(expanded: $expanded, animationNamespace: animationNamespace)
-                        .transition(.opacity)
+                        .transition(.scale(scale: 0.9, anchor: .top).combined(with: .opacity))
                 }
                 ProgressTracker(progress: progressTrackState)
             }
             .frame(height: expanded ? nil : NowPlayingLayout.compactHeight, alignment: .top)
+            // `NowPlayingBackground` only clips its own fill to the pill/rounded-rect shape —
+            // its ZStack siblings (the Compact/Regular content, scaling in via `.transition`)
+            // aren't clipped by that on their own, so a mid-animation frame where the content's
+            // own scale hasn't tracked the container's animating height exactly could show it
+            // poking past the background's rounded corners. Clipping the whole stack to the same
+            // shape guarantees content never renders outside the background's current bounds,
+            // however the two animations line up frame to frame.
+            .clipShape(.rect(cornerRadius: NowPlayingBackground.cornerRadius(expanded: expanded, isFullExpanded: isFullyExpanded)))
             .frame(maxHeight: .infinity, alignment: .bottom)
             .padding(.bottom, insets.bottom)
             .padding(.leading, insets.leading)

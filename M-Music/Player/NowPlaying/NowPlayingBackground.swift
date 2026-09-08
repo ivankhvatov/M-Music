@@ -23,16 +23,19 @@ struct NowPlayingBackground: View {
     }
 }
 
+extension NowPlayingBackground {
+    /// Shared with `ExpandableNowPlaying`, which clips its whole stack (background *and*
+    /// content) to this same shape — the two must always agree, or the content's clip would
+    /// visibly disagree with the background's own rounded corners as they animate together.
+    static func cornerRadius(expanded: Bool, isFullExpanded: Bool) -> CGFloat {
+        expanded
+            ? (isFullExpanded ? 0 : UIScreen.deviceCornerRadius)
+            : NowPlayingLayout.compactHeight / 2
+    }
+}
+
 private extension NowPlayingBackground {
     var playerCornerRadius: CGFloat {
-        expanded ? expandPlayerCornerRadius : collapsedPlayerCornerRadius
-    }
-
-    var expandPlayerCornerRadius: CGFloat {
-        isFullExpanded ? 0 : UIScreen.deviceCornerRadius
-    }
-
-    var collapsedPlayerCornerRadius: CGFloat {
-        NowPlayingLayout.compactHeight / 2
+        Self.cornerRadius(expanded: expanded, isFullExpanded: isFullExpanded)
     }
 }
