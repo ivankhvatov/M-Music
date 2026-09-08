@@ -10,6 +10,11 @@ enum PlayerMatchedGeometry {
 struct ExpandableNowPlaying: View {
     @Binding var expanded: Bool
     var collapsedFrame: CGRect
+    /// Set to `false` the instant the expand animation starts, `true` the instant the collapse
+    /// animation settles — lets `MainView` hide the real `.tabViewBottomAccessory` as soon as this
+    /// view starts taking over the screen, and only bring it back once this view has fully handed
+    /// off to it, so the two are never both visible at once.
+    @Binding var accessoryVisible: Bool
     @ObservedObject private var player = PlayerManager.shared
     @State private var offsetY: CGFloat = 0.0
     @State private var windowProgress: CGFloat = 0.0
@@ -23,11 +28,16 @@ struct ExpandableNowPlaying: View {
             .onChange(of: expanded) {
                 if expanded {
                     stacked(progress: 1, withAnimation: true)
+                    accessoryVisible = false
                 }
             }
             .onPreferenceChange(NowPlayingExpandProgressPreferenceKey.self) { [$expandProgress] value in
                 guard expandProgress != value else { return }
                 $expandProgress.wrappedValue = value
+            }
+            .onChange(of: isFullyCollapsed) { _, isFullyCollapsed in
+                guard isFullyCollapsed else { return }
+                accessoryVisible = true
             }
             .task(id: player.artworkURL) {
                 await updateColors()
@@ -69,30 +79,37 @@ private extension ExpandableNowPlaying {
                     showsExpandedContent: showsExpandedMaterial,
                     isFullExpanded: isFullyExpanded
                 )
-                // A single if/else (rather than two independently-opacity-toggled views that
-                // each internally condition their own artwork) guarantees SwiftUI mounts exactly
-                // one `.artwork` matchedGeometryEffect source at a time — two separately-managed
-                // conditionals sharing one boolean can transiently disagree during a transition
-                // and briefly leave both mounted, which crashes with "Multiple inserted views in
-                // matched geometry group ... isSource: true". Gated on `expanded` directly (not
-                // the delayed material threshold above) so the artwork's matchedGeometryEffect
-                // handoff runs across the full collapse, in step with the pill's own shape.
-                //
-                // No `.opacity` in these transitions: it applies to the *whole* view being
-                // inserted/removed, including the artwork inside it — but the artwork's own
-                // continuity is already handled by `matchedGeometryEffect`, which only
-                // interpolates position/size, not alpha. Layering an independent opacity fade on
-                // top fights that: the outgoing view's alpha ramps down while the incoming view's
-                // ramps up, and since they're two distinct instances the two ramps don't visually
-                // cancel out — the artwork reads as snapping away, then fading back in, instead of
-                // just continuously shrinking. `.scale` alone still gives the rest of the content
-                // (grip, controls) a pop-in/out on mount without touching alpha.
+                // Chrome (grip + controls, or marquee + buttons) — both always mounted and
+                // cross-faded via `expandProgress` directly, rather than swapped through an
+                // if/else with a `.transition()`. A `.transition()` here only pops in/out over
+                // whatever fraction of the ambient animation SwiftUI itself decides to spend on
+                // the mount/unmount — which in practice settled almost immediately, long before
+                // the artwork (driven by `matchedGeometryEffect`, which tracks the real geometry
+                // handoff frame by frame) had finished shrinking. Tying opacity straight to
+                // `expandProgress` — the same continuously-updated signal the artwork's container
+                // and material already key off — keeps the chrome's fade locked to the player's
+                // actual, real-time expand/collapse progress instead of racing ahead of it. Safe
+                // to keep both always mounted (unlike the artwork below): neither branch contains
+                // a `matchedGeometryEffect` descendant, so there's no risk of two simultaneous
+                // sources for the same id.
+                RegularChrome(size: size, colors: colors, onCollapse: collapse)
+                    .opacity(expandProgress)
+                    .allowsHitTesting(expanded)
+                CompactChrome(expanded: $expanded)
+                    .opacity(1 - expandProgress)
+                    .allowsHitTesting(!expanded)
+                // Artwork alone — a single `matchedGeometryEffect` source at a time (two
+                // independently-mounted sources for the same id crashes SwiftUI with "Multiple
+                // inserted views in matched geometry group ... isSource: true"). Swapped on
+                // `expanded` directly (not the delayed material threshold above) so the handoff
+                // runs across the full collapse, in step with the pill's own shape. No
+                // `.transition()` here — matchedGeometryEffect handles its own continuity
+                // (position/size only, no alpha), so the swap itself can just be instant and the
+                // artwork never disappears, even for a frame.
                 if expanded {
-                    RegularNowPlaying(size: size, colors: colors, animationNamespace: animationNamespace, onCollapse: collapse)
-                        .transition(.scale(scale: 0.7, anchor: .bottom).combined(with: .opacity))
+                    RegularArtwork(size: size, animationNamespace: animationNamespace)
                 } else {
-                    CompactNowPlaying(expanded: $expanded, animationNamespace: animationNamespace)
-                        .transition(.scale(scale: 0.9, anchor: .top).combined(with: .opacity))
+                    CompactArtwork(animationNamespace: animationNamespace)
                 }
                 ProgressTracker(progress: progressTrackState)
             }

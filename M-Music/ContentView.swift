@@ -4,6 +4,7 @@ struct MainView: View {
     @State private var selectedTab : Int = 0
     @State private var expandPlayer : Bool = false
     @State private var nowPlayingFrame: CGRect = .zero
+    @State private var accessoryVisible = true
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -11,6 +12,15 @@ struct MainView: View {
         TabBar()
             .tabViewBottomAccessory {
                 CompactNowPlaying(expanded: $expandPlayer)
+                    // Hidden (not removed, so its geometry/layout stays reserved and stable) the
+                    // instant `ExpandableNowPlaying`'s own pill starts expanding, and shown again
+                    // only once that pill has fully handed back off to this real, system-rendered
+                    // accessory — see `accessoryVisible`'s doc comment on `ExpandableNowPlaying`.
+                    // `.animation(nil, ...)` because this is a hard cut tied to the *start*/*end*
+                    // of the other animation, not something that should itself animate.
+                    .opacity(accessoryVisible ? 1 : 0)
+                    .allowsHitTesting(accessoryVisible)
+                    .animation(nil, value: accessoryVisible)
                     .onGeometryChange(
                         for: CGRect.self,
                         of: { $0.frame(in: .global).roundedToPoint },
@@ -34,8 +44,12 @@ struct MainView: View {
             .tabBarMinimizeBehavior(.never)
             .environment(\.colorScheme, colorScheme)
             .overlay {
-                ExpandableNowPlaying(expanded: $expandPlayer, collapsedFrame: nowPlayingFrame)
-                    .toolbarColorScheme(colorScheme, for: .navigationBar)
+                ExpandableNowPlaying(
+                    expanded: $expandPlayer,
+                    collapsedFrame: nowPlayingFrame,
+                    accessoryVisible: $accessoryVisible
+                )
+                .toolbarColorScheme(colorScheme, for: .navigationBar)
             }
     }
 
