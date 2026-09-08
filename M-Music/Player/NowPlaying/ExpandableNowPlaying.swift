@@ -20,6 +20,15 @@ struct ExpandableNowPlaying: View {
     @State private var windowProgress: CGFloat = 0.0
     @State private var progressTrackState: CGFloat = 0.0
     @State private var expandProgress: CGFloat = 0.0
+    /// Drives the chrome crossfade below — kept separate from `expandProgress`, which also tracks
+    /// the interactive drag-to-dismiss gesture pixel-by-pixel as the user's finger moves. Chrome
+    /// should only start crossfading once a collapse is actually committed (released past the
+    /// threshold, or the grip tapped), not merely previewed by dragging partway down and holding.
+    /// `stacked(progress:withAnimation:)` only touches this alongside `progressTrackState` when
+    /// `withAnimation` is true — i.e. never from the interactive, per-pixel gesture updates — so it
+    /// stays pinned at its pre-drag value for the whole interactive portion of the gesture and only
+    /// animates once the gesture ends in a real committed transition.
+    @State private var chromeProgress: CGFloat = 0.0
     @State private var colors: [Color] = [.gray]
     @Namespace private var animationNamespace
 
@@ -80,23 +89,24 @@ private extension ExpandableNowPlaying {
                     isFullExpanded: isFullyExpanded
                 )
                 // Chrome (grip + controls, or marquee + buttons) — both always mounted and
-                // cross-faded via `expandProgress` directly, rather than swapped through an
-                // if/else with a `.transition()`. A `.transition()` here only pops in/out over
-                // whatever fraction of the ambient animation SwiftUI itself decides to spend on
-                // the mount/unmount — which in practice settled almost immediately, long before
-                // the artwork (driven by `matchedGeometryEffect`, which tracks the real geometry
-                // handoff frame by frame) had finished shrinking. Tying opacity straight to
-                // `expandProgress` — the same continuously-updated signal the artwork's container
-                // and material already key off — keeps the chrome's fade locked to the player's
-                // actual, real-time expand/collapse progress instead of racing ahead of it. Safe
-                // to keep both always mounted (unlike the artwork below): neither branch contains
-                // a `matchedGeometryEffect` descendant, so there's no risk of two simultaneous
-                // sources for the same id.
+                // cross-faded via `chromeProgress`, rather than swapped through an if/else with a
+                // `.transition()`. A `.transition()` here only pops in/out over whatever fraction
+                // of the ambient animation SwiftUI itself decides to spend on the mount/unmount —
+                // which in practice settled almost immediately, long before the artwork (driven by
+                // `matchedGeometryEffect`, which tracks the real geometry handoff frame by frame)
+                // had finished shrinking. Tying opacity to `chromeProgress` — which only moves on
+                // committed, animated transitions, never on the interactive drag-to-dismiss preview
+                // — keeps the chrome's fade locked to the player's actual, real-time expand/collapse
+                // progress instead of racing ahead of it, and keeps it from starting to crossfade
+                // just because the player was dragged partway down and held. Safe to keep both
+                // always mounted (unlike the artwork below): neither branch contains a
+                // `matchedGeometryEffect` descendant, so there's no risk of two simultaneous sources
+                // for the same id.
                 RegularChrome(size: size, colors: colors, onCollapse: collapse)
-                    .opacity(expandProgress)
+                    .opacity(chromeProgress)
                     .allowsHitTesting(expanded)
                 CompactChrome(expanded: $expanded)
-                    .opacity(1 - expandProgress)
+                    .opacity(1 - chromeProgress)
                     .allowsHitTesting(!expanded)
                 // Artwork alone — a single `matchedGeometryEffect` source at a time (two
                 // independently-mounted sources for the same id crashes SwiftUI with "Multiple
@@ -198,6 +208,7 @@ private extension ExpandableNowPlaying {
         if withAnimation {
             SwiftUI.withAnimation(.playerExpandAnimation) {
                 progressTrackState = progress
+                chromeProgress = progress
             }
         } else {
             progressTrackState = progress
@@ -207,6 +218,7 @@ private extension ExpandableNowPlaying {
     func resetStackedWithAnimation() {
         withAnimation(.playerExpandAnimation) {
             progressTrackState = 0
+            chromeProgress = 0
         }
     }
 
