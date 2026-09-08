@@ -481,7 +481,7 @@
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Соединение"
+            "value" : "Подключение"
           }
         }
       }
@@ -1011,7 +1011,7 @@
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Повторное соединение"
+            "value" : "Повторное подключение"
           }
         }
       }
