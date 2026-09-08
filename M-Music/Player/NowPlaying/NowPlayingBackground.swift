@@ -31,7 +31,7 @@ struct NowPlayingBackground: View {
                 // transparent than `.regular` glass; `.clear` is the variant that lets more of
                 // what's behind it show through, matching that look instead of a more opaque
                 // frosted-glass appearance.
-                .glassEffect(.clear, in: .rect(cornerRadius: playerCornerRadius))
+                .glassEffect(.regular, in: .rect(cornerRadius: playerCornerRadius))
                 .opacity(showsExpandedContent ? 0 : 1)
                 .animation(nil, value: showsExpandedContent)
             ColorfulBackground(colors: colors)
