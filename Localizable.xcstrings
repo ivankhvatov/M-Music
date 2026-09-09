@@ -402,6 +402,26 @@
         }
       }
     },
+    "All songs" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Все песни"
+          }
+        }
+      }
+    },
+    "Appearance" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Внешний вид"
+          }
+        }
+      }
+    },
     "Artist" : {
       "localizations" : {
         "de" : {
@@ -793,6 +813,9 @@
           }
         }
       }
+    },
+    "No songs found." : {
+
     },
     "Not Playing" : {
       "localizations" : {

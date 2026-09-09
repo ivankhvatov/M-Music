@@ -233,6 +233,9 @@ struct LibraryView: View {
                     NavigationLink(destination: DownloadsSettingsView()) {
                         Label("Downloads", systemImage: "square.and.arrow.down")
                     }
+                    NavigationLink(destination: AppearanceSettingsView()) {
+                        Label("Appearance", systemImage: "paintbrush")
+                    }
                 } label: {
                     Image(systemName: "gear")
                         .foregroundStyle(.primary)

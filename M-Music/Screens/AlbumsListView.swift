@@ -164,9 +164,9 @@ struct AlbumsListView: View {
             let comparison: ComparisonResult
             switch sortField.wrappedValue {
             case .title:
-                comparison = Self.sortKey(lhs.name).localizedStandardCompare(Self.sortKey(rhs.name))
+                comparison = lhs.name.sortKey.localizedStandardCompare(rhs.name.sortKey)
             case .artist:
-                comparison = Self.sortKey(lhs.artist ?? "").localizedStandardCompare(Self.sortKey(rhs.artist ?? ""))
+                comparison = (lhs.artist ?? "").sortKey.localizedStandardCompare((rhs.artist ?? "").sortKey)
             case .year:
                 let lhsYear = lhs.year ?? 0
                 let rhsYear = rhs.year ?? 0
@@ -176,22 +176,6 @@ struct AlbumsListView: View {
         }
 
         return result
-    }
-
-    /// Leading articles to ignore when sorting titles/artists, e.g. "The Beatles" sorts under "B".
-    private static let sortingArticles: Set<String> = [
-        "a", "an", "the",
-        "der", "die", "das", "den", "dem", "des",
-        "le", "la", "les",
-        "el", "los", "las",
-        "il", "lo", "gli", "i",
-    ]
-
-    private static func sortKey(_ text: String) -> String {
-        guard let spaceIndex = text.firstIndex(of: " ") else { return text }
-        let firstWord = text[text.startIndex..<spaceIndex].lowercased()
-        guard sortingArticles.contains(firstWord) else { return text }
-        return String(text[text.index(after: spaceIndex)...])
     }
 
     private func refresh() {

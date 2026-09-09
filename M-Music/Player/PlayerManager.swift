@@ -64,6 +64,13 @@ final class PlayerManager: ObservableObject {
     /// mean a disk write twice a second for as long as something is playing.
     private var ticksSincePersist = 0
 
+    /// Per-track starred state, overriding the queue's own `Child.starred` (server-decoded and
+    /// immutable) once `toggleStarred()` changes it — otherwise navigating away from a track with
+    /// `next()`/`previous()` and back would reset `isCurrentTrackStarred` to that stale original
+    /// value, undoing the toggle from the track's perspective even though the server-side star
+    /// state is still correct.
+    private var starredOverrides: [String: Bool] = [:]
+
     init(client: SubsonicClient = .shared) {
         self.client = client
         restorePersistedState()
@@ -187,6 +194,7 @@ final class PlayerManager: ObservableObject {
         guard let track = currentTrack else { return }
         let newValue = !isCurrentTrackStarred
         isCurrentTrackStarred = newValue
+        starredOverrides[track.id.raw] = newValue
         updateNowPlayingFeedback()
         Task {
             do {
@@ -197,6 +205,7 @@ final class PlayerManager: ObservableObject {
                 }
             } catch {
                 await MainActor.run {
+                    starredOverrides[track.id.raw] = !newValue
                     guard currentTrack?.id == track.id else { return }
                     isCurrentTrackStarred = !newValue
                     updateNowPlayingFeedback()
@@ -436,7 +445,7 @@ final class PlayerManager: ObservableObject {
             updateNowPlayingFeedback()
             return
         }
-        isCurrentTrackStarred = track.isStarred
+        isCurrentTrackStarred = starredOverrides[track.id.raw] ?? track.isStarred
         updateNowPlayingFeedback()
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: track.title,
