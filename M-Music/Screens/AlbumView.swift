@@ -29,10 +29,15 @@ struct AlbumView: View {
     @State private var isDownloaded = false
     @State private var backgroundColor: Color
 
-    /// Computed once (`.task`, not inline in `albumArtwork()`) and cached — `coverArtURL` signs
-    /// every call with a fresh random token, and this view re-renders on every `PlayerManager`
-    /// tick (it's `@ObservedObject`), so recomputing inline would hand `CachedAsyncImage` a "new"
-    /// URL on every body evaluation and re-run its load task needlessly.
+    /// Computed once, in `init` (not inline in `albumArtwork()`, and not deferred to a `.task`)
+    /// and cached — `coverArtURL` signs every call with a fresh random token, and this view
+    /// re-renders on every `PlayerManager` tick (it's `@ObservedObject`), so recomputing inline
+    /// would hand `CachedAsyncImage` a "new" URL on every body evaluation and re-run its load
+    /// task needlessly. Computing it synchronously in `init` rather than in a `.task` matters
+    /// too: `CachedAsyncImage` does a synchronous in-memory cache check at `init`, so having a
+    /// real URL ready for its very first render is what lets an already-cached cover (e.g. from
+    /// `AlbumCardView`, which requests this same URL) appear immediately instead of flashing the
+    /// placeholder for a frame while an async task first goes and computes the URL.
     @State private var artworkURL: URL?
 
     /// How far the list is scrolled from its top edge — drives a smooth blend between the artwork
@@ -45,6 +50,7 @@ struct AlbumView: View {
         self.zoomNamespace = zoomNamespace
         _isStarred = State(initialValue: album.isStarred)
         _backgroundColor = State(initialValue: Color(.systemBackground))
+        _artworkURL = State(initialValue: try? SubsonicClient.shared.coverArtURL(forId: album.coverArt ?? album.id.raw))
     }
 
     var body: some View {
@@ -62,9 +68,6 @@ struct AlbumView: View {
         }
         .task {
             await loadRelatedAlbums()
-        }
-        .task(id: album.id) {
-            artworkURL = try? client.coverArtURL(forId: album.coverArt ?? album.id.raw)
         }
     }
 
