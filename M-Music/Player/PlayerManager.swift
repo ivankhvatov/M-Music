@@ -45,8 +45,14 @@ final class PlayerManager: ObservableObject {
     private var player: AVPlayer?
     private var timeObserverToken: Any?
     private var endObserver: NSObjectProtocol?
+    private var failureObserver: NSObjectProtocol?
     private var backgroundObserver: NSObjectProtocol?
+    private var interruptionObserver: NSObjectProtocol?
     private var didConfigureAudioSession = false
+    /// Whether playback was active right before the interruption currently in progress (a phone
+    /// call, Siri, another app taking audio focus, ...) — so `.ended` only resumes what we were
+    /// actually doing, not something the user had already paused themselves before it started.
+    private var wasPlayingBeforeInterruption = false
 
     /// The next track's item, built ahead of time so it's already buffering when the current
     /// track ends — swapping it straight in (instead of building a fresh item at that point) is
@@ -66,6 +72,37 @@ final class PlayerManager: ObservableObject {
             forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
         ) { [weak self] _ in
             Task { @MainActor in self?.persistState() }
+        }
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification, object: nil, queue: .main
+        ) { [weak self] notification in
+            Task { @MainActor in self?.handleInterruption(notification) }
+        }
+    }
+
+    /// The system pauses output itself for the duration of an interruption (a phone call, Siri,
+    /// another app taking audio focus, ...) — without this, nothing here ever finds out, so
+    /// `isPlaying`/the lock screen keep claiming playback is active while it's actually silent,
+    /// and nothing resumes it once the interruption is over.
+    private func handleInterruption(_ notification: Notification) {
+        guard let info = notification.userInfo,
+              let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue)
+        else { return }
+        switch type {
+        case .began:
+            wasPlayingBeforeInterruption = isPlaying
+            pause()
+        case .ended:
+            defer { wasPlayingBeforeInterruption = false }
+            let optionsValue = info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+            guard wasPlayingBeforeInterruption,
+                  AVAudioSession.InterruptionOptions(rawValue: optionsValue).contains(.shouldResume)
+            else { return }
+            try? AVAudioSession.sharedInstance().setActive(true)
+            resume()
+        @unknown default:
+            break
         }
     }
 
@@ -234,6 +271,17 @@ final class PlayerManager: ObservableObject {
         installItem(AVPlayerItem(url: url), autoplay: autoplay, startTime: startTime)
     }
 
+    /// A stream failed mid-playback (e.g. a transient network hiccup, or the server closing an
+    /// idle connection) — without this, the item's status just flips to `.failed` and nothing
+    /// else happens: `isPlaying` stays true with no audio and no progress, forever. Rebuilds the
+    /// item from scratch at the last known position instead, resuming playback if it was
+    /// playing when the stream dropped.
+    private func recoverFromPlaybackFailure() {
+        guard currentTrack != nil else { return }
+        clearPreparedItem()
+        loadCurrentItem(autoplay: isPlaying, startTime: currentTime)
+    }
+
     /// Codecs that store audio without loss — the only ones worth transcoding under
     /// `TranscodeFileScope.losslessOnly`, since re-encoding an already-lossy file only loses more
     /// quality without the bandwidth win that matters for lossless sources.
@@ -281,6 +329,15 @@ final class PlayerManager: ObservableObject {
             forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
         ) { [weak self] _ in
             Task { @MainActor in self?.advance(autoplay: true) }
+        }
+
+        if let failureObserver {
+            NotificationCenter.default.removeObserver(failureObserver)
+        }
+        failureObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemFailedToPlayToEndTime, object: item, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.recoverFromPlaybackFailure() }
         }
 
         if let player {
