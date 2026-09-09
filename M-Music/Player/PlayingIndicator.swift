@@ -22,7 +22,9 @@ struct PlayingIndicator: View {
                     .fill(color)
                     .frame(width: 3, height: animate ? bar.max : bar.min)
                     .animation(
-                        .easeInOut(duration: bar.duration).repeatForever(autoreverses: true),
+                        animate ?
+                            .easeInOut(duration: bar.duration).repeatForever(autoreverses: true) :
+                            .easeOut(duration: 0.3),
                         value: animate
                     )
             }

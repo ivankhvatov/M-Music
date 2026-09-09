@@ -46,6 +46,7 @@ struct PlayerButtons: View {
 extension PlayerButtonConfig {
     static var expandedPlayer: Self {
         Self(
+            circleScale: 0.8,
             labelColor: .white,
             tint: Color.white.opacity(0.3),
             pressedColor: .white
