@@ -62,6 +62,7 @@ private enum SongSortOrder: LocalizedStringKey, CaseIterable {
 struct SongsListView: View {
     private let client = SubsonicClient.shared
     @ObservedObject private var player = PlayerManager.shared
+    @ObservedObject private var downloads = DownloadStore.shared
 
     @State private var searchText = ""
 
@@ -172,6 +173,8 @@ struct SongsListView: View {
 
             Spacer()
 
+            DownloadStatusIndicator(state: downloads.state(for: track.id.raw))
+
             songMenu(track)
         }
     }
@@ -206,6 +209,7 @@ struct SongsListView: View {
 
     private func songMenu(_ track: Child) -> some View {
         let starred = isStarred(track)
+        let downloadState = downloads.state(for: track.id.raw)
         return Menu {
             Button {
                 toggleStarred(track)
@@ -225,6 +229,23 @@ struct SongsListView: View {
                 player.addToQueue(track)
             } label: {
                 Label("Add to queue", systemImage: "text.line.last.and.arrowtriangle.forward")
+            }
+
+            switch downloadState {
+            case .completed:
+                Button(role: .destructive) {
+                    downloads.remove(songId: track.id.raw)
+                } label: {
+                    Label("Remove Download", systemImage: "checkmark.circle.fill")
+                }
+            case .queued, .downloading:
+                Label("Downloading…", systemImage: "arrow.down.circle")
+            default:
+                Button {
+                    downloads.download(track)
+                } label: {
+                    Label("Download", systemImage: "arrow.down.circle")
+                }
             }
         } label: {
             Image(systemName: "ellipsis")

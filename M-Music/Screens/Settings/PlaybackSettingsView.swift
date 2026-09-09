@@ -21,6 +21,10 @@ struct PlaybackSettingsView: View {
     @AppStorage(ReplayGainSettings.Keys.preAmp) private var preAmp: Double = 0
     @AppStorage(ReplayGainSettings.Keys.defaultGain) private var defaultGain: Double = 0
 
+    @AppStorage(DownloadTranscodingSettings.Keys.isEnabled) private var isDownloadTranscodingEnabled = false
+    @AppStorage(DownloadTranscodingSettings.Keys.format) private var downloadFormat = TranscodingFormat.mp3
+    @AppStorage(DownloadTranscodingSettings.Keys.bitrate) private var downloadBitrate = TranscodingBitrate.k192
+
     private let gainRange: ClosedRange<Double> = -15...15
 
     var body: some View {
@@ -106,6 +110,30 @@ struct PlaybackSettingsView: View {
                         Text("ReplayGain")
                     } footer: {
                         Text("Adjusts playback volume so tracks and albums sound equally loud, using ReplayGain tags from your library.")
+                    }
+
+                    Section {
+                        Toggle("Enable download transcoding", isOn: $isDownloadTranscodingEnabled)
+
+                        Picker("Format", selection: $downloadFormat) {
+                            ForEach(TranscodingFormat.allCases) { option in
+                                Text(option.displayName).tag(option)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .disabled(!isDownloadTranscodingEnabled)
+
+                        Picker("Bitrate", selection: $downloadBitrate) {
+                            ForEach(TranscodingBitrate.allCases) { option in
+                                Text(option.displayName).tag(option)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .disabled(!isDownloadTranscodingEnabled)
+                    } header: {
+                        Text("Downloads")
+                    } footer: {
+                        Text("Applies only to new downloads — songs already saved to this device keep whatever quality they were downloaded at.")
                     }
                 }
                 .navigationTitle("Playback")

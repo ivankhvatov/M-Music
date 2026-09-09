@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		2CEC0DB72FF947BB00DF22A9 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 2CEC0DB62FF947BB00DF22A9 /* Localizable.xcstrings */; };
+		D91C46ADB6DECF22345C588A /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 0B2603EFFAB25A8D5200AEBD /* GRDB */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -70,6 +71,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D91C46ADB6DECF22345C588A /* GRDB in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -131,6 +133,7 @@
 			);
 			name = "M-Music";
 			packageProductDependencies = (
+				0B2603EFFAB25A8D5200AEBD /* GRDB */,
 			);
 			productName = "M-Music";
 			productReference = 2CE8FF692FF8D79C0037BA59 /* M-Music.app */;
@@ -216,6 +219,9 @@
 			);
 			mainGroup = 2CE8FF602FF8D79C0037BA59;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				B293903C3A91F8DF3B2BF488 /* XCRemoteSwiftPackageReference "GRDB" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 2CE8FF6A2FF8D79C0037BA59 /* Products */;
 			projectDirPath = "";
@@ -584,6 +590,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		B293903C3A91F8DF3B2BF488 /* XCRemoteSwiftPackageReference "GRDB" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/groue/GRDB.swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 7.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		0B2603EFFAB25A8D5200AEBD /* GRDB */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B293903C3A91F8DF3B2BF488 /* XCRemoteSwiftPackageReference "GRDB" */;
+			productName = GRDB;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 2CE8FF612FF8D79C0037BA59 /* Project object */;
 }

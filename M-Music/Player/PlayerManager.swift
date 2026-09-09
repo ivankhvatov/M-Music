@@ -1,18 +1,20 @@
-import Foundation
 import AVFoundation
+import Foundation
+import Combine
 import MediaPlayer
 import UIKit
 
-/// Owns playback of the current queue via a single `AVPlayer`, streaming each track from the
-/// Subsonic server through `SubsonicClient.streamURL(forId:)`. Shared across the app (mini
-/// player, full-screen player, and whatever starts playback) the same way `SubsonicClient` is.
+/// Owns playback of the current queue via `PlayerEngine`, resolving each track through a
+/// three-tier lookup — an already-downloaded file (`LocalDownloadIndex`), a prefetched stream
+/// cache file (`StreamCacheService`), or a live `SubsonicClient.streamURL(forId:)` — the same way
+/// across the app (mini player, full-screen player, and whatever starts playback).
 ///
 /// Supports background playback (a `.playback` audio session plus the `audio` background mode,
 /// with lock screen / Control Center integration via `MPNowPlayingInfoCenter` and
-/// `MPRemoteCommandCenter`), near-gapless transitions between tracks (the next track's
-/// `AVPlayerItem` is built — and so starts buffering — ahead of time, then swapped in directly
-/// instead of being built fresh once the current one ends), and persists the current queue,
-/// track, and position across launches.
+/// `MPRemoteCommandCenter`), true gapless transitions between tracks for the natural
+/// end-of-queue-track case (`PlayerEngine.preloadForGapless`, backed by an `AVQueuePlayer` that
+/// performs the handoff itself rather than a fresh item being swapped in after the fact), and
+/// persists the current queue, track, and position across launches.
 @MainActor
 final class PlayerManager: ObservableObject {
     static let shared = PlayerManager()
@@ -42,10 +44,8 @@ final class PlayerManager: ObservableObject {
     }
 
     private let client: SubsonicClient
-    private var player: AVPlayer?
-    private var timeObserverToken: Any?
-    private var endObserver: NSObjectProtocol?
-    private var failureObserver: NSObjectProtocol?
+    private let engine = PlayerEngine()
+    private var engineSubscriptions: Set<AnyCancellable> = []
     private var backgroundObserver: NSObjectProtocol?
     private var interruptionObserver: NSObjectProtocol?
     private var didConfigureAudioSession = false
@@ -53,12 +53,16 @@ final class PlayerManager: ObservableObject {
     /// call, Siri, another app taking audio focus, ...) — so `.ended` only resumes what we were
     /// actually doing, not something the user had already paused themselves before it started.
     private var wasPlayingBeforeInterruption = false
+    /// Whether `engine.play(url:)` has ever been called for the current `PlayerManager` instance
+    /// — mirrors the old "is there an `AVPlayer` yet" check: after a cold launch, session state
+    /// is restored (queue/position) without actually streaming anything until playback resumes.
+    private var hasLoadedItem = false
 
-    /// The next track's item, built ahead of time so it's already buffering when the current
-    /// track ends — swapping it straight in (instead of building a fresh item at that point) is
-    /// what makes the transition gapless rather than a beat of silence while it loads.
-    private var preparedItem: AVPlayerItem?
-    private var preparedIndex: Int?
+    /// The queue index `engine.preloadForGapless(url:)` was last called for, so the natural
+    /// end-of-track callback can tell whether `PlayerEngine`'s `AVQueuePlayer` already performed
+    /// the gapless handoff to it internally (nothing further to load) or whether it needs a fresh
+    /// `engine.play(url:)` call (nothing was ready in time, or the queue changed since).
+    private var gaplessPreloadedIndex: Int?
 
     /// Throttles how often playback position is written to disk — every time-observer tick would
     /// mean a disk write twice a second for as long as something is playing.
@@ -75,6 +79,7 @@ final class PlayerManager: ObservableObject {
         self.client = client
         restorePersistedState()
         configureRemoteCommandCenter()
+        subscribeToEngine()
         backgroundObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -84,6 +89,27 @@ final class PlayerManager: ObservableObject {
             forName: AVAudioSession.interruptionNotification, object: nil, queue: .main
         ) { [weak self] notification in
             Task { @MainActor in self?.handleInterruption(notification) }
+        }
+    }
+
+    private func subscribeToEngine() {
+        engine.$currentTime
+            .sink { [weak self] time in self?.handleTimeUpdate(time) }
+            .store(in: &engineSubscriptions)
+        engine.$duration
+            .sink { [weak self] duration in
+                guard let self, duration > 0 else { return }
+                self.duration = duration
+            }
+            .store(in: &engineSubscriptions)
+        engine.$isPlaying
+            .sink { [weak self] isPlaying in self?.isPlaying = isPlaying }
+            .store(in: &engineSubscriptions)
+        engine.onTrackFinished = { [weak self] in
+            Task { @MainActor in self?.handleTrackFinishedNaturally() }
+        }
+        engine.onPlaybackFailed = { [weak self] _ in
+            Task { @MainActor in self?.recoverFromPlaybackFailure() }
         }
     }
 
@@ -120,7 +146,7 @@ final class PlayerManager: ObservableObject {
         guard newQueue.indices.contains(index) else { return }
         queue = newQueue
         currentIndex = index
-        clearPreparedItem()
+        clearGaplessPreload()
         loadCurrentItem(autoplay: true)
     }
 
@@ -129,7 +155,15 @@ final class PlayerManager: ObservableObject {
     }
 
     func next() {
-        advance(autoplay: true)
+        guard let currentIndex else { return }
+        let nextIndex = currentIndex + 1
+        guard queue.indices.contains(nextIndex) else {
+            finishQueue()
+            return
+        }
+        self.currentIndex = nextIndex
+        clearGaplessPreload()
+        loadCurrentItem(autoplay: true)
     }
 
     func previous() {
@@ -142,7 +176,7 @@ final class PlayerManager: ObservableObject {
         let previousIndex = currentIndex - 1
         if queue.indices.contains(previousIndex) {
             self.currentIndex = previousIndex
-            clearPreparedItem()
+            clearGaplessPreload()
             loadCurrentItem(autoplay: true)
         } else {
             seek(to: 0)
@@ -157,9 +191,10 @@ final class PlayerManager: ObservableObject {
             return
         }
         queue.insert(track, at: currentIndex + 1)
-        // The prepared item (if any) was built for whatever used to sit at `currentIndex + 1`,
-        // which has now shifted one slot later — rebuild it against the newly-inserted track.
-        clearPreparedItem()
+        // Whatever was preloaded (if anything) was built for whatever used to sit at
+        // `currentIndex + 1`, which has now shifted one slot later — rebuild it against the
+        // newly-inserted track.
+        clearGaplessPreload()
         prepareNextItem()
         persistState()
     }
@@ -174,7 +209,7 @@ final class PlayerManager: ObservableObject {
         queue.append(track)
         // The queue may have just been exhausted (nothing left to prepare), in which case this
         // newly-appended track is now the one that should be buffering ahead of time.
-        if preparedItem == nil {
+        if gaplessPreloadedIndex == nil {
             prepareNextItem()
         }
         persistState()
@@ -183,7 +218,7 @@ final class PlayerManager: ObservableObject {
     func seek(to time: TimeInterval) {
         let clamped = min(max(time, 0), duration)
         currentTime = clamped
-        player?.seek(to: CMTime(seconds: clamped, preferredTimescale: 600))
+        engine.seek(to: clamped)
         updateNowPlayingPlaybackState()
         persistState()
     }
@@ -218,50 +253,31 @@ final class PlayerManager: ObservableObject {
 
     private func resume() {
         guard currentTrack != nil else { return }
-        guard let player else {
+        guard hasLoadedItem else {
             // Lazily restored from a previous session: nothing's been streamed yet, so build the
             // item now and pick up from the restored `currentTime`.
             loadCurrentItem(autoplay: true, startTime: currentTime)
             return
         }
-        player.play()
-        isPlaying = true
+        engine.resume()
         updateNowPlayingPlaybackState()
         persistState()
     }
 
     private func pause() {
-        guard let player, isPlaying else { return }
-        player.pause()
-        isPlaying = false
+        guard hasLoadedItem, isPlaying else { return }
+        engine.pause()
         updateNowPlayingPlaybackState()
         persistState()
     }
 
-    private func advance(autoplay: Bool) {
-        guard let currentIndex else { return }
-        let nextIndex = currentIndex + 1
-        guard queue.indices.contains(nextIndex) else {
-            finishQueue()
-            return
-        }
-        self.currentIndex = nextIndex
-        if preparedIndex == nextIndex, let item = preparedItem {
-            preparedItem = nil
-            preparedIndex = nil
-            installItem(item, autoplay: autoplay, startTime: 0)
-        } else {
-            loadCurrentItem(autoplay: autoplay)
-        }
-    }
-
     /// Reached the end of the queue: rewind to the first track and stop, like Apple Music.
     private func finishQueue() {
-        clearPreparedItem()
+        clearGaplessPreload()
         if queue.isEmpty {
             currentIndex = nil
-            player?.pause()
-            isPlaying = false
+            engine.stop()
+            hasLoadedItem = false
         } else {
             currentIndex = 0
             loadCurrentItem(autoplay: false)
@@ -277,17 +293,64 @@ final class PlayerManager: ObservableObject {
             isPlaying = false
             return
         }
-        installItem(AVPlayerItem(url: url), autoplay: autoplay, startTime: startTime)
+        hasLoadedItem = true
+        engine.play(url: url)
+        if !autoplay {
+            engine.pause()
+        }
+        engine.setReplayGainVolume(replayGainVolume(for: track))
+
+        duration = TimeInterval(track.duration ?? 0)
+        currentTime = startTime
+        if startTime > 0 {
+            engine.seek(to: startTime)
+        }
+
+        updateArtworkURL()
+        updateNowPlayingInfo()
+        prepareNextItem()
+        updateNowPlayingPlaybackState()
+        persistState()
+    }
+
+    /// The natural end of the current track — as opposed to an explicit `next()`/`previous()`
+    /// tap. If `prepareNextItem()` had already preloaded this next track into `PlayerEngine`'s
+    /// `AVQueuePlayer`, it has already performed the seamless handoff internally by the time this
+    /// runs (that's what makes the transition gapless) and there's nothing left to load — just
+    /// bookkeeping. Otherwise (nothing was ready in time), fall back to a fresh load.
+    private func handleTrackFinishedNaturally() {
+        guard let currentIndex else { return }
+        let nextIndex = currentIndex + 1
+        guard queue.indices.contains(nextIndex) else {
+            finishQueue()
+            return
+        }
+        self.currentIndex = nextIndex
+
+        if gaplessPreloadedIndex == nextIndex {
+            gaplessPreloadedIndex = nil
+            let track = queue[nextIndex]
+            duration = TimeInterval(track.duration ?? 0)
+            currentTime = 0
+            engine.setReplayGainVolume(replayGainVolume(for: track))
+            updateArtworkURL()
+            updateNowPlayingInfo()
+            prepareNextItem()
+            updateNowPlayingPlaybackState()
+            persistState()
+        } else {
+            clearGaplessPreload()
+            loadCurrentItem(autoplay: true)
+        }
     }
 
     /// A stream failed mid-playback (e.g. a transient network hiccup, or the server closing an
-    /// idle connection) — without this, the item's status just flips to `.failed` and nothing
-    /// else happens: `isPlaying` stays true with no audio and no progress, forever. Rebuilds the
-    /// item from scratch at the last known position instead, resuming playback if it was
-    /// playing when the stream dropped.
+    /// idle connection) — without this, nothing else happens: `isPlaying` stays true with no
+    /// audio and no progress, forever. Rebuilds the item from scratch at the last known position
+    /// instead, resuming playback if it was playing when the stream dropped.
     private func recoverFromPlaybackFailure() {
         guard currentTrack != nil else { return }
-        clearPreparedItem()
+        clearGaplessPreload()
         loadCurrentItem(autoplay: isPlaying, startTime: currentTime)
     }
 
@@ -308,9 +371,11 @@ final class PlayerManager: ObservableObject {
         }
     }
 
-    /// A playable URL for `track` per the current transcoding settings — source quality if
-    /// transcoding is off, doesn't apply to this file scope, or the current network doesn't match.
-    private func streamURL(for track: Child) throws -> URL {
+    /// The live network URL for `track` per the current streaming transcoding settings — source
+    /// quality if transcoding is off, doesn't apply to this file scope, or the current network
+    /// doesn't match. Used both as `streamURL(for:)`'s final fallback and as the URL
+    /// `StreamCacheService` prefetches ahead of the track boundary.
+    private func liveStreamURL(for track: Child) throws -> URL {
         guard shouldTranscode(track) else {
             return try client.streamURL(forId: track.id.raw)
         }
@@ -319,88 +384,62 @@ final class PlayerManager: ObservableObject {
         )
     }
 
-    /// The player-wide volume for `track`'s ReplayGain adjustment. Applied via `AVPlayer.volume`
-    /// rather than a per-item `AVAudioMix`: an audio mix needs the item's audio track loaded
-    /// asynchronously before it takes effect, and in practice that's too easy to lose the race
-    /// against playback starting — even building the item a whole track ahead of time
-    /// (`prepareNextItem`) wasn't reliably enough lead time. `player.volume` takes effect
-    /// synchronously and instantly, at the cost of only being able to attenuate: values above 1
-    /// are clamped to no change, since this can't express a boost the way a mix could.
+    /// A playable URL for `track`, checked in order: an already-downloaded file, a prefetched
+    /// stream-cache file, then the live network stream (transcoded per `TranscodingSettings`).
+    private func streamURL(for track: Child) throws -> URL {
+        if let localURL = LocalDownloadIndex.shared.url(songId: track.id.raw) {
+            return localURL
+        }
+        if let cachedURL = StreamCacheStatus.shared.url(for: track.id.raw) {
+            return cachedURL
+        }
+        return try liveStreamURL(for: track)
+    }
+
+    /// The player-wide volume for `track`'s ReplayGain adjustment. Applied via
+    /// `PlayerEngine.setReplayGainVolume` rather than a per-item `AVAudioMix`: an audio mix needs
+    /// the item's audio track loaded asynchronously before it takes effect, and in practice
+    /// that's too easy to lose the race against playback starting — even building the item a
+    /// whole track ahead of time (`prepareNextItem`) wasn't reliably enough lead time. The
+    /// engine's volume takes effect synchronously and instantly, at the cost of only being able
+    /// to attenuate: values above 1 are clamped to no change, since this can't express a boost
+    /// the way a mix could.
     private func replayGainVolume(for track: Child) -> Float {
         Float(min(ReplayGainSettings.linearGain(for: track), 1))
     }
 
-    private func installItem(_ item: AVPlayerItem, autoplay: Bool, startTime: TimeInterval) {
-        if let endObserver {
-            NotificationCenter.default.removeObserver(endObserver)
-        }
-        endObserver = NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in self?.advance(autoplay: true) }
-        }
-
-        if let failureObserver {
-            NotificationCenter.default.removeObserver(failureObserver)
-        }
-        failureObserver = NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemFailedToPlayToEndTime, object: item, queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in self?.recoverFromPlaybackFailure() }
-        }
-
-        if let player {
-            player.replaceCurrentItem(with: item)
-        } else {
-            let newPlayer = AVPlayer(playerItem: item)
-            player = newPlayer
-            let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
-            timeObserverToken = newPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
-                Task { @MainActor in self?.handleTimeUpdate(time.seconds) }
-            }
-        }
-        if let track = currentTrack {
-            player?.volume = replayGainVolume(for: track)
-        }
-
-        duration = TimeInterval(currentTrack?.duration ?? 0)
-        currentTime = startTime
-        if startTime > 0 {
-            player?.seek(to: CMTime(seconds: startTime, preferredTimescale: 600))
-        }
-
-        updateArtworkURL()
-        updateNowPlayingInfo()
-        prepareNextItem()
-
-        if autoplay {
-            player?.play()
-            isPlaying = true
-        } else {
-            player?.pause()
-            isPlaying = false
-        }
-        updateNowPlayingPlaybackState()
-        persistState()
-    }
-
-    /// Builds the next track's `AVPlayerItem` ahead of time. An `AVPlayerItem` starts loading its
-    /// asset and buffering media data as soon as it's created — whether or not it's attached to a
-    /// player yet — so this one is ready to swap straight in once the current track ends.
+    /// Builds the next track's URL ahead of time and hands it to `PlayerEngine` to preload into
+    /// its `AVQueuePlayer` — that's what makes the natural transition into it gapless. Also kicks
+    /// off a `StreamCacheService` prefetch of the live URL (skipped for an already-downloaded
+    /// track) so a later retry of this same call — `handleTimeUpdate` retries it as the current
+    /// track nears its end — has a better chance of finding a local copy already sitting in the
+    /// cache instead of a live network URL, more resilient to a hiccup right at the boundary.
     private func prepareNextItem() {
         guard let currentIndex else { return }
         let nextIndex = currentIndex + 1
-        guard queue.indices.contains(nextIndex), preparedIndex != nextIndex else { return }
+        guard queue.indices.contains(nextIndex), gaplessPreloadedIndex != nextIndex else { return }
         let nextTrack = queue[nextIndex]
         guard let url = try? streamURL(for: nextTrack) else { return }
-        let item = AVPlayerItem(url: url)
-        preparedItem = item
-        preparedIndex = nextIndex
+        engine.preloadForGapless(url: url)
+        gaplessPreloadedIndex = nextIndex
+
+        if !LocalDownloadIndex.shared.contains(songId: nextTrack.id.raw),
+           StreamCacheStatus.shared.url(for: nextTrack.id.raw) == nil,
+           let liveURL = try? liveStreamURL(for: nextTrack) {
+            let bitrate = shouldTranscode(nextTrack) ? TranscodingSettings.bitrate.rawValue : 0
+            let codec = shouldTranscode(nextTrack) ? TranscodingSettings.format.rawValue : (nextTrack.suffix ?? "")
+            Task { await StreamCacheService.shared.prefetch(songId: nextTrack.id.raw, url: liveURL, codec: codec, bitrate: bitrate) }
+        }
+
+        // Only the current and upcoming track are worth keeping cached — without this, every
+        // track prefetched over the course of a long listening session would sit in the cache
+        // forever.
+        let keepIds = Set([queue[currentIndex].id.raw, nextTrack.id.raw])
+        Task { await StreamCacheService.shared.trim(keeping: keepIds) }
     }
 
-    private func clearPreparedItem() {
-        preparedItem = nil
-        preparedIndex = nil
+    private func clearGaplessPreload() {
+        gaplessPreloadedIndex = nil
     }
 
     private func handleTimeUpdate(_ time: TimeInterval) {
@@ -415,7 +454,7 @@ final class PlayerManager: ObservableObject {
         }
         // Retry preparing the next item if it wasn't ready right after loading (e.g. a transient
         // network hiccup) — give it another shot as the current track nears its end.
-        if preparedItem == nil, duration > 0, duration - time < 15 {
+        if gaplessPreloadedIndex == nil, duration > 0, duration - time < 15 {
             prepareNextItem()
         }
     }

@@ -6,6 +6,7 @@ struct AlbumView: View {
 
     private let client = SubsonicClient.shared
     @ObservedObject private var player = PlayerManager.shared
+    @ObservedObject private var downloads = DownloadStore.shared
     @Environment(\.displayScale) private var displayScale
 
     /// Zoom transition for the "Other versions" / "More by artist" cards below — separate from
@@ -26,7 +27,6 @@ struct AlbumView: View {
     @State private var hasRelatedAlbums: Bool = false
 
     @State private var isStarred: Bool
-    @State private var isDownloaded = false
     @State private var backgroundColor: Color
 
     /// Computed once, in `init` (not inline in `albumArtwork()`, and not deferred to a `.task`)
@@ -321,12 +321,15 @@ struct AlbumView: View {
 
             Spacer()
 
+            DownloadStatusIndicator(state: downloads.state(for: track.id.raw))
+
             trackMenu(track, at: index)
         }
     }
 
     private func trackMenu(_ track: Child, at index: Int) -> some View {
         let starred = isStarred(track)
+        let downloadState = downloads.state(for: track.id.raw)
         return Menu {
             // Not a `ControlGroup`/`.palette` row: that style is icon-only by design (no way to
             // opt back into showing titles), which would hide the label text these need.
@@ -348,6 +351,23 @@ struct AlbumView: View {
                 player.addToQueue(track)
             } label: {
                 Label("Add to queue", systemImage: "text.line.last.and.arrowtriangle.forward")
+            }
+
+            switch downloadState {
+            case .completed:
+                Button(role: .destructive) {
+                    downloads.remove(songId: track.id.raw)
+                } label: {
+                    Label("Remove Download", systemImage: "checkmark.circle.fill")
+                }
+            case .queued, .downloading:
+                Label("Downloading…", systemImage: "arrow.down.circle")
+            default:
+                Button {
+                    downloads.download(track)
+                } label: {
+                    Label("Download", systemImage: "arrow.down.circle")
+                }
             }
         } label: {
             Image(systemName: "ellipsis")
@@ -502,15 +522,26 @@ struct AlbumView: View {
         }
     }
 
+    /// Whether every track in this album has been downloaded — the toolbar button downloads the
+    /// whole album if not, or offers to remove it if so.
+    private var isAlbumDownloaded: Bool {
+        !songs.isEmpty && songs.allSatisfy { downloads.isDownloaded($0.id.raw) }
+    }
+
     @ToolbarContentBuilder
         private var downloadButton: some ToolbarContent {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    isDownloaded = true
+                    if isAlbumDownloaded {
+                        downloads.removeAlbum(albumId: album.id.raw)
+                    } else {
+                        downloads.downloadAlbum(songs)
+                    }
                 } label: {
-                    Image(systemName: isDownloaded ? "checkmark" : "arrow.down")
+                    Image(systemName: isAlbumDownloaded ? "checkmark" : "arrow.down")
                         .foregroundStyle(.primary)
                 }
+                .disabled(songs.isEmpty)
             }
         }
 

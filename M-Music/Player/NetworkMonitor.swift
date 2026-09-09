@@ -27,4 +27,10 @@ final class NetworkMonitor {
     var isOnCellular: Bool {
         lock.withLock { path?.usesInterfaceType(.cellular) ?? false }
     }
+
+    /// Whether the device currently has any usable network path at all — used to skip
+    /// prefetching/downloading rather than let it fail immediately.
+    var hasNetwork: Bool {
+        lock.withLock { path?.status == .satisfied }
+    }
 }

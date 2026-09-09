@@ -103,4 +103,49 @@ enum TranscodingSettings {
     static var network: TranscodeNetwork {
         UserDefaults.standard.string(forKey: Keys.network).flatMap(TranscodeNetwork.init(rawValue:)) ?? .both
     }
+
+    /// Maps an HTTP `Content-Type` to a file extension — used to name a downloaded/cached file
+    /// correctly even when the server falls back to delivering the original file instead of the
+    /// requested transcode.
+    static func extensionFor(mimeType: String?) -> String? {
+        let mime = mimeType?
+            .components(separatedBy: ";")
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard let mime, !mime.isEmpty else { return nil }
+        switch mime {
+        case "audio/mpeg", "audio/mp3": return "mp3"
+        case "audio/aac", "audio/aacp": return "aac"
+        case "audio/mp4", "audio/x-m4a", "audio/m4a": return "m4a"
+        case "audio/ogg", "audio/opus", "audio/x-opus+ogg", "application/ogg": return "opus"
+        case "audio/flac", "audio/x-flac": return "flac"
+        case "audio/wav", "audio/x-wav": return "wav"
+        case "audio/webm": return "webm"
+        default: return nil
+        }
+    }
+}
+
+/// Keys and read-only accessors for the download-time transcoding preferences, configured
+/// separately from streaming's `TranscodingSettings` above (a download is a one-time cost, so
+/// it's reasonable to want a different quality/size trade-off than for every-time streaming).
+enum DownloadTranscodingSettings {
+    enum Keys {
+        static let isEnabled = "downloadTranscoding.isEnabled"
+        static let format = "downloadTranscoding.format"
+        static let bitrate = "downloadTranscoding.bitrate"
+    }
+
+    static var isEnabled: Bool {
+        UserDefaults.standard.bool(forKey: Keys.isEnabled)
+    }
+
+    static var format: TranscodingFormat {
+        UserDefaults.standard.string(forKey: Keys.format).flatMap(TranscodingFormat.init(rawValue:)) ?? .mp3
+    }
+
+    static var bitrate: TranscodingBitrate {
+        TranscodingBitrate(rawValue: UserDefaults.standard.integer(forKey: Keys.bitrate)) ?? .k192
+    }
 }

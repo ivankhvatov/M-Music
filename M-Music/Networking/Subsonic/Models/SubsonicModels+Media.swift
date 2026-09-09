@@ -119,6 +119,47 @@ struct Child: Codable, Identifiable, Hashable, Sendable {
         replayGain = try c.decodeIfPresent(ReplayGain.self, forKey: .replayGain)
     }
 
+    /// Builds a `Child` directly rather than by decoding server JSON — used to turn a locally
+    /// downloaded song (`DownloadRecord`) back into the same type the player queue and song rows
+    /// already work with. Fields the download pipeline doesn't track (folder-browsing metadata,
+    /// ratings, play history, ...) default to their "unknown" value.
+    init(
+        id: FlexibleID, title: String, album: String?, artist: String?, track: Int?, year: Int?,
+        genre: String?, coverArt: String?, size: Int64?, contentType: String?, suffix: String?,
+        duration: Int?, bitRate: Int?, discNumber: Int?, starred: String?, albumId: FlexibleID?,
+        artistId: FlexibleID?, replayGain: ReplayGain?
+    ) {
+        self.id = id
+        self.parent = nil
+        self.isDir = false
+        self.title = title
+        self.album = album
+        self.artist = artist
+        self.track = track
+        self.year = year
+        self.genre = genre
+        self.coverArt = coverArt
+        self.size = size
+        self.contentType = contentType
+        self.suffix = suffix
+        self.duration = duration
+        self.bitRate = bitRate
+        self.path = nil
+        self.isVideo = nil
+        self.userRating = nil
+        self.averageRating = nil
+        self.playCount = nil
+        self.discNumber = discNumber
+        self.created = nil
+        self.starred = starred
+        self.albumId = albumId
+        self.artistId = artistId
+        self.type = nil
+        self.bookmarkPosition = nil
+        self.albumVersion = nil
+        self.replayGain = replayGain
+    }
+
     /// Returns a copy with `album`/`albumVersion` overridden. Used by `AlbumWithSongsID3`'s
     /// decoding, which knows the exact ALBUMVERSION value for every song in it (from the sibling
     /// `version` field) and can split each song's `album` precisely — see `AlbumVersionParsing`.

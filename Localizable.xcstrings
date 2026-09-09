@@ -4,6 +4,9 @@
     "-%@" : {
 
     },
+    "%lld" : {
+
+    },
     "%lld dB" : {
       "localizations" : {
         "de" : {
@@ -422,6 +425,9 @@
         }
       }
     },
+    "Applies only to new downloads — songs already saved to this device keep whatever quality they were downloaded at." : {
+
+    },
     "Artist" : {
       "localizations" : {
         "de" : {
@@ -532,6 +538,15 @@
         }
       }
     },
+    "Delete" : {
+
+    },
+    "Delete All Downloads" : {
+
+    },
+    "Delete all downloads?" : {
+
+    },
     "Descending" : {
       "localizations" : {
         "ru" : {
@@ -552,6 +567,15 @@
         }
       }
     },
+    "Download" : {
+
+    },
+    "Downloaded songs" : {
+
+    },
+    "Downloading…" : {
+
+    },
     "Downloads" : {
       "localizations" : {
         "de" : {
@@ -567,6 +591,9 @@
           }
         }
       }
+    },
+    "Enable download transcoding" : {
+
     },
     "Enable ReplayGain" : {
       "localizations" : {
@@ -804,6 +831,9 @@
         }
       }
     },
+    "No Downloads" : {
+
+    },
     "No recently played albums yet." : {
       "localizations" : {
         "ru" : {
@@ -1039,6 +1069,9 @@
         }
       }
     },
+    "Remove Download" : {
+
+    },
     "Remove from Favorites" : {
       "localizations" : {
         "ru" : {
@@ -1169,6 +1202,9 @@
         }
       }
     },
+    "Songs and albums you download will appear here." : {
+
+    },
     "Sort by" : {
       "localizations" : {
         "ru" : {
@@ -1188,6 +1224,9 @@
           }
         }
       }
+    },
+    "Total size" : {
+
     },
     "Track" : {
       "localizations" : {
@@ -1252,6 +1291,9 @@
           }
         }
       }
+    },
+    "Unknown Album" : {
+
     },
     "Username" : {
       "localizations" : {
