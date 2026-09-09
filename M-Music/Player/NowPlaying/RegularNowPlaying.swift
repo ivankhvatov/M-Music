@@ -49,8 +49,6 @@ struct RegularArtwork: View {
                 .frame(width: 70, height: 5)
                 .padding(.vertical, 12)
             artwork
-                .matchedGeometryEffect(id: PlayerMatchedGeometry.artwork, in: animationNamespace)
-                .frame(height: RegularNowPlayingLayout.artworkHeight(for: size))
                 .padding(.vertical, RegularNowPlayingLayout.artworkVerticalPadding(for: size))
                 .padding(.horizontal, RegularNowPlayingLayout.Const.horizontalPadding)
             Spacer(minLength: 0)
@@ -59,12 +57,24 @@ struct RegularArtwork: View {
         .padding(.bottom, NowPlayingLayout.safeAreaInsets.bottom)
     }
 
+    /// The paused/playing shrink is expressed as this view's own size (fed into
+    /// `matchedGeometryEffect`) rather than, as it was, a fixed-size box with inner padding —
+    /// `matchedGeometryEffect` only ever interpolates the frame it's actually given, so a fixed
+    /// outer frame with the shrink hidden inside as padding never took part in the expand/collapse
+    /// handoff to `CompactArtwork`: collapsing snapped straight back to full size before the
+    /// (unrelated, un-inset) compact frame took over, instead of shrinking smoothly into it.
     @ViewBuilder
     private var artwork: some View {
         let small = !player.isPlaying
+        let fullSide = RegularNowPlayingLayout.artworkHeight(for: size)
+        let shrunkSide = fullSide - RegularNowPlayingLayout.Const.pausedInset * 2
         TrackArtworkView(url: player.artworkURL, cornerRadius: 10)
             .shadow(color: Color(.sRGBLinear, white: 0, opacity: small ? 0.13 : 0.33), radius: small ? 3 : 8, y: small ? 3 : 10)
-            .padding(small ? 48 : 0)
+            .matchedGeometryEffect(id: PlayerMatchedGeometry.artwork, in: animationNamespace)
+            .frame(width: small ? shrunkSide : fullSide, height: small ? shrunkSide : fullSide)
+            // Reserves the full, un-shrunk square regardless of `small`, so the smaller box stays
+            // centered with even margins instead of the surrounding VStack reflowing around it.
+            .frame(width: fullSide, height: fullSide)
             .animation(.smooth, value: player.isPlaying)
     }
 }
@@ -72,6 +82,8 @@ struct RegularArtwork: View {
 enum RegularNowPlayingLayout {
     enum Const {
         static let horizontalPadding: CGFloat = 25
+        /// How much the artwork shrinks (per side) while paused — see `RegularArtwork.artwork`.
+        static let pausedInset: CGFloat = 48
     }
 
     static func artworkHeight(for size: CGSize) -> CGFloat {
