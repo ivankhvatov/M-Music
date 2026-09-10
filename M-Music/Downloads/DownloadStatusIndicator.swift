@@ -11,7 +11,7 @@ struct DownloadStatusIndicator: View {
         case .completed:
             Image(systemName: "arrow.down.circle.fill")
                 .foregroundStyle(.secondary)
-                .font(.system(size: 15))
+                .font(.system(size: 12))
         case .queued:
             ProgressRing(progress: 0)
         case .downloading(let progress):
@@ -38,7 +38,7 @@ struct DownloadStatusIndicator: View {
                     .stroke(Color.secondary, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                     .rotationEffect(.degrees(-90))
             }
-            .frame(width: 15, height: 15)
+            .frame(width: 12, height: 12)
         }
     }
 }

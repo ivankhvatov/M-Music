@@ -45,7 +45,7 @@ final class PlayerManager: ObservableObject {
 
     private let client: SubsonicClient
     private let engine = PlayerEngine()
-    private var engineSubscriptions: Set<AnyCancellable> = []
+    private var subscriptions: Set<AnyCancellable> = []
     private var backgroundObserver: NSObjectProtocol?
     private var interruptionObserver: NSObjectProtocol?
     private var didConfigureAudioSession = false
@@ -68,12 +68,7 @@ final class PlayerManager: ObservableObject {
     /// mean a disk write twice a second for as long as something is playing.
     private var ticksSincePersist = 0
 
-    /// Per-track starred state, overriding the queue's own `Child.starred` (server-decoded and
-    /// immutable) once `toggleStarred()` changes it — otherwise navigating away from a track with
-    /// `next()`/`previous()` and back would reset `isCurrentTrackStarred` to that stale original
-    /// value, undoing the toggle from the track's perspective even though the server-side star
-    /// state is still correct.
-    private var starredOverrides: [String: Bool] = [:]
+    private let starStore = StarStore.shared
 
     init(client: SubsonicClient = .shared) {
         self.client = client
@@ -95,16 +90,30 @@ final class PlayerManager: ObservableObject {
     private func subscribeToEngine() {
         engine.$currentTime
             .sink { [weak self] time in self?.handleTimeUpdate(time) }
-            .store(in: &engineSubscriptions)
+            .store(in: &subscriptions)
         engine.$duration
             .sink { [weak self] duration in
                 guard let self, duration > 0 else { return }
                 self.duration = duration
             }
-            .store(in: &engineSubscriptions)
+            .store(in: &subscriptions)
         engine.$isPlaying
             .sink { [weak self] isPlaying in self?.isPlaying = isPlaying }
-            .store(in: &engineSubscriptions)
+            .store(in: &subscriptions)
+        // Keeps `isCurrentTrackStarred` (and the lock screen's "favorite" toggle) in sync with
+        // every star/unstar change — including ones made elsewhere, like `AlbumView` or
+        // `SongsListView` starring a track that happens to be the one currently playing.
+        // Reads the overrides straight from this sink's payload rather than re-reading
+        // `starStore.overrides` afterward: `@Published` publishes from `willSet`, so a
+        // synchronous re-read from inside this closure would still see the pre-update
+        // dictionary, flipping `isCurrentTrackStarred` to the opposite of what was just set.
+        starStore.$overrides
+            .sink { [weak self] overrides in
+                guard let self, let track = self.currentTrack else { return }
+                self.isCurrentTrackStarred = overrides[track.id.raw] ?? track.isStarred
+                self.updateNowPlayingFeedback()
+            }
+            .store(in: &subscriptions)
         engine.onTrackFinished = { [weak self] in
             Task { @MainActor in self?.handleTrackFinishedNaturally() }
         }
@@ -223,30 +232,14 @@ final class PlayerManager: ObservableObject {
         persistState()
     }
 
-    /// Stars/unstars the current track. Shared by `PlayerView`'s star button and the lock
-    /// screen / Control Center "favorite" toggle, so both stay in sync and do the same thing.
+    /// Stars/unstars the current track via the shared `StarStore` — used by `PlayerView`'s star
+    /// button and the lock screen / Control Center "favorite" toggle, so both stay in sync and do
+    /// the same thing. `isCurrentTrackStarred` picks up the result via the `starStore.$overrides`
+    /// subscription in `subscribeToEngine()`, same as any other star change from `AlbumView` or
+    /// `SongsListView`.
     func toggleStarred() {
         guard let track = currentTrack else { return }
-        let newValue = !isCurrentTrackStarred
-        isCurrentTrackStarred = newValue
-        starredOverrides[track.id.raw] = newValue
-        updateNowPlayingFeedback()
-        Task {
-            do {
-                if newValue {
-                    try await client.star(ids: [track.id.raw])
-                } else {
-                    try await client.unstar(ids: [track.id.raw])
-                }
-            } catch {
-                await MainActor.run {
-                    starredOverrides[track.id.raw] = !newValue
-                    guard currentTrack?.id == track.id else { return }
-                    isCurrentTrackStarred = !newValue
-                    updateNowPlayingFeedback()
-                }
-            }
-        }
+        starStore.toggleStarred(track)
     }
 
     // MARK: - Playback control
@@ -477,15 +470,26 @@ final class PlayerManager: ObservableObject {
 
     // MARK: - Now Playing / remote control (lock screen, Control Center)
 
-    private func updateNowPlayingInfo() {
+    /// Recomputes `isCurrentTrackStarred` from `StarStore` for whichever track is current right
+    /// now — called on every track change and on every store-wide star/unstar change, so this
+    /// stays correct however the current track's starred state got updated.
+    private func syncCurrentTrackStarredState() {
         guard let track = currentTrack else {
-            MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
             isCurrentTrackStarred = false
             updateNowPlayingFeedback()
             return
         }
-        isCurrentTrackStarred = starredOverrides[track.id.raw] ?? track.isStarred
+        isCurrentTrackStarred = starStore.isStarred(track)
         updateNowPlayingFeedback()
+    }
+
+    private func updateNowPlayingInfo() {
+        guard let track = currentTrack else {
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+            syncCurrentTrackStarredState()
+            return
+        }
+        syncCurrentTrackStarredState()
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: track.title,
             MPMediaItemPropertyArtist: track.artist ?? "",

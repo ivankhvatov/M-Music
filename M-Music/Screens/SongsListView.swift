@@ -63,6 +63,7 @@ struct SongsListView: View {
     private let client = SubsonicClient.shared
     @ObservedObject private var player = PlayerManager.shared
     @ObservedObject private var downloads = DownloadStore.shared
+    @ObservedObject private var starStore = StarStore.shared
 
     @State private var searchText = ""
 
@@ -93,10 +94,6 @@ struct SongsListView: View {
     @State private var isLoading = false
     @State private var loadError: String?
     @State private var hasLoadedOnce = false
-
-    /// Per-track starred state, overriding `Child.isStarred` (server-decoded and immutable) once
-    /// the user stars/unstars a track from its context menu here.
-    @State private var starOverrides: [String: Bool] = [:]
 
     var body: some View {
         NavigationStack {
@@ -140,18 +137,6 @@ struct SongsListView: View {
             }
             .onAppear {
                 refresh()
-            }
-            // Toggling the current track's star (from here or from the mini/full player) only
-            // updates `player.isCurrentTrackStarred` — `isStarred(_:)` reads that directly for an
-            // instant reflection while it's playing, but once the track stops being current that
-            // source of truth goes away. Mirror every change into `starOverrides` as it happens,
-            // so the last known state survives the switch to the next track (otherwise `isStarred`
-            // falls back to the original, now-stale `track.isStarred` and the track appears to
-            // re-star itself).
-            .onChange(of: player.isCurrentTrackStarred) { _, newValue in
-                if let id = player.currentTrack?.id.raw {
-                    starOverrides[id] = newValue
-                }
             }
         }
     }
@@ -208,11 +193,11 @@ struct SongsListView: View {
     }
 
     private func songMenu(_ track: Child) -> some View {
-        let starred = isStarred(track)
+        let starred = starStore.isStarred(track)
         let downloadState = downloads.state(for: track.id.raw)
         return Menu {
             Button {
-                toggleStarred(track)
+                starStore.toggleStarred(track)
             } label: {
                 Label(
                     starred ? "Remove from Favorites" : "Add to Favorites",
@@ -256,40 +241,6 @@ struct SongsListView: View {
         }
     }
 
-    /// For the currently playing track, defers to `PlayerManager.isCurrentTrackStarred` instead
-    /// of `starOverrides`/`track.isStarred` — it's `@Published`, so starring/unstarring from the
-    /// mini or full player (which can happen while this list is on screen, since the player sits
-    /// above it rather than replacing it) is reflected here the instant it happens, not just on
-    /// the next fetch.
-    private func isStarred(_ track: Child) -> Bool {
-        if player.currentTrack?.id == track.id {
-            return player.isCurrentTrackStarred
-        }
-        return starOverrides[track.id.raw] ?? track.isStarred
-    }
-
-    private func toggleStarred(_ track: Child) {
-        // Route through PlayerManager rather than maintaining a separate override, so the two
-        // stay in sync and don't race each other with independent star/unstar network calls.
-        if player.currentTrack?.id == track.id {
-            player.toggleStarred()
-            return
-        }
-        let newValue = !isStarred(track)
-        starOverrides[track.id.raw] = newValue
-        Task {
-            do {
-                if newValue {
-                    try await client.star(ids: [track.id.raw])
-                } else {
-                    try await client.unstar(ids: [track.id.raw])
-                }
-            } catch {
-                await MainActor.run { starOverrides[track.id.raw] = !newValue }
-            }
-        }
-    }
-
     private func play(_ track: Child) {
         guard let index = displayedSongs.firstIndex(where: { $0.id == track.id }) else { return }
         player.play(queue: displayedSongs, startAt: index)
@@ -299,7 +250,7 @@ struct SongsListView: View {
         var result = songs
 
         if filterOption.wrappedValue == .favoritesOnly {
-            result = result.filter { isStarred($0) }
+            result = result.filter { starStore.isStarred($0) }
         }
 
         if !searchText.isEmpty {

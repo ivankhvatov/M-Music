@@ -7,6 +7,7 @@ struct AlbumView: View {
     private let client = SubsonicClient.shared
     @ObservedObject private var player = PlayerManager.shared
     @ObservedObject private var downloads = DownloadStore.shared
+    @ObservedObject private var starStore = StarStore.shared
     @Environment(\.displayScale) private var displayScale
 
     /// Zoom transition for the "Other versions" / "More by artist" cards below — separate from
@@ -17,10 +18,6 @@ struct AlbumView: View {
     @State private var albumCodec: String?
     @State private var isLoadingSongs = true
     @State private var loadError: String?
-    /// Per-track starred state, overriding `Child.isStarred` (`Child.starred` is server-decoded
-    /// and immutable) once the user stars/unstars a track from its context menu. Keyed by track
-    /// id; a track with no entry here just falls back to its own `isStarred`.
-    @State private var trackStarOverrides: [String: Bool] = [:]
 
     @State private var otherVersions: [AlbumID3] = []
     @State private var moreByArtist: [AlbumID3] = []
@@ -44,6 +41,7 @@ struct AlbumView: View {
     /// color and the related-albums section's darker shade as the top of the list nears the
     /// translucent nav bar (see `listBackground`).
     @State private var scrollEdgeOffsets = ScrollEdgeOffsets()
+    @State private var showingRemoveDownloadConfirmation = false
 
     init(album: AlbumID3, zoomNamespace: Namespace.ID? = nil) {
         self.album = album
@@ -328,13 +326,13 @@ struct AlbumView: View {
     }
 
     private func trackMenu(_ track: Child, at index: Int) -> some View {
-        let starred = isStarred(track)
+        let starred = starStore.isStarred(track)
         let downloadState = downloads.state(for: track.id.raw)
         return Menu {
             // Not a `ControlGroup`/`.palette` row: that style is icon-only by design (no way to
             // opt back into showing titles), which would hide the label text these need.
             Button {
-                toggleStarred(track)
+                starStore.toggleStarred(track)
             } label: {
                 Label(
                     starred ? "Remove from Favorites" : "Add to Favorites",
@@ -377,30 +375,6 @@ struct AlbumView: View {
                 // tap target) without changing how it looks.
                 .frame(height: 20)
                 .contentShape(Rectangle())
-        }
-    }
-
-    private func isStarred(_ track: Child) -> Bool {
-        trackStarOverrides[track.id.raw] ?? track.isStarred
-    }
-
-    /// Stars/unstars a single track from its context menu — separate from `AlbumView`'s own
-    /// `toggleStarred()` (the album-level star button), and from `PlayerManager.toggleStarred()`
-    /// (only ever the currently-playing track), since this can act on any track in the list
-    /// regardless of what's playing.
-    private func toggleStarred(_ track: Child) {
-        let newValue = !isStarred(track)
-        trackStarOverrides[track.id.raw] = newValue
-        Task {
-            do {
-                if newValue {
-                    try await client.star(ids: [track.id.raw])
-                } else {
-                    try await client.unstar(ids: [track.id.raw])
-                }
-            } catch {
-                await MainActor.run { trackStarOverrides[track.id.raw] = !newValue }
-            }
         }
     }
 
@@ -533,7 +507,7 @@ struct AlbumView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     if isAlbumDownloaded {
-                        downloads.removeAlbum(albumId: album.id.raw)
+                        showingRemoveDownloadConfirmation = true
                     } else {
                         downloads.downloadAlbum(songs)
                     }
@@ -542,6 +516,15 @@ struct AlbumView: View {
                         .foregroundStyle(.primary)
                 }
                 .disabled(songs.isEmpty)
+                .confirmationDialog(
+                    "Delete the album from this device?",
+                    isPresented: $showingRemoveDownloadConfirmation,
+                    titleVisibility: .visible
+                ) {
+                    Button("Delete", role: .destructive) {
+                        downloads.removeAlbum(albumId: album.id.raw)
+                    }
+                }
             }
         }
 

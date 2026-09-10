@@ -397,6 +397,12 @@
     },
     "All albums" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alle Alben"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -407,6 +413,12 @@
     },
     "All songs" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alle Songs"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -426,7 +438,14 @@
       }
     },
     "Applies only to new downloads — songs already saved to this device keep whatever quality they were downloaded at." : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Распространяется только на новые загрузки — сохраненные  ранее песни останутся в том же качестве, в котором были загружены."
+          }
+        }
+      }
     },
     "Artist" : {
       "localizations" : {
@@ -504,6 +523,12 @@
     },
     "Connect" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verbinden"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -539,13 +564,44 @@
       }
     },
     "Delete" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удалить"
+          }
+        }
+      }
     },
     "Delete All Downloads" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удалить все загрузки"
+          }
+        }
+      }
     },
     "Delete all downloads?" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удалить все загрузки?"
+          }
+        }
+      }
+    },
+    "Delete the album from this device?" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удалить альбом с этого устройства?"
+          }
+        }
+      }
     },
     "Descending" : {
       "localizations" : {
@@ -568,13 +624,40 @@
       }
     },
     "Download" : {
-
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Herunterladen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Загрузить"
+          }
+        }
+      }
     },
     "Downloaded songs" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Загруженные песни"
+          }
+        }
+      }
     },
     "Downloading…" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Загрузка…"
+          }
+        }
+      }
     },
     "Downloads" : {
       "localizations" : {
@@ -593,7 +676,14 @@
       }
     },
     "Enable download transcoding" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Включить транскодирование при загрузке"
+          }
+        }
+      }
     },
     "Enable ReplayGain" : {
       "localizations" : {
@@ -717,6 +807,12 @@
     },
     "https://music.example.com" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "https://music.example.com"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -823,6 +919,12 @@
     },
     "No albums found." : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keine Alben gefunden."
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -832,7 +934,20 @@
       }
     },
     "No Downloads" : {
-
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keine Downloads"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Нет загрузок"
+          }
+        }
+      }
     },
     "No recently played albums yet." : {
       "localizations" : {
@@ -845,7 +960,20 @@
       }
     },
     "No songs found." : {
-
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keine Songs gefunden."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Песни не найдены."
+          }
+        }
+      }
     },
     "Not Playing" : {
       "localizations" : {
@@ -1061,6 +1189,12 @@
     },
     "Reconnect" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neu verbinden"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1070,7 +1204,14 @@
       }
     },
     "Remove Download" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удалить загрузку"
+          }
+        }
+      }
     },
     "Remove from Favorites" : {
       "localizations" : {
@@ -1203,7 +1344,14 @@
       }
     },
     "Songs and albums you download will appear here." : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Загруженные песни и альбомы появятся здесь."
+          }
+        }
+      }
     },
     "Sort by" : {
       "localizations" : {
@@ -1217,6 +1365,12 @@
     },
     "Title" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Titel"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1226,7 +1380,14 @@
       }
     },
     "Total size" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Общий размер"
+          }
+        }
+      }
     },
     "Track" : {
       "localizations" : {
@@ -1293,7 +1454,14 @@
       }
     },
     "Unknown Album" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Неизвестный альбом"
+          }
+        }
+      }
     },
     "Username" : {
       "localizations" : {
@@ -1345,6 +1513,12 @@
     },
     "Year" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Jahr"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
