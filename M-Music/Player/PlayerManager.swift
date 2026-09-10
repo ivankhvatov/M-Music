@@ -407,21 +407,39 @@ final class PlayerManager: ObservableObject {
     /// track) so a later retry of this same call — `handleTimeUpdate` retries it as the current
     /// track nears its end — has a better chance of finding a local copy already sitting in the
     /// cache instead of a live network URL, more resilient to a hiccup right at the boundary.
+    ///
+    /// Deliberately does *nothing* when the next track has no local copy and would be streamed
+    /// through the server's live transcoder: unlike a static file, a transcoded stream is
+    /// generated on the fly for one request and can't be meaningfully paused mid-download and
+    /// resumed later. Preloading it this far ahead of when it's actually needed leaves that
+    /// connection sitting idle for the rest of the current track; by the time `AVQueuePlayer`
+    /// finally needs it, the connection (or the server's encoder process) has often gone stale,
+    /// and reconnecting to a live transcode either restarts it from position 0 or fails outright
+    /// — audible as a glitch, a restart, or a dropped track. `handleTrackFinishedNaturally()`'s
+    /// fallback opens a fresh connection at the exact moment it's needed instead: a brief reload
+    /// rather than a seamless handoff, but reliable. A downloaded track (even one transcoded at
+    /// download time) is unaffected — it's just a file on disk by playback time, so it's caught by
+    /// the local-copy check below and stays fully gapless.
     private func prepareNextItem() {
         guard let currentIndex else { return }
         let nextIndex = currentIndex + 1
         guard queue.indices.contains(nextIndex), gaplessPreloadedIndex != nextIndex else { return }
         let nextTrack = queue[nextIndex]
+
+        let localURL = LocalDownloadIndex.shared.url(songId: nextTrack.id.raw)
+            ?? StreamCacheStatus.shared.url(for: nextTrack.id.raw)
+        guard localURL != nil || !shouldTranscode(nextTrack) else { return }
+
         guard let url = try? streamURL(for: nextTrack) else { return }
         engine.preloadForGapless(url: url)
         gaplessPreloadedIndex = nextIndex
 
-        if !LocalDownloadIndex.shared.contains(songId: nextTrack.id.raw),
-           StreamCacheStatus.shared.url(for: nextTrack.id.raw) == nil,
-           let liveURL = try? liveStreamURL(for: nextTrack) {
-            let bitrate = shouldTranscode(nextTrack) ? TranscodingSettings.bitrate.rawValue : 0
-            let codec = shouldTranscode(nextTrack) ? TranscodingSettings.format.rawValue : (nextTrack.suffix ?? "")
-            Task { await StreamCacheService.shared.prefetch(songId: nextTrack.id.raw, url: liveURL, codec: codec, bitrate: bitrate) }
+        if localURL == nil, let liveURL = try? liveStreamURL(for: nextTrack) {
+            Task {
+                await StreamCacheService.shared.prefetch(
+                    songId: nextTrack.id.raw, url: liveURL, codec: nextTrack.suffix ?? "", bitrate: 0
+                )
+            }
         }
 
         // Only the current and upcoming track are worth keeping cached — without this, every
