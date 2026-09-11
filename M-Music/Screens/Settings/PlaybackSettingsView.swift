@@ -25,6 +25,11 @@ struct PlaybackSettingsView: View {
     @AppStorage(DownloadTranscodingSettings.Keys.format) private var downloadFormat = TranscodingFormat.mp3
     @AppStorage(DownloadTranscodingSettings.Keys.bitrate) private var downloadBitrate = TranscodingBitrate.k192
 
+    @AppStorage(GaplessCacheSettings.Keys.isEnabled) private var isGaplessCacheEnabled = false
+    @AppStorage(GaplessCacheSettings.Keys.sizeLimit) private var gaplessCacheSizeLimit = GaplessCacheSizeLimit.mb500
+    @AppStorage(GaplessCacheSettings.Keys.retention) private var gaplessCacheRetention = GaplessCacheRetention.day3
+    @State private var gaplessCacheUsageBytes: Int64 = 0
+
     private let gainRange: ClosedRange<Double> = -15...15
 
     var body: some View {
@@ -135,10 +140,44 @@ struct PlaybackSettingsView: View {
                     } footer: {
                         Text("Applies only to new downloads — songs already saved to this device keep whatever quality they were downloaded at.")
                     }
+
+                    Section {
+                        Toggle("Cache upcoming track", isOn: $isGaplessCacheEnabled)
+
+                        Picker("Cache size limit", selection: $gaplessCacheSizeLimit) {
+                            ForEach(GaplessCacheSizeLimit.allCases) { option in
+                                Text(option.displayName).tag(option)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .disabled(!isGaplessCacheEnabled)
+
+                        Picker("Keep cached for", selection: $gaplessCacheRetention) {
+                            ForEach(GaplessCacheRetention.allCases) { option in
+                                Text(option.displayName).tag(option)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .disabled(!isGaplessCacheEnabled)
+
+                        HStack {
+                            Text("Currently cached")
+                            Spacer()
+                            Text(ByteCountFormatter.string(fromByteCount: gaplessCacheUsageBytes, countStyle: .file))
+                                .foregroundStyle(.secondary)
+                        }
+                    } header: {
+                        Text("Gapless Caching")
+                    } footer: {
+                        Text("Downloads the next track ahead of time so the transition into it has no gap, even when streaming a transcoded or slow connection. A track not played again within the limit above is automatically removed.")
+                    }
                 }
                 .navigationTitle("Playback")
             }
             .toolbar {
+            }
+            .task {
+                gaplessCacheUsageBytes = await GaplessCacheDatabase.shared.totalBytes()
             }
         }
     }

@@ -1,0 +1,158 @@
+import Foundation
+
+/// Publishes which songs are currently caching/cached, and their cached file's format/bitrate —
+/// `@MainActor` so `PlayerManager.streamURL(for:)` (itself `@MainActor`) can look up a cached
+/// entry synchronously. `GaplessCacheService` itself is an actor and can only be reached with
+/// `await`, which a synchronous URL-builder can't afford. Kept separate from `StreamCacheStatus`
+/// even though the shape is similar — this one is a persistent, user-sized cache with a different
+/// lifecycle, not `StreamCacheService`'s ephemeral current+next window.
+@MainActor
+final class GaplessCacheStatus: ObservableObject {
+    static let shared = GaplessCacheStatus()
+
+    struct Entry: Equatable {
+        let url: URL
+        let format: String
+        let bitrate: Int
+    }
+
+    @Published private(set) var activeSongIds: Set<String> = []
+    @Published private(set) var cachedEntries: [String: Entry] = [:]
+
+    private init() {}
+
+    func markActive(_ songId: String) {
+        activeSongIds.insert(songId)
+    }
+
+    func markCached(_ songId: String, entry: Entry) {
+        activeSongIds.remove(songId)
+        cachedEntries[songId] = entry
+    }
+
+    func remove(_ songId: String) {
+        activeSongIds.remove(songId)
+        cachedEntries.removeValue(forKey: songId)
+    }
+
+    func entry(for songId: String) -> Entry? {
+        cachedEntries[songId]
+    }
+}
+
+/// Downloads the *upcoming* track to a real file ahead of the boundary, for any track — raw or
+/// transcoded — so `PlayerManager` can gapless-preload it once it lands, kept as a persistent,
+/// size/age-bounded cache the user configures (`GaplessCacheSettings`) rather than
+/// `StreamCacheService`'s ephemeral current+next window. Opt-in: every method below is a no-op
+/// while `GaplessCacheSettings.isEnabled` is `false`.
+///
+/// Modeled on `StreamCacheService`'s download-with-retry pattern (a plain `URLSession`, not a
+/// background session — see the plan's design note on why that's the right call here) rather than
+/// `DownloadService`'s heavier background-session machinery.
+actor GaplessCacheService {
+    static let shared = GaplessCacheService()
+    private init() {}
+
+    private var activeTasks: [String: Task<Void, Never>] = [:]
+    /// A generous timeout — unlike an ordinary file download, a transcoded stream can only be
+    /// downloaded about as fast as it's encoded, so this needs to cover roughly "as long as the
+    /// current track plays," not just a quick file fetch.
+    private static let requestTimeout: TimeInterval = 240
+
+    private static func destinationDirectory() -> URL {
+        GaplessCacheDatabase.rootDirectory()
+    }
+
+    private static func destinationURL(songId: String, ext: String) -> URL {
+        destinationDirectory().appendingPathComponent("\(songId.pathSafeComponent).\(ext.pathSafeFileExtension())")
+    }
+
+    /// `fallbackExtension` is used only if the downloaded payload can't be identified by content
+    /// sniffing or MIME type (rare) — the caller's best guess at the real file extension (the
+    /// track's own `suffix` for a raw file, or the transcode codec for a transcoded one).
+    func enqueue(songId: String, url: URL, format: String, bitrate: Int, fallbackExtension: String) {
+        guard GaplessCacheSettings.isEnabled else { return }
+        guard activeTasks[songId] == nil else { return }
+        Task { @MainActor in GaplessCacheStatus.shared.markActive(songId) }
+        activeTasks[songId] = Task {
+            await self.download(songId: songId, url: url, format: format, bitrate: bitrate, fallbackExtension: fallbackExtension)
+            self.activeTasks.removeValue(forKey: songId)
+        }
+    }
+
+    /// A no-op unless `songId` is still actively downloading — safe to call on a song that has
+    /// already finished caching (or was never enqueued) without evicting its valid entry.
+    func cancel(songId: String) {
+        guard let task = activeTasks[songId] else { return }
+        task.cancel()
+        activeTasks.removeValue(forKey: songId)
+        Task { @MainActor in GaplessCacheStatus.shared.remove(songId) }
+    }
+
+    /// Marks a cached track as just played, so it outlives the retention window while it's still
+    /// in active use instead of aging out from under it.
+    func touch(songId: String) {
+        Task { await GaplessCacheDatabase.shared.touch(songId: songId) }
+    }
+
+    /// Loads previously-cached rows from disk into `GaplessCacheStatus` — called once, lazily, so
+    /// a relaunch doesn't forget what's already cached.
+    private var didLoadExisting = false
+    private func loadExistingIfNeeded() async {
+        guard !didLoadExisting else { return }
+        didLoadExisting = true
+        let records = await GaplessCacheDatabase.shared.allRecords()
+        for record in records where FileManager.default.fileExists(atPath: record.filePath) {
+            let entry = GaplessCacheStatus.Entry(url: record.fileURL, format: record.format, bitrate: record.bitrate)
+            await MainActor.run { GaplessCacheStatus.shared.markCached(record.songId, entry: entry) }
+        }
+    }
+
+    private func download(songId: String, url: URL, format: String, bitrate: Int, fallbackExtension: String) async {
+        await loadExistingIfNeeded()
+        do {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = Self.requestTimeout
+            let (tmpURL, response) = try await URLSession.shared.download(for: request)
+            guard !Task.isCancelled else {
+                try? FileManager.default.removeItem(at: tmpURL)
+                return
+            }
+            let http = response as? HTTPURLResponse
+            let byteSize = (try? FileManager.default.attributesOfItem(atPath: tmpURL.path)[.size] as? NSNumber)?.int64Value ?? 0
+            let validation = try await DownloadPayloadValidator.validate(
+                fileURL: tmpURL, byteSize: byteSize, statusCode: http?.statusCode, mimeType: http?.mimeType,
+                fallbackFileExtension: fallbackExtension
+            )
+            let ext = (validation.fileExtension ?? fallbackExtension).pathSafeFileExtension()
+            try? FileManager.default.createDirectory(at: Self.destinationDirectory(), withIntermediateDirectories: true)
+            let destination = Self.destinationURL(songId: songId, ext: ext)
+            try? FileManager.default.removeItem(at: destination)
+            try FileManager.default.moveItem(at: tmpURL, to: destination)
+
+            let now = Date()
+            let record = GaplessCacheRecord(
+                songId: songId, format: format, bitrate: bitrate, filePath: destination.path,
+                fileExtension: ext, byteSize: byteSize, cachedAt: now, lastPlayedAt: now
+            )
+            await GaplessCacheDatabase.shared.upsert(record)
+            await runEviction()
+
+            let entry = GaplessCacheStatus.Entry(url: destination, format: format, bitrate: bitrate)
+            await MainActor.run { GaplessCacheStatus.shared.markCached(songId, entry: entry) }
+        } catch {
+            guard !Task.isCancelled else { return }
+            await MainActor.run { GaplessCacheStatus.shared.remove(songId) }
+        }
+    }
+
+    private func runEviction() async {
+        let overBudget = await GaplessCacheDatabase.shared.evictOverBudget(maxBytes: GaplessCacheSettings.sizeLimit.byteCount)
+        let cutoff = Calendar.current.date(byAdding: .day, value: -GaplessCacheSettings.retention.rawValue, to: Date()) ?? .distantPast
+        let stale = await GaplessCacheDatabase.shared.evictOlderThan(cutoff)
+        for record in overBudget + stale {
+            try? FileManager.default.removeItem(at: record.fileURL)
+            await MainActor.run { GaplessCacheStatus.shared.remove(record.songId) }
+        }
+    }
+}

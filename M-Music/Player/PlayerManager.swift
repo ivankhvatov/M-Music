@@ -64,11 +64,22 @@ final class PlayerManager: ObservableObject {
     /// `engine.play(url:)` call (nothing was ready in time, or the queue changed since).
     private var gaplessPreloadedIndex: Int?
 
+    /// The song id `GaplessCacheService.enqueue` was last asked to cache, while that download is
+    /// still in flight — cleared once it lands (or is superseded). Lets `prepareNextItem()` cancel
+    /// a now-stale download if the "next" track changes again before it finishes.
+    private var gaplessCachingSongId: String?
+
     /// Throttles how often playback position is written to disk — every time-observer tick would
     /// mean a disk write twice a second for as long as something is playing.
     private var ticksSincePersist = 0
 
     private let starStore = StarStore.shared
+
+    /// Bounds how many times `recoverFromPlaybackFailure(error:)` will retry the *same* song
+    /// before giving up on it — see that method. Reset whenever the failing track differs from
+    /// `retryingTrackId`, so each song gets its own fresh budget.
+    private var streamFailureRetryPolicy = RemoteStreamFailureRetryPolicy()
+    private var retryingTrackId: String?
 
     init(client: SubsonicClient = .shared) {
         self.client = client
@@ -117,9 +128,27 @@ final class PlayerManager: ObservableObject {
         engine.onTrackFinished = { [weak self] in
             Task { @MainActor in self?.handleTrackFinishedNaturally() }
         }
-        engine.onPlaybackFailed = { [weak self] _ in
-            Task { @MainActor in self?.recoverFromPlaybackFailure() }
+        engine.onPlaybackFailed = { [weak self] error in
+            Task { @MainActor in self?.recoverFromPlaybackFailure(error: error) }
         }
+        // Once the upcoming track's gapless-cache download lands, preload it — this is what
+        // actually delivers a gapless transition for a cached track, since `prepareNextItem()`
+        // itself only kicks off the download (see its doc comment).
+        GaplessCacheStatus.shared.$cachedEntries
+            .sink { [weak self] entries in
+                guard let self, let currentIndex else { return }
+                let nextIndex = currentIndex + 1
+                guard queue.indices.contains(nextIndex) else { return }
+                let nextTrack = queue[nextIndex]
+                guard let entry = entries[nextTrack.id.raw] else { return }
+                if gaplessCachingSongId == nextTrack.id.raw {
+                    gaplessCachingSongId = nil
+                }
+                guard gaplessPreloadedIndex == nil, isGaplessCacheEntry(entry, validFor: nextTrack) else { return }
+                engine.preloadForGapless(url: entry.url)
+                gaplessPreloadedIndex = nextIndex
+            }
+            .store(in: &subscriptions)
     }
 
     /// The system pauses output itself for the duration of an interruption (a phone call, Siri,
@@ -326,6 +355,12 @@ final class PlayerManager: ObservableObject {
             duration = TimeInterval(track.duration ?? 0)
             currentTime = 0
             engine.setReplayGainVolume(replayGainVolume(for: track))
+            // The gapless-swap path never re-resolves the URL (it was already handed to the
+            // engine back when this was preloaded), so `streamURL(for:)`'s own touch doesn't run
+            // for this case — do it here instead, for whichever track just became current.
+            if let entry = GaplessCacheStatus.shared.entry(for: track.id.raw), isGaplessCacheEntry(entry, validFor: track) {
+                Task { await GaplessCacheService.shared.touch(songId: track.id.raw) }
+            }
             updateArtworkURL()
             updateNowPlayingInfo()
             prepareNextItem()
@@ -338,13 +373,38 @@ final class PlayerManager: ObservableObject {
     }
 
     /// A stream failed mid-playback (e.g. a transient network hiccup, or the server closing an
-    /// idle connection) — without this, nothing else happens: `isPlaying` stays true with no
-    /// audio and no progress, forever. Rebuilds the item from scratch at the last known position
-    /// instead, resuming playback if it was playing when the stream dropped.
-    private func recoverFromPlaybackFailure() {
-        guard currentTrack != nil else { return }
+    /// idle connection partway through — this can happen well into a live-transcoded track, not
+    /// just at a transition) — without this, nothing else happens: `isPlaying` stays true with no
+    /// audio and no progress, forever.
+    ///
+    /// Bounded via `streamFailureRetryPolicy` (ported from Shelv) rather than always retrying: if
+    /// the failure isn't a transient network error, or this song has already used its small retry
+    /// budget, skip to the next track instead — otherwise a persistent, recurring cause (e.g. a
+    /// fixed-duration connection limit somewhere between here and the server) would retry forever,
+    /// hitting the exact same failure every time.
+    ///
+    /// When it does retry, a live-transcoded track with no local copy gets `startTime: 0` instead
+    /// of the current position: the reconnect is necessarily a **fresh** transcode (Navidrome has
+    /// no "resume this transcode at time X"), and seeking that into a nonzero position is exactly
+    /// what produced the reported glitch/restart — an honest restart from 0 is broken but not
+    /// corrupted. A raw stream, a download, or a gapless-cache hit can still seek back to
+    /// `currentTime` correctly, since a real file (or a plain static stream) genuinely supports
+    /// resuming via Range.
+    private func recoverFromPlaybackFailure(error: Error?) {
+        guard let track = currentTrack else { return }
+        if track.id.raw != retryingTrackId {
+            streamFailureRetryPolicy.reset()
+            retryingTrackId = track.id.raw
+        }
+        guard streamFailureRetryPolicy.shouldRetry(for: error) else {
+            next()
+            return
+        }
         clearGaplessPreload()
-        loadCurrentItem(autoplay: isPlaying, startTime: currentTime)
+        let hasLocalCopy = LocalDownloadIndex.shared.url(songId: track.id.raw) != nil
+            || GaplessCacheStatus.shared.entry(for: track.id.raw).map { isGaplessCacheEntry($0, validFor: track) } == true
+        let startTime = (!hasLocalCopy && shouldTranscode(track)) ? 0 : currentTime
+        loadCurrentItem(autoplay: isPlaying, startTime: startTime)
     }
 
     /// Codecs that store audio without loss — the only ones worth transcoding under
@@ -377,16 +437,33 @@ final class PlayerManager: ObservableObject {
         )
     }
 
-    /// A playable URL for `track`, checked in order: an already-downloaded file, a prefetched
-    /// stream-cache file, then the live network stream (transcoded per `TranscodingSettings`).
+    /// A playable URL for `track`, checked in order: an already-downloaded file, a
+    /// `GaplessCacheService` hit (only while the feature is enabled), a prefetched
+    /// `StreamCacheService` file, then the live network stream (transcoded per
+    /// `TranscodingSettings`).
     private func streamURL(for track: Child) throws -> URL {
         if let localURL = LocalDownloadIndex.shared.url(songId: track.id.raw) {
             return localURL
+        }
+        if GaplessCacheSettings.isEnabled,
+           let entry = GaplessCacheStatus.shared.entry(for: track.id.raw), isGaplessCacheEntry(entry, validFor: track) {
+            Task { await GaplessCacheService.shared.touch(songId: track.id.raw) }
+            return entry.url
         }
         if let cachedURL = StreamCacheStatus.shared.url(for: track.id.raw) {
             return cachedURL
         }
         return try liveStreamURL(for: track)
+    }
+
+    /// Whether a `GaplessCacheStatus` entry still matches what `track` would currently resolve
+    /// to — a settings change (streaming format/bitrate, or transcoding turned off/on) makes an
+    /// old entry a stale miss instead of serving the wrong quality.
+    private func isGaplessCacheEntry(_ entry: GaplessCacheStatus.Entry, validFor track: Child) -> Bool {
+        if shouldTranscode(track) {
+            return entry.format == TranscodingSettings.format.rawValue && entry.bitrate == TranscodingSettings.bitrate.rawValue
+        }
+        return entry.format == "raw"
     }
 
     /// The player-wide volume for `track`'s ReplayGain adjustment. Applied via
@@ -426,6 +503,11 @@ final class PlayerManager: ObservableObject {
         guard queue.indices.contains(nextIndex), gaplessPreloadedIndex != nextIndex else { return }
         let nextTrack = queue[nextIndex]
 
+        if GaplessCacheSettings.isEnabled {
+            prepareNextItemViaGaplessCache(nextTrack)
+            return
+        }
+
         let localURL = LocalDownloadIndex.shared.url(songId: nextTrack.id.raw)
             ?? StreamCacheStatus.shared.url(for: nextTrack.id.raw)
         guard localURL != nil || !shouldTranscode(nextTrack) else { return }
@@ -447,6 +529,43 @@ final class PlayerManager: ObservableObject {
         // forever.
         let keepIds = Set([queue[currentIndex].id.raw, nextTrack.id.raw])
         Task { await StreamCacheService.shared.trim(keeping: keepIds) }
+    }
+
+    /// The `GaplessCacheSettings.isEnabled` path: caches the upcoming track — raw or transcoded —
+    /// to a real file ahead of the boundary, superseding `StreamCacheService`'s lighter, raw-only
+    /// prefetch. Only kicks off the download here; the `GaplessCacheStatus.$cachedEntries`
+    /// subscription in `subscribeToEngine()` is what actually calls `engine.preloadForGapless`
+    /// once it lands, since there's no safe URL to preload until then.
+    private func prepareNextItemViaGaplessCache(_ nextTrack: Child) {
+        if let downloadURL = LocalDownloadIndex.shared.url(songId: nextTrack.id.raw) {
+            engine.preloadForGapless(url: downloadURL)
+            gaplessPreloadedIndex = currentIndex.map { $0 + 1 }
+            return
+        }
+        if let entry = GaplessCacheStatus.shared.entry(for: nextTrack.id.raw), isGaplessCacheEntry(entry, validFor: nextTrack) {
+            engine.preloadForGapless(url: entry.url)
+            gaplessPreloadedIndex = currentIndex.map { $0 + 1 }
+            return
+        }
+
+        guard gaplessCachingSongId != nextTrack.id.raw else { return }
+        if let stale = gaplessCachingSongId {
+            Task { await GaplessCacheService.shared.cancel(songId: stale) }
+        }
+        guard let url = try? liveStreamURL(for: nextTrack) else {
+            gaplessCachingSongId = nil
+            return
+        }
+        let isTranscode = shouldTranscode(nextTrack)
+        let format = isTranscode ? TranscodingSettings.format.rawValue : "raw"
+        let bitrate = isTranscode ? TranscodingSettings.bitrate.rawValue : 0
+        let fallbackExtension = isTranscode ? TranscodingSettings.format.rawValue : (nextTrack.suffix ?? "mp3")
+        gaplessCachingSongId = nextTrack.id.raw
+        Task {
+            await GaplessCacheService.shared.enqueue(
+                songId: nextTrack.id.raw, url: url, format: format, bitrate: bitrate, fallbackExtension: fallbackExtension
+            )
+        }
     }
 
     private func clearGaplessPreload() {

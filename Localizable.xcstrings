@@ -199,6 +199,24 @@
         }
       }
     },
+    "1 day" : {
+
+    },
+    "1 GB" : {
+
+    },
+    "2 GB" : {
+
+    },
+    "3 days" : {
+
+    },
+    "7 days" : {
+
+    },
+    "14 days" : {
+
+    },
     "64 kbps" : {
       "localizations" : {
         "de" : {
@@ -263,6 +281,9 @@
         }
       }
     },
+    "250 MB" : {
+
+    },
     "256 kbps" : {
       "localizations" : {
         "de" : {
@@ -294,6 +315,9 @@
           }
         }
       }
+    },
+    "500 MB" : {
+
     },
     "AAC" : {
       "localizations" : {
@@ -505,6 +529,12 @@
         }
       }
     },
+    "Cache size limit" : {
+
+    },
+    "Cache upcoming track" : {
+
+    },
     "Cellular" : {
       "localizations" : {
         "de" : {
@@ -546,6 +576,9 @@
           }
         }
       }
+    },
+    "Currently cached" : {
+
     },
     "Default gain" : {
       "localizations" : {
@@ -675,6 +708,9 @@
         }
       }
     },
+    "Downloads the next track ahead of time so the transition into it has no gap, even when streaming a transcoded or slow connection. A track not played again within the limit above is automatically removed." : {
+
+    },
     "Enable download transcoding" : {
       "localizations" : {
         "ru" : {
@@ -789,6 +825,9 @@
         }
       }
     },
+    "Gapless Caching" : {
+
+    },
     "Home" : {
       "localizations" : {
         "de" : {
@@ -820,6 +859,9 @@
           }
         }
       }
+    },
+    "Keep cached for" : {
+
     },
     "Library" : {
       "localizations" : {
