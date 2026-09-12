@@ -64,6 +64,7 @@ struct SongsListView: View {
     @ObservedObject private var player = PlayerManager.shared
     @ObservedObject private var downloads = DownloadStore.shared
     @ObservedObject private var starStore = StarStore.shared
+    @Environment(\.displayScale) private var displayScale
 
     @State private var searchText = ""
 
@@ -164,10 +165,16 @@ struct SongsListView: View {
         }
     }
 
+    /// Point size artwork renders at in a row — the server is asked to downscale to this times
+    /// `displayScale` rather than sending full-size cover art for a 44x44 thumbnail.
+    private let rowArtworkSize: CGFloat = 44
+
     @ViewBuilder
     private func artwork(for track: Child, isCurrent: Bool) -> some View {
+        let artId = track.coverArt ?? track.albumId?.raw ?? track.id.raw
+        let pixelSize = Int(rowArtworkSize * displayScale)
         ZStack {
-            CachedAsyncImage(url: try? client.coverArtURL(forId: track.coverArt ?? track.albumId?.raw ?? track.id.raw)) { image in
+            CachedAsyncImage(url: try? client.coverArtURL(forId: artId, size: pixelSize)) { image in
                 image
                     .resizable()
                     .aspectRatio(1, contentMode: .fill)
@@ -179,17 +186,17 @@ struct SongsListView: View {
                             .foregroundStyle(.secondary)
                     }
             }
-            .frame(width: 44, height: 44)
+            .frame(width: rowArtworkSize, height: rowArtworkSize)
             .clipShape(RoundedRectangle(cornerRadius: 4))
 
             if isCurrent {
                 RoundedRectangle(cornerRadius: 4)
                     .fill(Color.black.opacity(0.45))
-                    .frame(width: 44, height: 44)
+                    .frame(width: rowArtworkSize, height: rowArtworkSize)
                 PlayingIndicator(isPlaying: player.isPlaying, color: .white)
             }
         }
-        .frame(width: 44, height: 44)
+        .frame(width: rowArtworkSize, height: rowArtworkSize)
     }
 
     private func songMenu(_ track: Child) -> some View {
