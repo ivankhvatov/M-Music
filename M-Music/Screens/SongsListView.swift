@@ -293,13 +293,37 @@ struct SongsListView: View {
 /// subscriptions: `List`/`ForEach` only materializes visible rows, so a `PlayerManager` playback
 /// tick or a `DownloadStore` progress update now only re-renders the handful of on-screen rows
 /// instead of `SongsListView`'s entire body (and the full-library resort that would trigger).
+/// The artwork-darkening overlay + `PlayingIndicator` shown when this track is the one currently
+/// playing. Isolated into its own leaf view so it alone re-renders on `PlayerManager` playback
+/// ticks — `SongRow` itself no longer observes `player`, so its `Menu` stays stable while open.
+private struct SongNowPlayingOverlay: View {
+    let trackId: Child.ID
+    let rowArtworkSize: CGFloat
+
+    @ObservedObject private var player = PlayerManager.shared
+
+    var body: some View {
+        if player.currentTrack?.id == trackId {
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color.black.opacity(0.45))
+                .frame(width: rowArtworkSize, height: rowArtworkSize)
+            PlayingIndicator(isPlaying: player.isPlaying, color: .white)
+        }
+    }
+}
+
 private struct SongRow: View {
     let track: Child
     let rowArtworkSize: CGFloat
     let displayScale: CGFloat
 
     private let client = SubsonicClient.shared
-    @ObservedObject private var player = PlayerManager.shared
+    /// Not `@ObservedObject`: `songMenu` only ever calls a method on it (`playNext`/
+    /// `addToQueue`), never reads a `@Published` property — observing it here would rebuild this
+    /// row's `Menu` on every playback tick even while it's open, which is what caused the menu to
+    /// visibly pulsate and occasionally drop taps. `SongNowPlayingOverlay` observes it instead,
+    /// scoped to just the artwork glyph.
+    private let player = PlayerManager.shared
     @ObservedObject private var starStore = StarStore.shared
     @ObservedObject private var downloads = DownloadStore.shared
 
@@ -319,9 +343,8 @@ private struct SongRow: View {
     }
 
     var body: some View {
-        let isCurrent = player.currentTrack?.id == track.id
         HStack(spacing: 12) {
-            artwork(isCurrent: isCurrent)
+            artwork
 
             VStack(alignment: .leading) {
                 Text(track.title)
@@ -341,8 +364,7 @@ private struct SongRow: View {
         }
     }
 
-    @ViewBuilder
-    private func artwork(isCurrent: Bool) -> some View {
+    private var artwork: some View {
         ZStack {
             CachedAsyncImage(url: artworkURL) { image in
                 image
@@ -359,12 +381,7 @@ private struct SongRow: View {
             .frame(width: rowArtworkSize, height: rowArtworkSize)
             .clipShape(RoundedRectangle(cornerRadius: 4))
 
-            if isCurrent {
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(Color.black.opacity(0.45))
-                    .frame(width: rowArtworkSize, height: rowArtworkSize)
-                PlayingIndicator(isPlaying: player.isPlaying, color: .white)
-            }
+            SongNowPlayingOverlay(trackId: track.id, rowArtworkSize: rowArtworkSize)
         }
         .frame(width: rowArtworkSize, height: rowArtworkSize)
     }

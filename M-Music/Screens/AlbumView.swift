@@ -5,9 +5,12 @@ struct AlbumView: View {
     var zoomNamespace: Namespace.ID? = nil
 
     private let client = SubsonicClient.shared
-    @ObservedObject private var player = PlayerManager.shared
+    /// Not `@ObservedObject`: this view only ever calls a method on it (`playTrack(at:)` below),
+    /// never reads a `@Published` property in `body` — observing it would re-run this entire
+    /// view's body (recomputing the whole tracklist) on every playback tick. `TrackRow` observes
+    /// it instead, scoped to just the currently-visible rows.
+    private let player = PlayerManager.shared
     @ObservedObject private var downloads = DownloadStore.shared
-    @ObservedObject private var starStore = StarStore.shared
     @Environment(\.displayScale) private var displayScale
 
     /// Zoom transition for the "Other versions" / "More by artist" cards below — separate from
@@ -227,7 +230,7 @@ struct AlbumView: View {
                 Button {
                     playTrack(at: index)
                 } label: {
-                    trackRow(track, at: index)
+                    TrackRow(track: track, albumArtist: album.artist)
                         .padding(.horizontal, 4)
                         .padding(.vertical, 16)
                         .contentShape(Rectangle())
@@ -291,91 +294,6 @@ struct AlbumView: View {
         .font(.subheadline)
         .foregroundStyle(.secondary)
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    func trackRow(_ track: Child, at index: Int) -> some View {
-        let isCurrent = player.currentTrack?.id == track.id
-        return HStack(spacing: 12) {
-            Group {
-                if isCurrent {
-                    PlayingIndicator(isPlaying: player.isPlaying)
-                } else {
-                    Text(track.track.map(String.init) ?? "")
-                        .font(.body)
-                        .foregroundColor(.secondary)
-                }
-            }
-            .frame(minWidth: 20, alignment: .center)
-
-            VStack(alignment: .leading) {
-                Text(track.title)
-
-                if let trackArtist = track.artist, trackArtist != album.artist {
-                    Text(trackArtist)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Spacer()
-
-            DownloadStatusIndicator(state: downloads.state(for: track.id.raw))
-
-            trackMenu(track, at: index)
-        }
-    }
-
-    private func trackMenu(_ track: Child, at index: Int) -> some View {
-        let starred = starStore.isStarred(track)
-        let downloadState = downloads.state(for: track.id.raw)
-        return Menu {
-            // Not a `ControlGroup`/`.palette` row: that style is icon-only by design (no way to
-            // opt back into showing titles), which would hide the label text these need.
-            Button {
-                starStore.toggleStarred(track)
-            } label: {
-                Label(
-                    starred ? "Remove from Favorites" : "Add to Favorites",
-                    systemImage: starred ? "star.slash.fill" : "star.fill"
-                )
-            }
-
-            Button {
-                player.playNext(track)
-            } label: {
-                Label("Play next", systemImage: "text.line.first.and.arrowtriangle.forward")
-            }
-            Button {
-                player.addToQueue(track)
-            } label: {
-                Label("Add to queue", systemImage: "text.line.last.and.arrowtriangle.forward")
-            }
-
-            switch downloadState {
-            case .completed:
-                Button(role: .destructive) {
-                    downloads.remove(songId: track.id.raw)
-                } label: {
-                    Label("Remove Download", systemImage: "checkmark.circle.fill")
-                }
-            case .queued, .downloading:
-                Label("Downloading…", systemImage: "arrow.down.circle")
-            default:
-                Button {
-                    downloads.download(track)
-                } label: {
-                    Label("Download", systemImage: "arrow.down.circle")
-                }
-            }
-        } label: {
-            Image(systemName: "ellipsis")
-                .foregroundStyle(.primary)
-                .font(.system(size: 18))
-                // Enlarges the tappable area well past the glyph itself (Apple's ~44pt minimum
-                // tap target) without changing how it looks.
-                .frame(height: 20)
-                .contentShape(Rectangle())
-        }
     }
 
     func albumArtwork() -> some View {
@@ -543,6 +461,122 @@ struct AlbumView: View {
 /// the top.
 private struct ScrollEdgeOffsets: Equatable {
     var fromTop: CGFloat = 0
+}
+
+/// A single track row's content (playing indicator/track number, title/artist, download status,
+/// overflow menu). A real `View` type — not just a function on `AlbumView` — so it can own its
+/// own `@ObservedObject` subscriptions: a `PlayerManager` playback tick or a `DownloadStore`
+/// progress update now only re-renders this one row instead of `AlbumView`'s entire body (and
+/// the whole tracklist it builds).
+/// The track-number-or-`PlayingIndicator` leading glyph. Isolated so only it re-renders on
+/// `PlayerManager` playback ticks — `TrackRow` itself no longer observes `player`, so `trackMenu`
+/// stays stable while open.
+private struct TrackLeadingGlyph: View {
+    let track: Child
+
+    @ObservedObject private var player = PlayerManager.shared
+
+    var body: some View {
+        Group {
+            if player.currentTrack?.id == track.id {
+                PlayingIndicator(isPlaying: player.isPlaying)
+            } else {
+                Text(track.track.map(String.init) ?? "")
+                    .font(.body)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .frame(minWidth: 20, alignment: .center)
+    }
+}
+
+private struct TrackRow: View {
+    let track: Child
+    let albumArtist: String?
+
+    /// Not `@ObservedObject`: `trackMenu` only ever calls a method on it (`playNext`/
+    /// `addToQueue`), never reads a `@Published` property — observing it here would rebuild this
+    /// row's `Menu` on every playback tick even while it's open, which is what caused the menu to
+    /// visibly pulsate and occasionally drop taps. `TrackLeadingGlyph` observes it instead, scoped
+    /// to just the leading glyph.
+    private let player = PlayerManager.shared
+    @ObservedObject private var starStore = StarStore.shared
+    @ObservedObject private var downloads = DownloadStore.shared
+
+    var body: some View {
+        HStack(spacing: 12) {
+            TrackLeadingGlyph(track: track)
+
+            VStack(alignment: .leading) {
+                Text(track.title)
+
+                if let trackArtist = track.artist, trackArtist != albumArtist {
+                    Text(trackArtist)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer()
+
+            DownloadStatusIndicator(state: downloads.state(for: track.id.raw))
+
+            trackMenu
+        }
+    }
+
+    private var trackMenu: some View {
+        let starred = starStore.isStarred(track)
+        let downloadState = downloads.state(for: track.id.raw)
+        return Menu {
+            // Not a `ControlGroup`/`.palette` row: that style is icon-only by design (no way to
+            // opt back into showing titles), which would hide the label text these need.
+            Button {
+                starStore.toggleStarred(track)
+            } label: {
+                Label(
+                    starred ? "Remove from Favorites" : "Add to Favorites",
+                    systemImage: starred ? "star.slash.fill" : "star.fill"
+                )
+            }
+
+            Button {
+                player.playNext(track)
+            } label: {
+                Label("Play next", systemImage: "text.line.first.and.arrowtriangle.forward")
+            }
+            Button {
+                player.addToQueue(track)
+            } label: {
+                Label("Add to queue", systemImage: "text.line.last.and.arrowtriangle.forward")
+            }
+
+            switch downloadState {
+            case .completed:
+                Button(role: .destructive) {
+                    downloads.remove(songId: track.id.raw)
+                } label: {
+                    Label("Remove Download", systemImage: "checkmark.circle.fill")
+                }
+            case .queued, .downloading:
+                Label("Downloading…", systemImage: "arrow.down.circle")
+            default:
+                Button {
+                    downloads.download(track)
+                } label: {
+                    Label("Download", systemImage: "arrow.down.circle")
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .foregroundStyle(.primary)
+                .font(.system(size: 18))
+                // Enlarges the tappable area well past the glyph itself (Apple's ~44pt minimum
+                // tap target) without changing how it looks.
+                .frame(height: 20)
+                .contentShape(Rectangle())
+        }
+    }
 }
 
 #Preview {
