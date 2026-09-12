@@ -200,22 +200,64 @@
       }
     },
     "1 day" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 день"
+          }
+        }
+      }
     },
     "1 GB" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 ГБ"
+          }
+        }
+      }
     },
     "2 GB" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "2 ГБ"
+          }
+        }
+      }
     },
     "3 days" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "3 дня"
+          }
+        }
+      }
     },
     "7 days" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "7 дней"
+          }
+        }
+      }
     },
     "14 days" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "14 дней"
+          }
+        }
+      }
     },
     "64 kbps" : {
       "localizations" : {
@@ -282,7 +324,14 @@
       }
     },
     "250 MB" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "250 МБ"
+          }
+        }
+      }
     },
     "256 kbps" : {
       "localizations" : {
@@ -317,7 +366,14 @@
       }
     },
     "500 MB" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "200 МБ"
+          }
+        }
+      }
     },
     "AAC" : {
       "localizations" : {
@@ -435,6 +491,9 @@
         }
       }
     },
+    "All artists" : {
+
+    },
     "All songs" : {
       "localizations" : {
         "de" : {
@@ -530,10 +589,24 @@
       }
     },
     "Cache size limit" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Лимит объёма кэша"
+          }
+        }
+      }
     },
     "Cache upcoming track" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Загружать следующий трек"
+          }
+        }
+      }
     },
     "Cellular" : {
       "localizations" : {
@@ -578,7 +651,14 @@
       }
     },
     "Currently cached" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Текущий объём кэша"
+          }
+        }
+      }
     },
     "Default gain" : {
       "localizations" : {
@@ -709,7 +789,14 @@
       }
     },
     "Downloads the next track ahead of time so the transition into it has no gap, even when streaming a transcoded or slow connection. A track not played again within the limit above is automatically removed." : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Предварительная загрузка следующего трека для бесшовного перехода при транскодировании или слабом соединении. Не воспроизводимые долгое время треки в пределах объёма кэша удаляются автоматически."
+          }
+        }
+      }
     },
     "Enable download transcoding" : {
       "localizations" : {
@@ -826,7 +913,14 @@
       }
     },
     "Gapless Caching" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Бесшовное кэширование"
+          }
+        }
+      }
     },
     "Home" : {
       "localizations" : {
@@ -861,7 +955,14 @@
       }
     },
     "Keep cached for" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сохранять треки"
+          }
+        }
+      }
     },
     "Library" : {
       "localizations" : {
@@ -943,6 +1044,12 @@
         }
       }
     },
+    "Name: A-Z" : {
+
+    },
+    "Name: Z-A" : {
+
+    },
     "Navidrome Server" : {
       "localizations" : {
         "de" : {
@@ -974,6 +1081,9 @@
           }
         }
       }
+    },
+    "No artists found." : {
+
     },
     "No Downloads" : {
       "localizations" : {
@@ -1298,6 +1408,7 @@
       }
     },
     "Search albums" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ru" : {
           "stringUnit" : {
@@ -1308,6 +1419,7 @@
       }
     },
     "Search artists" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ru" : {
           "stringUnit" : {
@@ -1318,6 +1430,7 @@
       }
     },
     "Search playlists" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ru" : {
           "stringUnit" : {
@@ -1328,6 +1441,7 @@
       }
     },
     "Search songs" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ru" : {
           "stringUnit" : {

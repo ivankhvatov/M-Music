@@ -144,7 +144,7 @@ struct SongsListView: View {
                 }
             }
             .navigationTitle("Songs")
-            .searchable(text: $searchText, prompt: "Search songs")
+            .searchable(text: $searchText, prompt: "Search")
             .toolbar {
                 filterButton
                 sortButton

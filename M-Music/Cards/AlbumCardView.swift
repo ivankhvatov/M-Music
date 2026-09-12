@@ -1,8 +1,17 @@
 import SwiftUI
 
 struct AlbumCardView: View {
+    /// What the second line under the album title shows — the artist name (the default, used
+    /// everywhere an album can be by a different artist) or the release year (used in
+    /// `ArtistAlbumsView`'s grid, where every card is already known to be by this artist).
+    enum Subtitle {
+        case artist
+        case year
+    }
+
     let album: AlbumID3
     var zoomNamespace: Namespace.ID? = nil
+    var subtitle: Subtitle = .artist
 
     /// Computed once per `album.id` and cached, rather than inline in `artwork` — `coverArtURL`
     /// signs every call with a fresh random token, so recomputing it on every body evaluation
@@ -21,13 +30,22 @@ struct AlbumCardView: View {
                 .font(.system(size: 15))
                 .lineLimit(1)
 
-            Text(album.artist ?? "Unknown Artist")
+            Text(subtitleText)
                 .font(.caption)
                 .foregroundColor(.gray)
                 .lineLimit(1)
         }
         .task(id: album.id) {
             artworkURL = try? SubsonicClient.shared.coverArtURL(forId: album.coverArt ?? album.id.raw)
+        }
+    }
+
+    private var subtitleText: String {
+        switch subtitle {
+        case .artist:
+            return album.artist ?? "Unknown Artist"
+        case .year:
+            return album.year.map(String.init) ?? "Unknown Year"
         }
     }
 

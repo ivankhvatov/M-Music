@@ -105,7 +105,7 @@ struct AlbumsListView: View {
                 albumsGrid
             }
             .navigationTitle("Albums")
-            .searchable(text: $searchText, prompt: "Search albums")
+            .searchable(text: $searchText, prompt: "Search")
             .toolbar {
                 filterButton
                 sortButton
