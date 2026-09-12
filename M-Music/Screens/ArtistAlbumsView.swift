@@ -151,7 +151,7 @@ struct ArtistAlbumsView: View {
             .clipShape(Circle())
 
             Text(artist.name)
-                .font(.system(size: 28, weight: .semibold))
+                .font(.system(size: 28, weight: .bold))
                 .multilineTextAlignment(.center)
         }
     }

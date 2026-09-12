@@ -135,8 +135,9 @@ struct AlbumView: View {
         guard let artistId = album.artistId?.raw else { return }
         do {
             let artist = try await client.getArtist(id: artistId)
-            let others = artist.album.filter { $0.id != album.id && $0.name == album.name }
-            let more = artist.album.filter { $0.name != album.name }
+            let albumName = album.name.lowercased()
+            let others = artist.album.filter { $0.id != album.id && $0.name.lowercased() == albumName }
+            let more = artist.album.filter { $0.name.lowercased() != albumName }
             await MainActor.run {
                 otherVersions = others
                 moreByArtist = more.reversed()
@@ -186,7 +187,7 @@ struct AlbumView: View {
                 HStack(alignment: .top, spacing: 16) {
                     ForEach(albums) { relatedAlbum in
                         NavigationLink(destination: AlbumView(album: relatedAlbum, zoomNamespace: relatedAlbumZoomNamespace)) {
-                            AlbumCardView(album: relatedAlbum, zoomNamespace: relatedAlbumZoomNamespace)
+                            AlbumCardView(album: relatedAlbum, zoomNamespace: relatedAlbumZoomNamespace, subtitle: .year)
                                 .frame(width: 160)
                         }
                         .buttonStyle(.plain)
