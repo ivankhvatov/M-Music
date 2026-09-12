@@ -61,8 +61,11 @@ private enum SongSortOrder: LocalizedStringKey, CaseIterable {
 
 struct SongsListView: View {
     private let client = SubsonicClient.shared
-    @ObservedObject private var player = PlayerManager.shared
-    @ObservedObject private var downloads = DownloadStore.shared
+    /// Not `@ObservedObject`: this view only ever calls a method on it (`play(_:)` below), never
+    /// reads a `@Published` property in `body` — observing it would re-run this view's full
+    /// filter+sort over the entire library on every playback tick. `SongRow` observes it instead,
+    /// scoped to just the currently-visible rows.
+    private let player = PlayerManager.shared
     @ObservedObject private var starStore = StarStore.shared
     @Environment(\.displayScale) private var displayScale
 
@@ -96,6 +99,16 @@ struct SongsListView: View {
     @State private var loadError: String?
     @State private var hasLoadedOnce = false
 
+    /// Cached result of filtering/sorting `songs`, recomputed only by `updateDisplayedSongs()`
+    /// (see its call sites below) rather than on every `body` evaluation — this list can hold
+    /// an entire library's worth of tracks, and re-filtering/re-sorting all of them on every
+    /// access (there were 2-3 per `body` pass) was the dominant cause of this screen lagging.
+    @State private var displayedSongs: [Child] = []
+
+    /// Point size artwork renders at in a row — the server is asked to downscale to this times
+    /// `displayScale` rather than sending full-size cover art for a 44x44 thumbnail.
+    private let rowArtworkSize: CGFloat = 44
+
     var body: some View {
         NavigationStack {
             Group {
@@ -120,7 +133,7 @@ struct SongsListView: View {
                             Button {
                                 play(track)
                             } label: {
-                                songRow(track)
+                                SongRow(track: track, rowArtworkSize: rowArtworkSize, displayScale: displayScale)
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
@@ -139,112 +152,12 @@ struct SongsListView: View {
             .onAppear {
                 refresh()
             }
-        }
-    }
-
-    private func songRow(_ track: Child) -> some View {
-        let isCurrent = player.currentTrack?.id == track.id
-        return HStack(spacing: 12) {
-            artwork(for: track, isCurrent: isCurrent)
-
-            VStack(alignment: .leading) {
-                Text(track.title)
-
-                if let trackArtist = track.artist {
-                    Text(trackArtist)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Spacer()
-
-            DownloadStatusIndicator(state: downloads.state(for: track.id.raw))
-
-            songMenu(track)
-        }
-    }
-
-    /// Point size artwork renders at in a row — the server is asked to downscale to this times
-    /// `displayScale` rather than sending full-size cover art for a 44x44 thumbnail.
-    private let rowArtworkSize: CGFloat = 44
-
-    @ViewBuilder
-    private func artwork(for track: Child, isCurrent: Bool) -> some View {
-        let artId = track.coverArt ?? track.albumId?.raw ?? track.id.raw
-        let pixelSize = Int(rowArtworkSize * displayScale)
-        ZStack {
-            CachedAsyncImage(url: try? client.coverArtURL(forId: artId, size: pixelSize)) { image in
-                image
-                    .resizable()
-                    .aspectRatio(1, contentMode: .fill)
-            } placeholder: {
-                Rectangle()
-                    .fill(Color.secondary.opacity(0.15))
-                    .overlay {
-                        Image(systemName: "music.note")
-                            .foregroundStyle(.secondary)
-                    }
-            }
-            .frame(width: rowArtworkSize, height: rowArtworkSize)
-            .clipShape(RoundedRectangle(cornerRadius: 4))
-
-            if isCurrent {
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(Color.black.opacity(0.45))
-                    .frame(width: rowArtworkSize, height: rowArtworkSize)
-                PlayingIndicator(isPlaying: player.isPlaying, color: .white)
-            }
-        }
-        .frame(width: rowArtworkSize, height: rowArtworkSize)
-    }
-
-    private func songMenu(_ track: Child) -> some View {
-        let starred = starStore.isStarred(track)
-        let downloadState = downloads.state(for: track.id.raw)
-        return Menu {
-            Button {
-                starStore.toggleStarred(track)
-            } label: {
-                Label(
-                    starred ? "Remove from Favorites" : "Add to Favorites",
-                    systemImage: starred ? "star.slash.fill" : "star.fill"
-                )
-            }
-
-            Button {
-                player.playNext(track)
-            } label: {
-                Label("Play next", systemImage: "text.line.first.and.arrowtriangle.forward")
-            }
-            Button {
-                player.addToQueue(track)
-            } label: {
-                Label("Add to queue", systemImage: "text.line.last.and.arrowtriangle.forward")
-            }
-
-            switch downloadState {
-            case .completed:
-                Button(role: .destructive) {
-                    downloads.remove(songId: track.id.raw)
-                } label: {
-                    Label("Remove Download", systemImage: "checkmark.circle.fill")
-                }
-            case .queued, .downloading:
-                Label("Downloading…", systemImage: "arrow.down.circle")
-            default:
-                Button {
-                    downloads.download(track)
-                } label: {
-                    Label("Download", systemImage: "arrow.down.circle")
-                }
-            }
-        } label: {
-            Image(systemName: "ellipsis")
-                .foregroundStyle(.primary)
-                .font(.system(size: 18))
-                .frame(height: 20)
-                .contentShape(Rectangle())
+            .onChange(of: songs) { updateDisplayedSongs() }
+            .onChange(of: searchText) { updateDisplayedSongs() }
+            .onChange(of: filterOptionStorage) { updateDisplayedSongs() }
+            .onChange(of: sortFieldStorage) { updateDisplayedSongs() }
+            .onChange(of: sortOrderStorage) { updateDisplayedSongs() }
+            .onChange(of: starStore.overrides) { updateDisplayedSongs() }
         }
     }
 
@@ -253,7 +166,7 @@ struct SongsListView: View {
         player.play(queue: displayedSongs, startAt: index)
     }
 
-    private var displayedSongs: [Child] {
+    private func updateDisplayedSongs() {
         var result = songs
 
         if filterOption.wrappedValue == .favoritesOnly {
@@ -282,7 +195,7 @@ struct SongsListView: View {
             return sortOrder.wrappedValue == .ascending ? comparison == .orderedAscending : comparison == .orderedDescending
         }
 
-        return result
+        displayedSongs = result
     }
 
     private func refresh() {
@@ -371,6 +284,137 @@ struct SongsListView: View {
                 Image(systemName: "arrow.up.arrow.down")
                     .foregroundStyle(.primary)
             }
+        }
+    }
+}
+
+/// A single song row's content (artwork, title/artist, download status, overflow menu). A real
+/// `View` type — not just a function on `SongsListView` — so it can own its own `@ObservedObject`
+/// subscriptions: `List`/`ForEach` only materializes visible rows, so a `PlayerManager` playback
+/// tick or a `DownloadStore` progress update now only re-renders the handful of on-screen rows
+/// instead of `SongsListView`'s entire body (and the full-library resort that would trigger).
+private struct SongRow: View {
+    let track: Child
+    let rowArtworkSize: CGFloat
+    let displayScale: CGFloat
+
+    private let client = SubsonicClient.shared
+    @ObservedObject private var player = PlayerManager.shared
+    @ObservedObject private var starStore = StarStore.shared
+    @ObservedObject private var downloads = DownloadStore.shared
+
+    /// Resolved once, in `init` — `coverArtURL` signs every call with a fresh random token, so
+    /// recomputing it inline in `body` would hand `CachedAsyncImage` a "new" URL (and restart its
+    /// load task) on every one of this row's re-renders, even though it's the same image every
+    /// time. Mirrors the fix already applied to `AlbumView`'s artwork URL.
+    @State private var artworkURL: URL?
+
+    init(track: Child, rowArtworkSize: CGFloat, displayScale: CGFloat) {
+        self.track = track
+        self.rowArtworkSize = rowArtworkSize
+        self.displayScale = displayScale
+        let artId = track.coverArt ?? track.albumId?.raw ?? track.id.raw
+        let pixelSize = Int(rowArtworkSize * displayScale)
+        _artworkURL = State(initialValue: try? SubsonicClient.shared.coverArtURL(forId: artId, size: pixelSize))
+    }
+
+    var body: some View {
+        let isCurrent = player.currentTrack?.id == track.id
+        HStack(spacing: 12) {
+            artwork(isCurrent: isCurrent)
+
+            VStack(alignment: .leading) {
+                Text(track.title)
+
+                if let trackArtist = track.artist {
+                    Text(trackArtist)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer()
+
+            DownloadStatusIndicator(state: downloads.state(for: track.id.raw))
+
+            songMenu
+        }
+    }
+
+    @ViewBuilder
+    private func artwork(isCurrent: Bool) -> some View {
+        ZStack {
+            CachedAsyncImage(url: artworkURL) { image in
+                image
+                    .resizable()
+                    .aspectRatio(1, contentMode: .fill)
+            } placeholder: {
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.15))
+                    .overlay {
+                        Image(systemName: "music.note")
+                            .foregroundStyle(.secondary)
+                    }
+            }
+            .frame(width: rowArtworkSize, height: rowArtworkSize)
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+
+            if isCurrent {
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color.black.opacity(0.45))
+                    .frame(width: rowArtworkSize, height: rowArtworkSize)
+                PlayingIndicator(isPlaying: player.isPlaying, color: .white)
+            }
+        }
+        .frame(width: rowArtworkSize, height: rowArtworkSize)
+    }
+
+    private var songMenu: some View {
+        let starred = starStore.isStarred(track)
+        let downloadState = downloads.state(for: track.id.raw)
+        return Menu {
+            Button {
+                starStore.toggleStarred(track)
+            } label: {
+                Label(
+                    starred ? "Remove from Favorites" : "Add to Favorites",
+                    systemImage: starred ? "star.slash.fill" : "star.fill"
+                )
+            }
+
+            Button {
+                player.playNext(track)
+            } label: {
+                Label("Play next", systemImage: "text.line.first.and.arrowtriangle.forward")
+            }
+            Button {
+                player.addToQueue(track)
+            } label: {
+                Label("Add to queue", systemImage: "text.line.last.and.arrowtriangle.forward")
+            }
+
+            switch downloadState {
+            case .completed:
+                Button(role: .destructive) {
+                    downloads.remove(songId: track.id.raw)
+                } label: {
+                    Label("Remove Download", systemImage: "checkmark.circle.fill")
+                }
+            case .queued, .downloading:
+                Label("Downloading…", systemImage: "arrow.down.circle")
+            default:
+                Button {
+                    downloads.download(track)
+                } label: {
+                    Label("Download", systemImage: "arrow.down.circle")
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .foregroundStyle(.primary)
+                .font(.system(size: 18))
+                .frame(height: 20)
+                .contentShape(Rectangle())
         }
     }
 }
