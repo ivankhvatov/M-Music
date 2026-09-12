@@ -39,6 +39,31 @@ private enum ArtistAlbumSortOrder: LocalizedStringKey, CaseIterable {
     }
 }
 
+/// Buckets for the RELEASETYPE tag (OpenSubsonic), recognized case-insensitively in both
+/// singular and plural form. `allCases` is declared in the exact order carousels should appear
+/// in, with anything unrecognized (including no tag at all) falling into `.other`.
+private enum ReleaseTypeCategory: LocalizedStringKey, CaseIterable, Hashable {
+    case album = "Albums"
+    case ep = "EPs"
+    case single = "Singles"
+    case compilation = "Compilations"
+    case liveAlbum = "Live albums"
+    case instrumental = "Instrumentals"
+    case other = "Other"
+
+    init(rawTag: String?) {
+        switch (rawTag ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "album", "albums": self = .album
+        case "ep", "eps": self = .ep
+        case "single", "singles": self = .single
+        case "compilation", "compilations": self = .compilation
+        case "live album", "live albums": self = .liveAlbum
+        case "instrumental", "instrumentals": self = .instrumental
+        default: self = .other
+        }
+    }
+}
+
 struct ArtistAlbumsView: View {
     let artist: ArtistID3
 
@@ -56,6 +81,8 @@ struct ArtistAlbumsView: View {
 
     @AppStorage("artistAlbums.sortField") private var sortFieldStorage = ArtistAlbumSortField.title.storageKey
     @AppStorage("artistAlbums.sortOrder") private var sortOrderStorage = ArtistAlbumSortOrder.ascending.storageKey
+    @AppStorage("library.separateReleaseTypes") private var separateReleaseTypesEnabled = false
+    @AppStorage("library.groupReleaseVersions") private var groupReleaseVersionsEnabled = false
 
     private var sortField: Binding<ArtistAlbumSortField> {
         Binding(
@@ -180,6 +207,8 @@ struct ArtistAlbumsView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .padding(.top, 24)
+        } else if separateReleaseTypesEnabled && hasMultipleReleaseTypes {
+            releaseTypeCarousels
         } else {
             LazyVGrid(columns: gridColumns, spacing: 16) {
                 ForEach(sortedAlbums) { album in
@@ -194,8 +223,12 @@ struct ArtistAlbumsView: View {
         }
     }
 
+    private var displayAlbums: [AlbumID3] {
+        groupReleaseVersionsEnabled ? albums.groupedByPreferredVersion() : albums
+    }
+
     private var sortedAlbums: [AlbumID3] {
-        albums.sorted { lhs, rhs in
+        displayAlbums.sorted { lhs, rhs in
             let comparison: ComparisonResult
             switch sortField.wrappedValue {
             case .title:
@@ -206,6 +239,52 @@ struct ArtistAlbumsView: View {
                 comparison = lhsYear == rhsYear ? .orderedSame : (lhsYear < rhsYear ? .orderedAscending : .orderedDescending)
             }
             return sortOrder.wrappedValue == .ascending ? comparison == .orderedAscending : comparison == .orderedDescending
+        }
+    }
+
+    private var hasMultipleReleaseTypes: Bool {
+        Set(displayAlbums.map { ReleaseTypeCategory(rawTag: $0.releaseTypes?.first) }).count > 1
+    }
+
+    /// Buckets `sortedAlbums` by release type — each bucket keeps the current Title/Year +
+    /// Ascending/Descending sort internally, but the rows themselves always appear in the fixed
+    /// order `ReleaseTypeCategory.allCases` declares (Albums, EPs, Singles, Compilations, Live
+    /// albums, Instrumentals, Other), regardless of the album sort setting.
+    private var releaseTypeGroups: [(category: ReleaseTypeCategory, albums: [AlbumID3])] {
+        let buckets = Dictionary(grouping: sortedAlbums, by: { ReleaseTypeCategory(rawTag: $0.releaseTypes?.first) })
+        return ReleaseTypeCategory.allCases.compactMap { category in
+            buckets[category].map { (category: category, albums: $0) }
+        }
+    }
+
+    private var releaseTypeCarousels: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            ForEach(releaseTypeGroups, id: \.category) { group in
+                albumCarousel(title: group.category.rawValue, albums: group.albums)
+            }
+        }
+        .padding(.top, 8)
+    }
+
+    /// Same carousel presentation as `AlbumView`'s "Other versions"/"More by artist" rows.
+    private func albumCarousel(title: LocalizedStringKey, albums: [AlbumID3]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.system(size: 20, weight: .semibold))
+                .padding(.horizontal, 16)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 16) {
+                    ForEach(albums) { album in
+                        NavigationLink(destination: AlbumView(album: album, zoomNamespace: albumZoomNamespace)) {
+                            AlbumCardView(album: album, zoomNamespace: albumZoomNamespace, subtitle: .year)
+                                .frame(width: 160)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
         }
     }
 

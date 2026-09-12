@@ -69,6 +69,7 @@ struct AlbumsListView: View {
     @AppStorage("albumsList.filterOption") private var filterOptionStorage = AlbumFilterOption.all.storageKey
     @AppStorage("albumsList.sortField") private var sortFieldStorage = AlbumSortField.title.storageKey
     @AppStorage("albumsList.sortOrder") private var sortOrderStorage = AlbumSortOrder.ascending.storageKey
+    @AppStorage("library.groupReleaseVersions") private var groupReleaseVersionsEnabled = false
 
     private var filterOption: Binding<AlbumFilterOption> {
         Binding(
@@ -149,8 +150,13 @@ struct AlbumsListView: View {
     private var displayedAlbums: [AlbumID3] {
         var result = albums
 
-        if filterOption.wrappedValue == .favoritesOnly {
+        let isFavoritesOnly = filterOption.wrappedValue == .favoritesOnly
+        if isFavoritesOnly {
             result = result.filter { $0.isStarred }
+        }
+
+        if groupReleaseVersionsEnabled && !isFavoritesOnly {
+            result = result.groupedByPreferredVersion()
         }
 
         if !searchText.isEmpty {

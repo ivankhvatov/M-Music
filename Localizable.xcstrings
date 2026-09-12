@@ -492,7 +492,14 @@
       }
     },
     "All artists" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Все артисты"
+          }
+        }
+      }
     },
     "All songs" : {
       "localizations" : {
@@ -620,6 +627,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Сотовая связь"
+          }
+        }
+      }
+    },
+    "Compilations" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сборники"
           }
         }
       }
@@ -850,6 +867,16 @@
         }
       }
     },
+    "EPs" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Мини-альбомы"
+          }
+        }
+      }
+    },
     "Favorite" : {
       "localizations" : {
         "ru" : {
@@ -922,6 +949,16 @@
         }
       }
     },
+    "Group release versions" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Группировать версии релизов"
+          }
+        }
+      }
+    },
     "Home" : {
       "localizations" : {
         "de" : {
@@ -954,6 +991,16 @@
         }
       }
     },
+    "Instrumentals" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Инструменталы"
+          }
+        }
+      }
+    },
     "Keep cached for" : {
       "localizations" : {
         "ru" : {
@@ -976,6 +1023,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Медиатека"
+          }
+        }
+      }
+    },
+    "Live albums" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Концертные альбомы"
           }
         }
       }
@@ -1045,10 +1102,24 @@
       }
     },
     "Name: A-Z" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Имя: А-Я"
+          }
+        }
+      }
     },
     "Name: Z-A" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Имя: Я-А"
+          }
+        }
+      }
     },
     "Navidrome Server" : {
       "localizations" : {
@@ -1083,7 +1154,14 @@
       }
     },
     "No artists found." : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Артисты не найдены."
+          }
+        }
+      }
     },
     "No Downloads" : {
       "localizations" : {
@@ -1165,6 +1243,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Порядок"
+          }
+        }
+      }
+    },
+    "Other" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Другие"
           }
         }
       }
@@ -1407,49 +1495,18 @@
         }
       }
     },
-    "Search albums" : {
-      "extractionState" : "stale",
+    "Separate artist's release types" : {
       "localizations" : {
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Поиск по альбомам"
+            "value" : "Разделять типы релизов артиста"
           }
         }
       }
     },
-    "Search artists" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Поиск по артистам"
-          }
-        }
-      }
-    },
-    "Search playlists" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Поиск по плейлистам"
-          }
-        }
-      }
-    },
-    "Search songs" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Поиск по песням"
-          }
-        }
-      }
+    "Separate artist's release types shows an artist's albums, EPs, singles, and other release types as separate rows instead of one grid; artists with only one release type are unaffected. Group release versions collapses multiple versions of the same album (e.g. a Deluxe or Remastered edition) down to just the plain edition, or the one with the shortest version name if there's no plain edition — except when Albums is filtered to Favorite only." : {
+
     },
     "Server" : {
       "localizations" : {
@@ -1479,6 +1536,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Настройки"
+          }
+        }
+      }
+    },
+    "Singles" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Синглы"
           }
         }
       }
