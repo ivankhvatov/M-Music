@@ -86,6 +86,10 @@ final class PlayerManager: ObservableObject {
         restorePersistedState()
         configureRemoteCommandCenter()
         subscribeToEngine()
+        // Eagerly, so an already-cached track (from an earlier session) resolves correctly the
+        // very first time it's tapped, rather than only after some other download happens to run
+        // first and trigger this as a side effect — see `GaplessCacheService.preload()`.
+        Task { await GaplessCacheService.shared.preload() }
         backgroundObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
         ) { [weak self] _ in

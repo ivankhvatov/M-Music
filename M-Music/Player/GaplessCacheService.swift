@@ -95,10 +95,14 @@ actor GaplessCacheService {
         Task { await GaplessCacheDatabase.shared.touch(songId: songId) }
     }
 
-    /// Loads previously-cached rows from disk into `GaplessCacheStatus` — called once, lazily, so
-    /// a relaunch doesn't forget what's already cached.
+    /// Loads previously-cached rows from disk into `GaplessCacheStatus` — called once. `download`
+    /// also calls this itself as a defensive fallback, but the real caller is `PlayerManager.init`,
+    /// eagerly at launch: `GaplessCacheStatus.entry(for:)` is a plain synchronous dictionary read
+    /// with no way to lazily trigger this on its own, so without an eager call here, a track
+    /// that's already cached from an earlier session would wrongly stream live instead of loading
+    /// from disk if tapped before any *other* download happened to run first this session.
     private var didLoadExisting = false
-    private func loadExistingIfNeeded() async {
+    func preload() async {
         guard !didLoadExisting else { return }
         didLoadExisting = true
         let records = await GaplessCacheDatabase.shared.allRecords()
@@ -109,7 +113,7 @@ actor GaplessCacheService {
     }
 
     private func download(songId: String, url: URL, format: String, bitrate: Int, fallbackExtension: String) async {
-        await loadExistingIfNeeded()
+        await preload()
         do {
             var request = URLRequest(url: url)
             request.timeoutInterval = Self.requestTimeout
