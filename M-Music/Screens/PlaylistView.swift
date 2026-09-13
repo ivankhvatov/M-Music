@@ -66,8 +66,6 @@ struct PlaylistView: View {
             .listRowBackground(backgroundColor.darkened())
 
             trackListSection()
-                .listRowSeparator(.hidden)
-                .listRowBackground(backgroundColor.darkened())
 
             playlistFooter()
                 .listRowSeparator(.hidden)
@@ -106,6 +104,8 @@ struct PlaylistView: View {
             ProgressView()
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 24)
+                .listRowSeparator(.hidden)
+                .listRowBackground(backgroundColor.darkened())
         } else if let loadError {
             Text(loadError)
                 .font(.subheadline)
@@ -113,36 +113,67 @@ struct PlaylistView: View {
                 .frame(maxWidth: .infinity)
                 .multilineTextAlignment(.center)
                 .padding(.vertical, 24)
+                .listRowSeparator(.hidden)
+                .listRowBackground(backgroundColor.darkened())
         } else {
+            // Not a single row holding a hand-stacked `VStack` of all songs (which is how
+            // `AlbumView.trackList` does it): that shape ties every separator's vertical
+            // position to the cumulative height of every row above it, and `SongRow`'s
+            // text-driven heights routinely don't sum to a whole number of physical pixels —
+            // the hairline then straddles two pixel rows and gets antialiased into a fainter,
+            // uneven line, or effectively disappears, differently per row and per rebuild. One
+            // real `List` row per song sidesteps that: each row (and its separator overlay) is
+            // laid out from its own height alone.
             trackList()
         }
     }
 
-    /// Matches the leading edge of a `SongRow`'s title: the row's own horizontal padding plus the
-    /// artwork's frame width and its spacing to the title.
-    private var trackTitleLeadingInset: CGFloat { 4 + rowArtworkSize + 12 }
+    /// Matches the leading edge of a `SongRow`'s title: the artwork's frame width plus its
+    /// spacing to the title (mirrors `AlbumView.trackTitleLeadingInset`, adjusted for `SongRow`'s
+    /// wider artwork in place of `TrackRow`'s track-number column).
+    private var trackTitleLeadingInset: CGFloat { rowArtworkSize + 12 }
 
+    /// One real `List` row per song. The top/bottom boundary rules are overlays on the
+    /// first/last row rather than separator rows of their own — a `List` row is never shorter
+    /// than the system's default minimum row height, so a standalone row holding only a hairline
+    /// renders as a mostly-empty ~44pt row, not a thin rule.
+    ///
+    /// Every row's own insets are otherwise zero (see the fix for the previous "large top
+    /// padding" bug), so the first/last row additionally get a bit of extra top/bottom inset
+    /// here — deliberately, rather than relying on whatever default row inset a single
+    /// `AlbumView`-style row would have picked up — to keep the action buttons and footer from
+    /// sitting flush against the tracklist's boundary rules.
     func trackList() -> some View {
-        VStack(spacing: 0) {
-            trackSeparator()
-            ForEach(Array(songs.enumerated()), id: \.element.id) { index, track in
-                Button {
-                    playTrack(at: index)
-                } label: {
-                    SongRow(track: track, rowArtworkSize: rowArtworkSize, displayScale: displayScale)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 8)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .overlay(alignment: .bottom) {
-                    if index < songs.count - 1 {
-                        trackSeparator()
-                            .padding(.leading, trackTitleLeadingInset)
-                    }
+        ForEach(Array(songs.enumerated()), id: \.element.id) { index, track in
+            Button {
+                playTrack(at: index)
+            } label: {
+                SongRow(track: track, rowArtworkSize: rowArtworkSize, displayScale: displayScale)
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .listRowSeparator(.hidden)
+            .listRowBackground(backgroundColor.darkened())
+            .listRowInsets(EdgeInsets(
+                top: index == 0 ? 12 : 0,
+                leading: 16,
+                bottom: index == songs.count - 1 ? 12 : 0,
+                trailing: 16
+            ))
+            .overlay(alignment: .top) {
+                if index == 0 {
+                    trackSeparator()
                 }
             }
-            trackSeparator()
+            .overlay(alignment: .bottom) {
+                if index < songs.count - 1 {
+                    trackSeparator()
+                        .padding(.leading, trackTitleLeadingInset)
+                } else {
+                    trackSeparator()
+                }
+            }
         }
     }
 
@@ -253,7 +284,7 @@ struct PlaylistView: View {
             VStack(alignment: .center, spacing: 6) {
                 playlistArtwork()
                 Text(playlist.name)
-                    .font(.system(size: 24, weight: .semibold))
+                    .font(.system(size: 24, weight: .bold))
                     .multilineTextAlignment(.center)
                     .padding(.top, 15)
                 Text(playlist.owner ?? "Unknown Creator")

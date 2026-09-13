@@ -147,7 +147,7 @@ struct ArtistAlbumsView: View {
                             .foregroundStyle(.secondary)
                     }
             }
-            .frame(width: 160, height: 160)
+            .frame(width: 120, height: 120)
             .clipShape(Circle())
 
             Text(artist.name)
@@ -270,7 +270,7 @@ struct ArtistAlbumsView: View {
     private func albumCarousel(title: LocalizedStringKey, albums: [AlbumID3]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title)
-                .font(.system(size: 20, weight: .semibold))
+                .font(.system(size: 20, weight: .bold))
                 .padding(.horizontal, 16)
 
             ScrollView(.horizontal, showsIndicators: false) {
