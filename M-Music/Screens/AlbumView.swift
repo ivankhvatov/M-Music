@@ -26,6 +26,8 @@ struct AlbumView: View {
     @State private var moreByArtist: [AlbumID3] = []
     @State private var hasRelatedAlbums: Bool = false
 
+    @AppStorage("library.groupReleaseVersions") private var groupReleaseVersionsEnabled = false
+
     @State private var isStarred: Bool
     @State private var backgroundColor: Color
 
@@ -137,7 +139,10 @@ struct AlbumView: View {
             let artist = try await client.getArtist(id: artistId)
             let albumName = album.name.lowercased()
             let others = artist.album.filter { $0.id != album.id && $0.name.lowercased() == albumName }
-            let more = artist.album.filter { $0.name.lowercased() != albumName }
+            var more = artist.album.filter { $0.name.lowercased() != albumName }
+            if groupReleaseVersionsEnabled {
+                more = more.groupedByPreferredVersion()
+            }
             await MainActor.run {
                 otherVersions = others
                 moreByArtist = more.reversed()
@@ -272,6 +277,11 @@ struct AlbumView: View {
         player.play(queue: songs, startAt: index)
     }
 
+    private func shuffle() {
+        guard !songs.isEmpty else { return }
+        player.play(queue: songs.shuffled(), startAt: 0)
+    }
+
     private var trackCountAndDuration: String {
         let totalMinutes = album.duration / 60
         let songsText = String(localized: "\(album.songCount) songs")
@@ -358,7 +368,9 @@ struct AlbumView: View {
 
     func actionButtons() -> some View {
         HStack(spacing: 12) {
-            Button {} label: {
+            Button {
+                shuffle()
+            } label: {
                 Image(systemName: "shuffle")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(.primary)
@@ -366,6 +378,7 @@ struct AlbumView: View {
                     .background(Color.gray.opacity(0.3))
                     .clipShape(Circle())
             }
+            .disabled(songs.isEmpty)
 
             Button {
                 playTrack(at: 0)

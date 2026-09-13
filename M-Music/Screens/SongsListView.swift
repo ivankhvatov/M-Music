@@ -312,7 +312,7 @@ private struct SongNowPlayingOverlay: View {
     }
 }
 
-private struct SongRow: View {
+struct SongRow: View {
     let track: Child
     let rowArtworkSize: CGFloat
     let displayScale: CGFloat

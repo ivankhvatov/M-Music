@@ -733,6 +733,22 @@
         }
       }
     },
+    "Delete the playlist from this device?" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Playlist von diesem Gerät löschen?"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удалить плейлист с этого устройства?"
+          }
+        }
+      }
+    },
     "Descending" : {
       "localizations" : {
         "ru" : {
@@ -1175,6 +1191,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Нет загрузок"
+          }
+        }
+      }
+    },
+    "No playlists found." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keine Playlists gefunden."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Плейлисты не найдены."
           }
         }
       }
@@ -1682,6 +1714,108 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Неизвестный альбом"
+          }
+        }
+      }
+    },
+    "Updated %lld days ago" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Vor %lld Tag aktualisiert"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Vor %lld Tagen aktualisiert"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Updated %lld day ago"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Updated %lld days ago"
+                }
+              }
+            }
+          }
+        },
+        "ru" : {
+          "variations" : {
+            "plural" : {
+              "few" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Обновлено %lld дня назад"
+                }
+              },
+              "many" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Обновлено %lld дней назад"
+                }
+              },
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Обновлено %lld день назад"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Обновлено %lld дней назад"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Updated today" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Heute aktualisiert"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Обновлено сегодня"
+          }
+        }
+      }
+    },
+    "Updated yesterday" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gestern aktualisiert"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Обновлено вчера"
           }
         }
       }
