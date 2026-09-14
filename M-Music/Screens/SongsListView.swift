@@ -366,12 +366,21 @@ struct SongRow: View {
 
     private var artwork: some View {
         ZStack {
+            // `.fit`, not `.fill` — a non-square cover keeps its own aspect ratio (its longer
+            // side matching `rowArtworkSize`) instead of being cropped to fill a square, and the
+            // rounded corners/outline below clip and trace its own resulting bounds rather than
+            // the fixed square frame.
             CachedAsyncImage(url: artworkURL) { image in
                 image
                     .resizable()
-                    .aspectRatio(1, contentMode: .fill)
+                    .aspectRatio(contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 4)
+                            .stroke(Color.secondary, lineWidth: 0.1)
+                    )
             } placeholder: {
-                Rectangle()
+                RoundedRectangle(cornerRadius: 4)
                     .fill(Color.secondary.opacity(0.15))
                     .overlay {
                         Image(systemName: "music.note")
@@ -379,7 +388,6 @@ struct SongRow: View {
                     }
             }
             .frame(width: rowArtworkSize, height: rowArtworkSize)
-            .clipShape(RoundedRectangle(cornerRadius: 4))
 
             SongNowPlayingOverlay(trackId: track.id, rowArtworkSize: rowArtworkSize)
         }

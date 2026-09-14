@@ -36,27 +36,35 @@ struct PlaylistCardView: View {
 
     @ViewBuilder
     private var artwork: some View {
-        // Same URL PlaylistView requests (original size, no `size` param), so opening this
-        // playlist reuses the image straight from ImageCache instead of triggering a second
-        // fetch — see CachedAsyncImage.
-        let image = CachedAsyncImage(url: artworkURL) { image in
-            image
-                .resizable()
-                .aspectRatio(1, contentMode: .fit)
-        } placeholder: {
-            Rectangle()
-                .fill(Color.secondary.opacity(0.15))
-                .aspectRatio(1, contentMode: .fit)
-                .overlay {
-                    Image(systemName: "music.note.list")
-                        .foregroundStyle(.secondary)
+        // `Color.clear.aspectRatio(1, contentMode: .fit)` establishes the square footprint every
+        // card in the grid shares (its side derived from the column's proposed width, same as
+        // this used to do directly) — `.overlay` then proposes that resolved square, concretely,
+        // to the real artwork below, so a non-square cover can `.fit` within it (longer side
+        // matching the square, not stretched to fill it) instead of forcing a 1:1 crop.
+        let image = Color.clear
+            .aspectRatio(1, contentMode: .fit)
+            .overlay {
+                // Same URL PlaylistView requests (original size, no `size` param), so opening
+                // this playlist reuses the image straight from ImageCache instead of triggering
+                // a second fetch — see CachedAsyncImage.
+                CachedAsyncImage(url: artworkURL) { image in
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.secondary, lineWidth: 0.15)
+                        )
+                } placeholder: {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.secondary.opacity(0.15))
+                        .overlay {
+                            Image(systemName: "music.note.list")
+                                .foregroundStyle(.secondary)
+                        }
                 }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.secondary, lineWidth: 0.15)
-        )
+            }
 
         if let zoomNamespace {
             image.matchedTransitionSource(id: playlist.id, in: zoomNamespace)
