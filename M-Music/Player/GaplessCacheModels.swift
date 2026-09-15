@@ -17,6 +17,12 @@ struct GaplessCacheRecord: Codable, Identifiable, FetchableRecord, PersistableRe
     var byteSize: Int64
     var cachedAt: Date
     var lastPlayedAt: Date
+    /// Display metadata only — purely for `PlaybackSettingsView`'s cached-songs list, never used
+    /// to resolve playback (that's always by `songId`).
+    var title: String
+    var artist: String?
+    var album: String?
+    var albumId: String?
 
     var id: String { songId }
     var fileURL: URL { URL(fileURLWithPath: filePath) }

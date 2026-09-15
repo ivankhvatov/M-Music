@@ -2,9 +2,14 @@ import Foundation
 import GRDB
 
 /// SQLite-backed catalog of `GaplessCacheService`'s cached tracks, via GRDB — mirrors
-/// `DownloadDatabase`'s shape, but deliberately lives under `Library/Caches` rather than
-/// `Application Support`: this data is disposable (iOS may reclaim it under storage pressure,
-/// and it must never be backed up to iCloud), unlike a real download the user asked to keep.
+/// `DownloadDatabase`'s shape and, like it, lives under `Application Support` rather than
+/// `Library/Caches`. It was originally placed under `Library/Caches` on the reasoning that this
+/// data is disposable — but that directory is also one iOS can silently purge under storage
+/// pressure at any time, with no notice to the app, which defeats the entire point of this cache
+/// having its own user-configured size limit and retention window (`GaplessCacheSettings`): the
+/// app's own policy should be the only thing that decides when an entry goes away. Marked
+/// excluded from backup below instead, to get `Application Support`'s durability without also
+/// bloating someone's device backup with easily-refetched data.
 actor GaplessCacheDatabase {
     static let shared = GaplessCacheDatabase()
 
@@ -13,6 +18,7 @@ actor GaplessCacheDatabase {
     private init() {
         let directory = Self.rootDirectory()
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        Self.excludeFromBackup(directory)
         let dbURL = directory.appendingPathComponent("cache.sqlite")
         do {
             dbQueue = try DatabaseQueue(path: dbURL.path)
@@ -27,8 +33,15 @@ actor GaplessCacheDatabase {
     }
 
     static func rootDirectory() -> URL {
-        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return base.appendingPathComponent("GaplessCache", isDirectory: true)
+    }
+
+    private static func excludeFromBackup(_ directory: URL) {
+        var directory = directory
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? directory.setResourceValues(values)
     }
 
     private var migrator: DatabaseMigrator {
@@ -43,6 +56,10 @@ actor GaplessCacheDatabase {
                 t.column("byteSize", .integer).notNull()
                 t.column("cachedAt", .datetime).notNull()
                 t.column("lastPlayedAt", .datetime).notNull().indexed()
+                t.column("title", .text).notNull()
+                t.column("artist", .text)
+                t.column("album", .text)
+                t.column("albumId", .text)
             }
         }
         return migrator
@@ -64,6 +81,16 @@ actor GaplessCacheDatabase {
         try? await dbQueue.write { db in
             _ = try GaplessCacheRecord.deleteOne(db, key: songId)
         }
+    }
+
+    /// Deletes every cached row. Returns the deleted records so the caller can remove their
+    /// files from disk.
+    func deleteAll() async -> [GaplessCacheRecord] {
+        (try? await dbQueue.write { db in
+            let all = try GaplessCacheRecord.fetchAll(db)
+            try GaplessCacheRecord.deleteAll(db)
+            return all
+        }) ?? []
     }
 
     func record(songId: String) async -> GaplessCacheRecord? {

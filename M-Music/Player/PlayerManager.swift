@@ -567,7 +567,7 @@ final class PlayerManager: ObservableObject {
         gaplessCachingSongId = nextTrack.id.raw
         Task {
             await GaplessCacheService.shared.enqueue(
-                songId: nextTrack.id.raw, url: url, format: format, bitrate: bitrate, fallbackExtension: fallbackExtension
+                song: nextTrack, url: url, format: format, bitrate: bitrate, fallbackExtension: fallbackExtension
             )
         }
     }

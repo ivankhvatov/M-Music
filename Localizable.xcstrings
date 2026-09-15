@@ -631,6 +631,9 @@
         }
       }
     },
+    "Clear Cache" : {
+
+    },
     "Compilations" : {
       "localizations" : {
         "ru" : {
@@ -702,6 +705,9 @@
           }
         }
       }
+    },
+    "Delete all cached songs?" : {
+
     },
     "Delete All Downloads" : {
       "localizations" : {
@@ -1242,6 +1248,9 @@
           }
         }
       }
+    },
+    "No cached songs." : {
+
     },
     "No Downloads" : {
       "localizations" : {

@@ -29,8 +29,29 @@ struct PlaybackSettingsView: View {
     @AppStorage(GaplessCacheSettings.Keys.sizeLimit) private var gaplessCacheSizeLimit = GaplessCacheSizeLimit.mb500
     @AppStorage(GaplessCacheSettings.Keys.retention) private var gaplessCacheRetention = GaplessCacheRetention.day3
     @State private var gaplessCacheUsageBytes: Int64 = 0
+    @State private var cachedRecords: [GaplessCacheRecord] = []
+    @State private var isCachedListExpanded = false
+    @State private var showingClearCacheConfirmation = false
 
     private let gainRange: ClosedRange<Double> = -15...15
+
+    private struct CachedAlbumGroup: Identifiable {
+        let id: String
+        let title: String
+        let songs: [GaplessCacheRecord]
+    }
+
+    private var cachedAlbumGroups: [CachedAlbumGroup] {
+        Dictionary(grouping: cachedRecords) { $0.albumId ?? $0.album ?? "" }
+            .map { key, records in
+                CachedAlbumGroup(
+                    id: key,
+                    title: records.first?.album ?? String(localized: "Unknown Album"),
+                    songs: records.sorted { $0.title.sortKey.localizedStandardCompare($1.title.sortKey) == .orderedAscending }
+                )
+            }
+            .sorted { $0.title.sortKey.localizedStandardCompare($1.title.sortKey) == .orderedAscending }
+    }
 
     var body: some View {
         NavigationStack {
@@ -160,12 +181,44 @@ struct PlaybackSettingsView: View {
                         .pickerStyle(.menu)
                         .disabled(!isGaplessCacheEnabled)
 
-                        HStack {
-                            Text("Currently cached")
-                            Spacer()
-                            Text(ByteCountFormatter.string(fromByteCount: gaplessCacheUsageBytes, countStyle: .file))
-                                .foregroundStyle(.secondary)
+                        DisclosureGroup(isExpanded: $isCachedListExpanded) {
+                            if cachedAlbumGroups.isEmpty {
+                                Text("No cached songs.")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                ForEach(cachedAlbumGroups) { group in
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(group.title)
+                                            .font(.subheadline.weight(.semibold))
+                                        ForEach(group.songs) { song in
+                                            HStack {
+                                                Text(song.title)
+                                                    .font(.subheadline)
+                                                    .foregroundStyle(.secondary)
+                                                Spacer()
+                                                Text(ByteCountFormatter.string(fromByteCount: song.byteSize, countStyle: .file))
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                        }
+                                    }
+                                    .padding(.vertical, 2)
+                                }
+                            }
+                        } label: {
+                            HStack {
+                                Text("Currently cached")
+                                Spacer()
+                                Text(ByteCountFormatter.string(fromByteCount: gaplessCacheUsageBytes, countStyle: .file))
+                                    .foregroundStyle(.secondary)
+                            }
                         }
+
+                        Button("Clear Cache", role: .destructive) {
+                            showingClearCacheConfirmation = true
+                        }
+                        .disabled(cachedRecords.isEmpty)
                     } header: {
                         Text("Gapless Caching")
                     } footer: {
@@ -177,9 +230,24 @@ struct PlaybackSettingsView: View {
             .toolbar {
             }
             .task {
-                gaplessCacheUsageBytes = await GaplessCacheDatabase.shared.totalBytes()
+                await reloadGaplessCacheInfo()
+            }
+            .confirmationDialog(
+                "Delete all cached songs?", isPresented: $showingClearCacheConfirmation, titleVisibility: .visible
+            ) {
+                Button("Clear Cache", role: .destructive) {
+                    Task {
+                        await GaplessCacheService.shared.clearAll()
+                        await reloadGaplessCacheInfo()
+                    }
+                }
             }
         }
+    }
+
+    private func reloadGaplessCacheInfo() async {
+        gaplessCacheUsageBytes = await GaplessCacheDatabase.shared.totalBytes()
+        cachedRecords = await GaplessCacheDatabase.shared.allRecords()
     }
 }
 

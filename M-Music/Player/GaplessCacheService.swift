@@ -35,6 +35,11 @@ final class GaplessCacheStatus: ObservableObject {
         cachedEntries.removeValue(forKey: songId)
     }
 
+    func removeAll() {
+        activeSongIds.removeAll()
+        cachedEntries.removeAll()
+    }
+
     func entry(for songId: String) -> Entry? {
         cachedEntries[songId]
     }
@@ -69,13 +74,16 @@ actor GaplessCacheService {
 
     /// `fallbackExtension` is used only if the downloaded payload can't be identified by content
     /// sniffing or MIME type (rare) — the caller's best guess at the real file extension (the
-    /// track's own `suffix` for a raw file, or the transcode codec for a transcoded one).
-    func enqueue(songId: String, url: URL, format: String, bitrate: Int, fallbackExtension: String) {
+    /// track's own `suffix` for a raw file, or the transcode codec for a transcoded one). `song`
+    /// is only ever used for its display metadata (title/artist/album), for
+    /// `PlaybackSettingsView`'s cached-songs list — playback resolution is always by `song.id.raw`.
+    func enqueue(song: Child, url: URL, format: String, bitrate: Int, fallbackExtension: String) {
         guard GaplessCacheSettings.isEnabled else { return }
+        let songId = song.id.raw
         guard activeTasks[songId] == nil else { return }
         Task { @MainActor in GaplessCacheStatus.shared.markActive(songId) }
         activeTasks[songId] = Task {
-            await self.download(songId: songId, url: url, format: format, bitrate: bitrate, fallbackExtension: fallbackExtension)
+            await self.download(song: song, url: url, format: format, bitrate: bitrate, fallbackExtension: fallbackExtension)
             self.activeTasks.removeValue(forKey: songId)
         }
     }
@@ -101,6 +109,11 @@ actor GaplessCacheService {
     /// with no way to lazily trigger this on its own, so without an eager call here, a track
     /// that's already cached from an earlier session would wrongly stream live instead of loading
     /// from disk if tapped before any *other* download happened to run first this session.
+    ///
+    /// Also runs eviction once here, not only as a side effect of a new download landing (see
+    /// `download(...)` below) — a session that never caches anything new (replaying an
+    /// already-fully-cached set of tracks, say) would otherwise never enforce the user's own
+    /// size-limit/retention settings at all, since nothing else ever triggers that check.
     private var didLoadExisting = false
     func preload() async {
         guard !didLoadExisting else { return }
@@ -110,9 +123,11 @@ actor GaplessCacheService {
             let entry = GaplessCacheStatus.Entry(url: record.fileURL, format: record.format, bitrate: record.bitrate)
             await MainActor.run { GaplessCacheStatus.shared.markCached(record.songId, entry: entry) }
         }
+        await runEviction()
     }
 
-    private func download(songId: String, url: URL, format: String, bitrate: Int, fallbackExtension: String) async {
+    private func download(song: Child, url: URL, format: String, bitrate: Int, fallbackExtension: String) async {
+        let songId = song.id.raw
         await preload()
         do {
             var request = URLRequest(url: url)
@@ -137,7 +152,8 @@ actor GaplessCacheService {
             let now = Date()
             let record = GaplessCacheRecord(
                 songId: songId, format: format, bitrate: bitrate, filePath: destination.path,
-                fileExtension: ext, byteSize: byteSize, cachedAt: now, lastPlayedAt: now
+                fileExtension: ext, byteSize: byteSize, cachedAt: now, lastPlayedAt: now,
+                title: song.title, artist: song.artist, album: song.album, albumId: song.albumId?.raw
             )
             await GaplessCacheDatabase.shared.upsert(record)
             await runEviction()
@@ -148,6 +164,19 @@ actor GaplessCacheService {
             guard !Task.isCancelled else { return }
             await MainActor.run { GaplessCacheStatus.shared.remove(songId) }
         }
+    }
+
+    /// Deletes every cached track and cancels anything in flight — "Clear cache" in
+    /// `PlaybackSettingsView`.
+    func clearAll() async {
+        for songId in Array(activeTasks.keys) {
+            cancel(songId: songId)
+        }
+        let records = await GaplessCacheDatabase.shared.deleteAll()
+        for record in records {
+            try? FileManager.default.removeItem(at: record.fileURL)
+        }
+        await MainActor.run { GaplessCacheStatus.shared.removeAll() }
     }
 
     private func runEviction() async {
