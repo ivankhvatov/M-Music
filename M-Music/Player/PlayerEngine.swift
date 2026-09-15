@@ -211,6 +211,14 @@ final class PlayerEngine: ObservableObject {
         } else {
             setupItemFinishedObserver()
         }
+
+        // `AVQueuePlayer` is *supposed* to keep the transport running on its own once it advances
+        // into the next queued item, but doesn't always reliably do so right at the boundary —
+        // observed as: `isPlaying` says true, but the real player sits at `rate == 0` forever,
+        // and nothing else ever calls `.play()` again to nudge it. An explicit call here is a
+        // no-op if the queue player already continued on its own, and fixes it if it didn't —
+        // exactly mirroring what `loadAndPlay`/`resume()` already do for every other transition.
+        player.play()
     }
 
     func pause() {

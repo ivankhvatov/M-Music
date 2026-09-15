@@ -103,6 +103,18 @@ actor GaplessCacheService {
         Task { await GaplessCacheDatabase.shared.touch(songId: songId) }
     }
 
+    /// Removes any in-flight or already-completed gapless-cache copy of `songId` — used once a
+    /// real download for that song lands, making the gapless-cache copy redundant per the
+    /// "downloaded songs always win" rule in `PlayerManager.streamURL(for:)`/
+    /// `prepareNextItemViaGaplessCache`. A safe no-op if there's nothing cached for this song.
+    func removeIfPresent(songId: String) async {
+        cancel(songId: songId)
+        guard let record = await GaplessCacheDatabase.shared.record(songId: songId) else { return }
+        await GaplessCacheDatabase.shared.delete(songId: songId)
+        try? FileManager.default.removeItem(at: record.fileURL)
+        await MainActor.run { GaplessCacheStatus.shared.remove(songId) }
+    }
+
     /// Loads previously-cached rows from disk into `GaplessCacheStatus` — called once. `download`
     /// also calls this itself as a defensive fallback, but the real caller is `PlayerManager.init`,
     /// eagerly at launch: `GaplessCacheStatus.entry(for:)` is a plain synchronous dictionary read

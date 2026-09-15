@@ -90,6 +90,11 @@ final class PlayerManager: ObservableObject {
         // very first time it's tapped, rather than only after some other download happens to run
         // first and trigger this as a side effect — see `GaplessCacheService.preload()`.
         Task { await GaplessCacheService.shared.preload() }
+        // Same reasoning, but for real downloads: `DownloadStore.shared` (which is what actually
+        // populates `LocalDownloadIndex`) is otherwise only ever referenced from SwiftUI views —
+        // referencing it here is what makes it exist at all in a session that never visits one of
+        // those screens before starting playback.
+        Task { await DownloadStore.shared.reload() }
         backgroundObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -281,8 +286,17 @@ final class PlayerManager: ObservableObject {
         guard currentTrack != nil else { return }
         guard hasLoadedItem else {
             // Lazily restored from a previous session: nothing's been streamed yet, so build the
-            // item now and pick up from the restored `currentTime`.
-            loadCurrentItem(autoplay: true, startTime: currentTime)
+            // item now and pick up from the restored `currentTime`. First, explicitly wait for
+            // both the gapless-cache and downloads indexes to load (each kicked off in init(),
+            // but not awaited there) — without this, a Play tap landing right after launch can
+            // race those still-suspended Tasks and resolve this track's URL before either index
+            // is actually populated, streaming live even though it's genuinely downloaded/cached.
+            // Both are cheap once already finished elsewhere (idempotent, guarded/re-readable).
+            Task {
+                await GaplessCacheService.shared.preload()
+                await DownloadStore.shared.reload()
+                loadCurrentItem(autoplay: true, startTime: currentTime)
+            }
             return
         }
         engine.resume()
@@ -328,13 +342,26 @@ final class PlayerManager: ObservableObject {
 
         duration = TimeInterval(track.duration ?? 0)
         currentTime = startTime
-        if startTime > 0 {
-            engine.seek(to: startTime)
-        }
 
         updateArtworkURL()
         updateNowPlayingInfo()
-        prepareNextItem()
+        // Deferred until any seek below completes, rather than run right away regardless —
+        // `prepareNextItem()` can insert the next track into `PlayerEngine`'s `AVQueuePlayer`
+        // queue (`preloadForGapless`), and doing that while a seek on the just-created current
+        // item is still in flight is a plausible trigger for the queue player to stop reliably
+        // advancing its own playback rate once it later reaches that preloaded item — surfacing,
+        // much later, as "the next track becomes current but plays no audio, and play/pause does
+        // nothing." A seek only happens here when resuming a persisted position (effectively:
+        // the very first `resume()` after a fresh launch) or during `recoverFromPlaybackFailure`'s
+        // reconnect — every other track load passes `startTime: 0` and hits the `else` branch
+        // exactly as before.
+        if startTime > 0 {
+            engine.seek(to: startTime) { [weak self] _ in
+                self?.prepareNextItem()
+            }
+        } else {
+            prepareNextItem()
+        }
         updateNowPlayingPlaybackState()
         persistState()
     }
@@ -489,18 +516,19 @@ final class PlayerManager: ObservableObject {
     /// track nears its end — has a better chance of finding a local copy already sitting in the
     /// cache instead of a live network URL, more resilient to a hiccup right at the boundary.
     ///
-    /// Deliberately does *nothing* when the next track has no local copy and would be streamed
-    /// through the server's live transcoder: unlike a static file, a transcoded stream is
-    /// generated on the fly for one request and can't be meaningfully paused mid-download and
-    /// resumed later. Preloading it this far ahead of when it's actually needed leaves that
-    /// connection sitting idle for the rest of the current track; by the time `AVQueuePlayer`
-    /// finally needs it, the connection (or the server's encoder process) has often gone stale,
-    /// and reconnecting to a live transcode either restarts it from position 0 or fails outright
-    /// — audible as a glitch, a restart, or a dropped track. `handleTrackFinishedNaturally()`'s
-    /// fallback opens a fresh connection at the exact moment it's needed instead: a brief reload
-    /// rather than a seamless handoff, but reliable. A downloaded track (even one transcoded at
-    /// download time) is unaffected — it's just a file on disk by playback time, so it's caught by
-    /// the local-copy check below and stays fully gapless.
+    /// A live-transcoded next track with no local copy *is* preloaded here like anything else,
+    /// even though unlike a static file, a transcoded stream is generated on the fly for one
+    /// request and can't be meaningfully paused mid-download and resumed later — preloading it
+    /// this far ahead of when it's needed can leave that connection sitting idle long enough to
+    /// go stale, audible as a glitch, a restart, or a dropped track on the transition. An earlier
+    /// version of this method skipped preloading in that case to dodge the glitch, falling back to
+    /// `handleTrackFinishedNaturally()`'s fresh-connection reload instead — trading away gapless
+    /// playback for reliability. `GaplessCacheSettings.isEnabled` ("Cache upcoming track") is the
+    /// real fix for that tradeoff: `prepareNextItemViaGaplessCache` below only ever preloads an
+    /// actual local file, once fully downloaded ahead of time, so it's both gapless and glitch-free.
+    /// With that setting off, gapless playback is preloaded here unconditionally instead, on the
+    /// same terms as before that workaround existed — accepting the occasional live-transcode
+    /// glitch as the cost of staying gapless rather than silently degrading every transition.
     private func prepareNextItem() {
         guard let currentIndex else { return }
         let nextIndex = currentIndex + 1
@@ -514,7 +542,6 @@ final class PlayerManager: ObservableObject {
 
         let localURL = LocalDownloadIndex.shared.url(songId: nextTrack.id.raw)
             ?? StreamCacheStatus.shared.url(for: nextTrack.id.raw)
-        guard localURL != nil || !shouldTranscode(nextTrack) else { return }
 
         guard let url = try? streamURL(for: nextTrack) else { return }
         engine.preloadForGapless(url: url)
@@ -542,6 +569,10 @@ final class PlayerManager: ObservableObject {
     /// once it lands, since there's no safe URL to preload until then.
     private func prepareNextItemViaGaplessCache(_ nextTrack: Child) {
         if let downloadURL = LocalDownloadIndex.shared.url(songId: nextTrack.id.raw) {
+            // This track may have started (or even finished) gapless-caching before its real
+            // download landed — now that it's confirmed downloaded, that copy is redundant.
+            if gaplessCachingSongId == nextTrack.id.raw { gaplessCachingSongId = nil }
+            Task { await GaplessCacheService.shared.removeIfPresent(songId: nextTrack.id.raw) }
             engine.preloadForGapless(url: downloadURL)
             gaplessPreloadedIndex = currentIndex.map { $0 + 1 }
             return

@@ -75,7 +75,11 @@ final class DownloadStore: ObservableObject {
         }
     }
 
-    private func reload() async {
+    /// Not `private` — `PlayerManager` also awaits this directly (see its `init()`/`resume()`),
+    /// since `DownloadStore.shared` is otherwise only ever referenced from SwiftUI views and would
+    /// never even be instantiated in a session that never visits one of those screens, leaving
+    /// `LocalDownloadIndex` permanently empty for playback's own download lookups.
+    func reload() async {
         let records = await DownloadDatabase.shared.allRecords()
         let stats = await DownloadDatabase.shared.storageStats()
         LocalDownloadIndex.shared.replaceAll(Dictionary(uniqueKeysWithValues: records.map { ($0.songId, $0.filePath) }))
@@ -98,6 +102,9 @@ final class DownloadStore: ObservableObject {
             progressBySongId.removeValue(forKey: update.songId)
             failedSongIds.remove(update.songId)
             await reload()
+            // A gapless-cache copy of this song, if any (in flight or already finished), is now
+            // redundant — the real download always wins for playback, so it's just dead weight.
+            Task { await GaplessCacheService.shared.removeIfPresent(songId: update.songId) }
         case .failed:
             progressBySongId.removeValue(forKey: update.songId)
             failedSongIds.insert(update.songId)
