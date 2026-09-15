@@ -61,7 +61,7 @@ struct PlaylistsListView: View {
                 }
             }
             .navigationTitle("Playlists")
-            .searchable(text: $searchText, prompt: "Search")
+            .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
             .onAppear {
                 refresh()
             }

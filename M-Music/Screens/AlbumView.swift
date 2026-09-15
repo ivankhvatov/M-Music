@@ -83,8 +83,6 @@ struct AlbumView: View {
             .listRowBackground(backgroundColor.darkened())
 
             trackListSection()
-                .listRowSeparator(.hidden)
-                .listRowBackground(backgroundColor.darkened())
 
             albumFooter()
                 .listRowSeparator(.hidden)
@@ -212,6 +210,8 @@ struct AlbumView: View {
             ProgressView()
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 24)
+                .listRowSeparator(.hidden)
+                .listRowBackground(backgroundColor.darkened())
         } else if let loadError {
             Text(loadError)
                 .font(.subheadline)
@@ -219,43 +219,67 @@ struct AlbumView: View {
                 .frame(maxWidth: .infinity)
                 .multilineTextAlignment(.center)
                 .padding(.vertical, 24)
+                .listRowSeparator(.hidden)
+                .listRowBackground(backgroundColor.darkened())
         } else {
             trackList()
         }
     }
 
+    // Not a single row holding a hand-stacked `VStack` of all songs (which is how this used to be
+    // built): that shape ties every separator's vertical position to the cumulative height of
+    // every row above it, and `TrackRow`'s text-driven heights routinely don't sum to a whole
+    // number of physical pixels — the hairline then straddles two pixel rows and gets
+    // antialiased into a fainter, uneven line, or effectively disappears, differently per row and
+    // per rebuild (worse the taller a row got, e.g. one showing a displayed artist name). One real
+    // `List` row per song sidesteps that: each row (and its separator overlay) is laid out from
+    // its own height alone — see `PlaylistView.trackList()`, fixed the same way.
     func trackList() -> some View {
-        VStack(spacing: 0) {
-            trackSeparator()
-            ForEach(Array(songs.enumerated()), id: \.element.id) { index, track in
-                // A `Button` (rather than `.onTapGesture` on the row) so the trailing `Menu`'s own
-                // taps take priority correctly — `.onTapGesture` on a container is a separate
-                // gesture recognizer that can swallow taps meant for a nested interactive control
-                // like `Menu`, whereas nesting an actual button-like control inside a `Button`'s
-                // label is a configuration SwiftUI resolves hit-testing for correctly.
-                Button {
-                    playTrack(at: index)
-                } label: {
-                    TrackRow(track: track, albumArtist: album.artist)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 16)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                // Anchored to this row's own bottom edge rather than being a separate sibling in
-                // the VStack — a sibling's position depends on the cumulative height of every row
-                // above it, which made it fragile (and apparently still is even with an explicit,
-                // fixed-size separator view) specifically once several rows in a row are taller
-                // for showing a displayed artist name. Deriving the separator from this row's own
-                // resolved geometry instead means it can't be affected by its neighbors.
-                .overlay(alignment: .bottom) {
-                        if index < songs.count - 1 {
-                            trackSeparator()
-                                .padding(.leading, trackTitleLeadingInset)
-                        }
-                    }
+        ForEach(Array(songs.enumerated()), id: \.element.id) { index, track in
+            // A `Button` (rather than `.onTapGesture` on the row) so the trailing `Menu`'s own
+            // taps take priority correctly — `.onTapGesture` on a container is a separate
+            // gesture recognizer that can swallow taps meant for a nested interactive control
+            // like `Menu`, whereas nesting an actual button-like control inside a `Button`'s
+            // label is a configuration SwiftUI resolves hit-testing for correctly.
+            Button {
+                playTrack(at: index)
+            } label: {
+                TrackRow(track: track, albumArtist: album.artist)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 16)
+                    .contentShape(Rectangle())
             }
-            trackSeparator()
+            .buttonStyle(.plain)
+            .listRowSeparator(.hidden)
+            .listRowBackground(backgroundColor.darkened())
+            // Every row's own vertical inset, rather than the system default a `List` row
+            // otherwise picks up — that default only ever applied once to the whole tracklist
+            // back when every track lived in one hand-stacked row; now that each track is its
+            // own row, leaving it in place would stack it on top of this row's own `.padding
+            // (.vertical, 16)` for every row after the first, making their top edge visibly
+            // bigger than their bottom edge. Zeroing it here lets that 16pt padding be the only
+            // thing controlling spacing, uniformly — except a bit of extra top/bottom inset on
+            // the first/last row, to keep the action buttons and footer from sitting flush
+            // against the tracklist's boundary rules. See `PlaylistView.trackList()`.
+            .listRowInsets(EdgeInsets(
+                top: index == 0 ? 12 : 0,
+                leading: 16,
+                bottom: index == songs.count - 1 ? 12 : 0,
+                trailing: 16
+            ))
+            .overlay(alignment: .top) {
+                if index == 0 {
+                    trackSeparator()
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if index < songs.count - 1 {
+                    trackSeparator()
+                        .padding(.leading, trackTitleLeadingInset)
+                } else {
+                    trackSeparator()
+                }
+            }
         }
     }
 
