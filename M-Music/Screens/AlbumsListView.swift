@@ -309,8 +309,10 @@ private struct AlbumRow: View {
     /// Requested downscaled to this row's own size (like `SongRow`), not the full original the
     /// grid card and `AlbumView` both request — a screen full of list rows fetching and decoding
     /// full-size covers just to show them at `rowArtworkSize` is wasted bandwidth and memory.
-    /// That does mean this doesn't share `AlbumView`'s cache entry the way the grid card does, so
-    /// opening the full view still fetches its own full-size cover.
+    /// That does mean this doesn't share `AlbumView`'s cache entry the way the grid card does —
+    /// `.task` below separately prefetches the full-size cover in the background so opening
+    /// `AlbumView` from this row is still lag-free, without paying full-size decode cost for the
+    /// row itself.
     @State private var artworkURL: URL?
 
     private let rowArtworkSize: CGFloat = 64
@@ -336,6 +338,12 @@ private struct AlbumRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
+        }
+        // Full-size cover, prefetched in the background — see `artworkURL`'s doc comment. Keyed
+        // to `album.id` so scrolling this row's cell to a different album (cell reuse) cancels
+        // the stale prefetch and starts the right one.
+        .task(id: album.id) {
+            ImageCache.shared.prefetch(try? SubsonicClient.shared.coverArtURL(forId: album.coverArt ?? album.id.raw))
         }
     }
 
