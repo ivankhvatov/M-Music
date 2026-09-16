@@ -171,14 +171,23 @@ final class PlayerEngine: ObservableObject {
 
     /// Builds `url`'s `AVPlayerItem` and inserts it into the queue right after the currently
     /// playing item — it starts buffering immediately, and `AVQueuePlayer` advances into it on its
-    /// own once the current item ends, with no gap.
-    func preloadForGapless(url: URL) {
-        guard let currentItem = player.currentItem else { return }
+    /// own once the current item ends, with no gap. Returns whether it actually did that: `false`
+    /// (and does nothing) when there's no current item to insert after yet — e.g. nothing has
+    /// actually started playing this session, which can be true well before a caller thinks it
+    /// should be (a track can become "current" in `PlayerManager`'s bookkeeping, restored from a
+    /// persisted session, before the user ever taps Play and `play(url:)` is called for the first
+    /// time). Callers must only treat the swap as armed when this returns `true` — trusting a
+    /// caller-side "preloaded" flag that doesn't reflect this leaves the engine with nothing
+    /// queued while the rest of the app believes a gapless transition is coming.
+    @discardableResult
+    func preloadForGapless(url: URL) -> Bool {
+        guard let currentItem = player.currentItem else { return false }
         let nextItem = makePlayerItem(url: url)
         gaplessNextItem = nextItem
         gaplessNextURL = url
         player.insert(nextItem, after: currentItem)
         gaplessPreloaded = true
+        return true
     }
 
     private func performGaplessSwap() {

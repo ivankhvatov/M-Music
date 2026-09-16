@@ -200,7 +200,7 @@ final class PlayerManager: ObservableObject {
                     gaplessCachingSongId = nil
                 }
                 guard gaplessPreloadedIndex == nil, isGaplessCacheEntry(entry, validFor: nextTrack) else { return }
-                engine.preloadForGapless(url: entry.url)
+                guard engine.preloadForGapless(url: entry.url) else { return }
                 gaplessPreloadedIndex = nextIndex
                 gaplessPreloadedSource = .gaplessCache
             }
@@ -697,9 +697,10 @@ final class PlayerManager: ObservableObject {
         let localURL = downloadURL ?? StreamCacheStatus.shared.url(for: nextTrack.id.raw)
 
         guard let url = try? streamURL(for: nextTrack) else { return }
-        engine.preloadForGapless(url: url)
-        gaplessPreloadedIndex = nextIndex
-        gaplessPreloadedSource = downloadURL != nil ? .downloaded : .stream
+        if engine.preloadForGapless(url: url) {
+            gaplessPreloadedIndex = nextIndex
+            gaplessPreloadedSource = downloadURL != nil ? .downloaded : .stream
+        }
 
         if localURL == nil, let liveURL = try? liveStreamURL(for: nextTrack) {
             Task {
@@ -727,13 +728,13 @@ final class PlayerManager: ObservableObject {
             // download landed — now that it's confirmed downloaded, that copy is redundant.
             if gaplessCachingSongId == nextTrack.id.raw { gaplessCachingSongId = nil }
             Task { await GaplessCacheService.shared.removeIfPresent(songId: nextTrack.id.raw) }
-            engine.preloadForGapless(url: downloadURL)
+            guard engine.preloadForGapless(url: downloadURL) else { return }
             gaplessPreloadedIndex = currentIndex.map { $0 + 1 }
             gaplessPreloadedSource = .downloaded
             return
         }
         if let entry = GaplessCacheStatus.shared.entry(for: nextTrack.id.raw), isGaplessCacheEntry(entry, validFor: nextTrack) {
-            engine.preloadForGapless(url: entry.url)
+            guard engine.preloadForGapless(url: entry.url) else { return }
             gaplessPreloadedIndex = currentIndex.map { $0 + 1 }
             gaplessPreloadedSource = .gaplessCache
             return
