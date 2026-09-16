@@ -82,7 +82,9 @@ final class DownloadStore: ObservableObject {
     func reload() async {
         let records = await DownloadDatabase.shared.allRecords()
         let stats = await DownloadDatabase.shared.storageStats()
-        LocalDownloadIndex.shared.replaceAll(Dictionary(uniqueKeysWithValues: records.map { ($0.songId, $0.filePath) }))
+        LocalDownloadIndex.shared.replaceAll(Dictionary(uniqueKeysWithValues: records.map {
+            ($0.songId, LocalDownloadIndex.Entry(path: $0.filePath, format: $0.format, bitRate: $0.bitRate))
+        }))
         downloadedRecords = records
         downloadedSongIds = Set(records.map(\.songId))
         totalBytes = stats.totalBytes

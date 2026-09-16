@@ -9,34 +9,48 @@ import Foundation
 final class LocalDownloadIndex {
     static let shared = LocalDownloadIndex()
     private let lock = NSLock()
-    private var pathBySongId: [String: String] = [:]
+
+    /// Just enough of a `DownloadRecord` for `PlayerManager` to both resolve a download's file
+    /// and decide whether it's still valid to use — `format`/`bitRate` mirror `DownloadRecord`'s
+    /// own fields (see its doc comments) rather than duplicating their meaning here.
+    struct Entry {
+        let path: String
+        let format: String?
+        let bitRate: Int?
+    }
+
+    private var entryBySongId: [String: Entry] = [:]
 
     private init() {}
 
-    func replaceAll(_ paths: [String: String]) {
+    func replaceAll(_ entries: [String: Entry]) {
         lock.lock()
-        pathBySongId = paths
+        entryBySongId = entries
         lock.unlock()
     }
 
-    func setPath(songId: String, path: String?) {
+    func setEntry(songId: String, entry: Entry?) {
         lock.lock()
-        if let path { pathBySongId[songId] = path } else { pathBySongId.removeValue(forKey: songId) }
+        if let entry { entryBySongId[songId] = entry } else { entryBySongId.removeValue(forKey: songId) }
         lock.unlock()
     }
 
+    func entry(songId: String) -> Entry? {
+        lock.lock()
+        let entry = entryBySongId[songId]
+        lock.unlock()
+        return entry
+    }
+
+    /// The file's URL, regardless of its format's current validity for playback — callers that
+    /// care about that (`PlayerManager`) should go through `entry(songId:)` and their own format
+    /// check instead; this is for callers that just want "is a download for this song on disk."
     func url(songId: String) -> URL? {
-        lock.lock()
-        let path = pathBySongId[songId]
-        lock.unlock()
-        guard let path else { return nil }
+        guard let path = entry(songId: songId)?.path else { return nil }
         return FileManager.default.fileExists(atPath: path) ? URL(fileURLWithPath: path) : nil
     }
 
     func contains(songId: String) -> Bool {
-        lock.lock()
-        let exists = pathBySongId[songId] != nil
-        lock.unlock()
-        return exists
+        entry(songId: songId) != nil
     }
 }

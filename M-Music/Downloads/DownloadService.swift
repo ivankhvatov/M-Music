@@ -19,9 +19,10 @@ private struct DownloadJob: Codable, Sendable {
     let bitRate: Int?
     let replayGainTrackGain: Double?
     let replayGainAlbumGain: Double?
+    let format: String
     let fallbackExtension: String
 
-    init(song: Child, requestedBitRate: Int?, fallbackExtension: String) {
+    init(song: Child, requestedBitRate: Int?, format: String, fallbackExtension: String) {
         songId = song.id.raw
         title = song.title
         artist = song.artist
@@ -36,6 +37,7 @@ private struct DownloadJob: Codable, Sendable {
         bitRate = requestedBitRate ?? song.bitRate
         replayGainTrackGain = song.replayGain?.trackGain
         replayGainAlbumGain = song.replayGain?.albumGain
+        self.format = format
         self.fallbackExtension = fallbackExtension
     }
 }
@@ -135,19 +137,22 @@ actor DownloadService {
         do {
             let url: URL
             let requestedBitRate: Int?
+            let format: String
             let fallbackExtension: String
             if DownloadTranscodingSettings.isEnabled {
-                let format = DownloadTranscodingSettings.format
+                let transcodeFormat = DownloadTranscodingSettings.format
                 let bitrate = DownloadTranscodingSettings.bitrate
-                url = try client.streamURL(forId: song.id.raw, maxBitRate: bitrate.rawValue, format: format.rawValue)
+                url = try client.streamURL(forId: song.id.raw, maxBitRate: bitrate.rawValue, format: transcodeFormat.rawValue)
                 requestedBitRate = bitrate.rawValue
-                fallbackExtension = format.rawValue
+                format = transcodeFormat.rawValue
+                fallbackExtension = transcodeFormat.rawValue
             } else {
                 url = try client.downloadURL(forId: song.id.raw)
                 requestedBitRate = song.bitRate
+                format = "raw"
                 fallbackExtension = song.suffix ?? "mp3"
             }
-            let job = DownloadJob(song: song, requestedBitRate: requestedBitRate, fallbackExtension: fallbackExtension)
+            let job = DownloadJob(song: song, requestedBitRate: requestedBitRate, format: format, fallbackExtension: fallbackExtension)
             guard let data = try? JSONEncoder().encode(job), let description = String(data: data, encoding: .utf8) else {
                 await limiter.release()
                 continuation?.yield(Update(songId: song.id.raw, state: .failed(message: "Could not prepare download")))
@@ -180,7 +185,7 @@ actor DownloadService {
             try? FileManager.default.removeItem(at: record.fileURL)
         }
         await DownloadDatabase.shared.delete(songId: songId)
-        LocalDownloadIndex.shared.setPath(songId: songId, path: nil)
+        LocalDownloadIndex.shared.setEntry(songId: songId, entry: nil)
         continuation?.yield(Update(songId: songId, state: .none))
     }
 
@@ -252,10 +257,12 @@ actor DownloadService {
                 year: job.year, genre: job.genre, filePath: destination.path, fileExtension: ext,
                 contentType: validation.contentType, bitRate: job.bitRate, byteSize: byteSize,
                 replayGainTrackGain: job.replayGainTrackGain, replayGainAlbumGain: job.replayGainAlbumGain,
-                addedAt: Date()
+                addedAt: Date(), format: job.format
             )
             await DownloadDatabase.shared.upsert(record)
-            LocalDownloadIndex.shared.setPath(songId: job.songId, path: destination.path)
+            LocalDownloadIndex.shared.setEntry(
+                songId: job.songId, entry: .init(path: destination.path, format: job.format, bitRate: job.bitRate)
+            )
             continuation?.yield(Update(songId: job.songId, state: .completed))
         } catch {
             continuation?.yield(Update(songId: job.songId, state: .failed(message: error.localizedDescription)))

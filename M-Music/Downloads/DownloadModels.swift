@@ -42,6 +42,13 @@ struct DownloadRecord: Codable, Identifiable, FetchableRecord, PersistableRecord
     var replayGainTrackGain: Double?
     var replayGainAlbumGain: Double?
     var addedAt: Date
+    /// `"raw"` for an untranscoded download, or a `TranscodingFormat.rawValue` (e.g. `"mp3"`) for
+    /// one downloaded via `DownloadTranscodingSettings` — lets `PlayerManager` tell whether a
+    /// download still matches the current streaming quality when
+    /// `DownloadTranscodingSettings.prioritizeDownloads` is off, the same way `GaplessCacheRecord`
+    /// tracks it for cache entries. `nil` for a download made before this field existed; treated
+    /// as always valid (there's no format on record to second-guess it against).
+    var format: String?
 
     var id: String { songId }
     var fileURL: URL { URL(fileURLWithPath: filePath) }

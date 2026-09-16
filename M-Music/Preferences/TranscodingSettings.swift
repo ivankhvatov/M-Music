@@ -135,7 +135,12 @@ enum DownloadTranscodingSettings {
         static let isEnabled = "downloadTranscoding.isEnabled"
         static let format = "downloadTranscoding.format"
         static let bitrate = "downloadTranscoding.bitrate"
+        static let prioritizeDownloads = "downloadTranscoding.prioritizeDownloads"
     }
+
+    /// Kept in sync with `PlaybackSettingsView`'s `@AppStorage` default argument by hand, since
+    /// `UserDefaults.bool(forKey:)` returns `false` (not this) for a key that was never written.
+    static let defaultPrioritizeDownloads = true
 
     static var isEnabled: Bool {
         UserDefaults.standard.bool(forKey: Keys.isEnabled)
@@ -147,5 +152,15 @@ enum DownloadTranscodingSettings {
 
     static var bitrate: TranscodingBitrate {
         TranscodingBitrate(rawValue: UserDefaults.standard.integer(forKey: Keys.bitrate)) ?? .k192
+    }
+
+    /// When `true` (the default — matches the app's original behavior, before this setting
+    /// existed), a downloaded song always plays from its downloaded file regardless of its
+    /// format. When `false`, `PlayerManager` only trusts the download if its format still matches
+    /// the current streaming quality (`TranscodingSettings`) — otherwise it falls back to the
+    /// gapless cache or live streaming instead, the same way a stale `GaplessCacheStatus` entry
+    /// already does (`isGaplessCacheEntry`).
+    static var prioritizeDownloads: Bool {
+        UserDefaults.standard.object(forKey: Keys.prioritizeDownloads) as? Bool ?? defaultPrioritizeDownloads
     }
 }

@@ -57,6 +57,15 @@ actor DownloadDatabase {
                 t.column("addedAt", .datetime).notNull()
             }
         }
+        // A separate migration, not folded into "createDownloads" above — that one has already
+        // run (and been recorded as applied) on a device with real, already-downloaded songs;
+        // GRDB tracks migrations by name, not content, so editing it in place would silently skip
+        // adding this column on any such device instead of applying the change.
+        migrator.registerMigration("addDownloadFormat") { db in
+            try db.alter(table: DownloadRecord.databaseTableName) { t in
+                t.add(column: "format", .text)
+            }
+        }
         return migrator
     }
 

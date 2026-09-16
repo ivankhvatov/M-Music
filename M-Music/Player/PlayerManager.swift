@@ -384,7 +384,7 @@ final class PlayerManager: ObservableObject {
             isPlaying = false
             return
         }
-        if let localURL = LocalDownloadIndex.shared.url(songId: track.id.raw) {
+        if let localURL = downloadURL(for: track) {
             pendingCacheSongId = nil
             isBuffering = false
             startPlayback(for: track, url: localURL, source: .downloaded, autoplay: autoplay, startTime: startTime)
@@ -585,7 +585,7 @@ final class PlayerManager: ObservableObject {
             return
         }
         clearGaplessPreload()
-        let hasLocalCopy = LocalDownloadIndex.shared.url(songId: track.id.raw) != nil
+        let hasLocalCopy = downloadURL(for: track) != nil
             || GaplessCacheStatus.shared.entry(for: track.id.raw).map { isGaplessCacheEntry($0, validFor: track) } == true
         let startTime = (!hasLocalCopy && shouldTranscode(track)) ? 0 : currentTime
         loadCurrentItem(autoplay: isPlaying, startTime: startTime)
@@ -626,7 +626,7 @@ final class PlayerManager: ObservableObject {
     /// `StreamCacheService` file, then the live network stream (transcoded per
     /// `TranscodingSettings`).
     private func streamURL(for track: Child) throws -> URL {
-        if let localURL = LocalDownloadIndex.shared.url(songId: track.id.raw) {
+        if let localURL = downloadURL(for: track) {
             return localURL
         }
         if GaplessCacheSettings.isEnabled,
@@ -648,6 +648,32 @@ final class PlayerManager: ObservableObject {
             return entry.format == TranscodingSettings.format.rawValue && entry.bitrate == TranscodingSettings.bitrate.rawValue
         }
         return entry.format == "raw"
+    }
+
+    /// `track`'s downloaded file, or `nil` if there isn't one (or it's on disk but no longer
+    /// trusted for playback — see below). Every `LocalDownloadIndex` lookup used for actual
+    /// playback resolution should go through this rather than `LocalDownloadIndex.shared.url(
+    /// songId:)` directly, so the validity check below is never accidentally skipped somewhere.
+    private func downloadURL(for track: Child) -> URL? {
+        guard let entry = LocalDownloadIndex.shared.entry(songId: track.id.raw), isDownloadEntry(entry, validFor: track)
+        else { return nil }
+        return FileManager.default.fileExists(atPath: entry.path) ? URL(fileURLWithPath: entry.path) : nil
+    }
+
+    /// Whether a downloaded file is still trusted for playback. With
+    /// `DownloadTranscodingSettings.prioritizeDownloads` on (the default), any download always
+    /// wins — matches the app's original behavior, from before this check existed. With it off, a
+    /// download only counts if its own format still matches the *current* streaming quality
+    /// (`TranscodingSettings`) — same reasoning as `isGaplessCacheEntry` above, just against the
+    /// download-format fields `DownloadRecord`/`LocalDownloadIndex.Entry` carry instead. A `nil`
+    /// `format` (a download made before that field existed) is always trusted — there's nothing
+    /// on record to compare against.
+    private func isDownloadEntry(_ entry: LocalDownloadIndex.Entry, validFor track: Child) -> Bool {
+        guard !DownloadTranscodingSettings.prioritizeDownloads, let format = entry.format else { return true }
+        if shouldTranscode(track) {
+            return format == TranscodingSettings.format.rawValue && entry.bitRate == TranscodingSettings.bitrate.rawValue
+        }
+        return format == "raw"
     }
 
     /// The player-wide volume for `track`'s ReplayGain adjustment. Applied via
@@ -693,13 +719,13 @@ final class PlayerManager: ObservableObject {
             return
         }
 
-        let downloadURL = LocalDownloadIndex.shared.url(songId: nextTrack.id.raw)
-        let localURL = downloadURL ?? StreamCacheStatus.shared.url(for: nextTrack.id.raw)
+        let downloadFileURL = downloadURL(for: nextTrack)
+        let localURL = downloadFileURL ?? StreamCacheStatus.shared.url(for: nextTrack.id.raw)
 
         guard let url = try? streamURL(for: nextTrack) else { return }
         if engine.preloadForGapless(url: url) {
             gaplessPreloadedIndex = nextIndex
-            gaplessPreloadedSource = downloadURL != nil ? .downloaded : .stream
+            gaplessPreloadedSource = downloadFileURL != nil ? .downloaded : .stream
         }
 
         if localURL == nil, let liveURL = try? liveStreamURL(for: nextTrack) {
@@ -723,12 +749,12 @@ final class PlayerManager: ObservableObject {
     /// subscription in `subscribeToEngine()` is what actually calls `engine.preloadForGapless`
     /// once it lands, since there's no safe URL to preload until then.
     private func prepareNextItemViaGaplessCache(_ nextTrack: Child) {
-        if let downloadURL = LocalDownloadIndex.shared.url(songId: nextTrack.id.raw) {
+        if let downloadFileURL = downloadURL(for: nextTrack) {
             // This track may have started (or even finished) gapless-caching before its real
             // download landed — now that it's confirmed downloaded, that copy is redundant.
             if gaplessCachingSongId == nextTrack.id.raw { gaplessCachingSongId = nil }
             Task { await GaplessCacheService.shared.removeIfPresent(songId: nextTrack.id.raw) }
-            guard engine.preloadForGapless(url: downloadURL) else { return }
+            guard engine.preloadForGapless(url: downloadFileURL) else { return }
             gaplessPreloadedIndex = currentIndex.map { $0 + 1 }
             gaplessPreloadedSource = .downloaded
             return
