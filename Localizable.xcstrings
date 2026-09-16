@@ -859,7 +859,11 @@
         }
       }
     },
+    "Downloads every track to this device before playing it, instead of streaming, so transitions have no gap even over a transcoded or slow connection. A track not played again within the limit above is automatically removed." : {
+
+    },
     "Downloads the next track ahead of time so the transition into it has no gap, even when streaming a transcoded or slow connection. A track not played again within the limit above is automatically removed." : {
+      "extractionState" : "stale",
       "localizations" : {
         "ru" : {
           "stringUnit" : {

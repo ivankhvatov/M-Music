@@ -222,7 +222,7 @@ struct PlaybackSettingsView: View {
                     } header: {
                         Text("Gapless Caching")
                     } footer: {
-                        Text("Downloads the next track ahead of time so the transition into it has no gap, even when streaming a transcoded or slow connection. A track not played again within the limit above is automatically removed.")
+                        Text("Downloads every track to this device before playing it, instead of streaming, so transitions have no gap even over a transcoded or slow connection. A track not played again within the limit above is automatically removed.")
                     }
                 }
                 .navigationTitle("Playback")

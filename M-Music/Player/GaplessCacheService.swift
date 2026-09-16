@@ -79,13 +79,37 @@ actor GaplessCacheService {
     /// `PlaybackSettingsView`'s cached-songs list — playback resolution is always by `song.id.raw`.
     func enqueue(song: Child, url: URL, format: String, bitrate: Int, fallbackExtension: String) {
         guard GaplessCacheSettings.isEnabled else { return }
+        _ = downloadTask(song: song, url: url, format: format, bitrate: bitrate, fallbackExtension: fallbackExtension)
+    }
+
+    /// Awaits `song` being cached — kicking off the download if nothing's already in flight for
+    /// it, or just waiting on the existing one (e.g. one `prepareNextItemViaGaplessCache` already
+    /// started) rather than starting a duplicate — and returns the resulting local file URL, or
+    /// `nil` if the download failed or was cancelled meanwhile.
+    ///
+    /// Used by `PlayerManager.cacheThenPlay(...)`: with `GaplessCacheSettings.isEnabled`, the app
+    /// never hands `PlayerEngine` a live network URL, so a track with nothing cached yet has to be
+    /// downloaded to a real file *before* playback can start at all.
+    func cacheAndWait(song: Child, url: URL, format: String, bitrate: Int, fallbackExtension: String) async -> URL? {
+        guard GaplessCacheSettings.isEnabled else { return nil }
         let songId = song.id.raw
-        guard activeTasks[songId] == nil else { return }
+        await downloadTask(song: song, url: url, format: format, bitrate: bitrate, fallbackExtension: fallbackExtension).value
+        return await MainActor.run { GaplessCacheStatus.shared.entry(for: songId)?.url }
+    }
+
+    /// The single-flight download task for `song.id.raw` — reuses whatever's already running for
+    /// that song (started by `enqueue` or a previous `cacheAndWait`) instead of starting a second,
+    /// redundant download of the same file.
+    private func downloadTask(song: Child, url: URL, format: String, bitrate: Int, fallbackExtension: String) -> Task<Void, Never> {
+        let songId = song.id.raw
+        if let existing = activeTasks[songId] { return existing }
         Task { @MainActor in GaplessCacheStatus.shared.markActive(songId) }
-        activeTasks[songId] = Task {
+        let task = Task {
             await self.download(song: song, url: url, format: format, bitrate: bitrate, fallbackExtension: fallbackExtension)
             self.activeTasks.removeValue(forKey: songId)
         }
+        activeTasks[songId] = task
+        return task
     }
 
     /// A no-op unless `songId` is still actively downloading — safe to call on a song that has

@@ -210,13 +210,18 @@ struct PlayerView: View {
                 ZStack {
                     PlayPauseBurst(trigger: playPauseBurstID, endScale: 1.6)
                         .frame(width: 44, height: 44)
-                    // No `.contentTransition(.symbolEffect(.replace))` here: its cross-fade
-                    // briefly renders both the play triangle and the pause bars on top of each
-                    // other. A plain instant swap plus the bounce pulse reads just as snappy
-                    // without that overlap.
-                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 42))
-                        .symbolEffect(.bounce, value: player.isPlaying)
+                    if player.isBuffering {
+                        ProgressView()
+                            .scaleEffect(1.4)
+                    } else {
+                        // No `.contentTransition(.symbolEffect(.replace))` here: its cross-fade
+                        // briefly renders both the play triangle and the pause bars on top of each
+                        // other. A plain instant swap plus the bounce pulse reads just as snappy
+                        // without that overlap.
+                        Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 42))
+                            .symbolEffect(.bounce, value: player.isPlaying)
+                    }
                 }
                 .frame(width: 60, height: 60)
                 .contentShape(.rect)

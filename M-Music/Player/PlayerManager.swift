@@ -26,6 +26,12 @@ final class PlayerManager: ObservableObject {
     @Published private(set) var isPlaying = false
     @Published private(set) var currentTime: TimeInterval = 0
     @Published private(set) var duration: TimeInterval = 0
+    /// True while the current track is being downloaded into the gapless cache before playback
+    /// can start — only possible while `GaplessCacheSettings.isEnabled`, since that setting means
+    /// nothing is ever streamed live; a track with nothing cached yet has to be fully downloaded
+    /// first. Lets the mini/full player show a loading state instead of a play/pause icon that
+    /// would otherwise look unresponsive for however long that download takes.
+    @Published private(set) var isBuffering = false
     /// Whether the current track is starred, kept in sync with the lock screen / Control
     /// Center's "favorite" toggle (`MPRemoteCommandCenter.likeCommand`) as well as `PlayerView`'s
     /// own star button — both call `toggleStarred()` below.
@@ -68,6 +74,13 @@ final class PlayerManager: ObservableObject {
     /// still in flight — cleared once it lands (or is superseded). Lets `prepareNextItem()` cancel
     /// a now-stale download if the "next" track changes again before it finishes.
     private var gaplessCachingSongId: String?
+
+    /// The song id `cacheThenPlay(...)` is currently awaiting a mandatory cache-before-play
+    /// download for — distinct from `gaplessCachingSongId` above, which is about the *next*
+    /// track's ahead-of-time prefetch. Guards against a stale download (superseded by a later
+    /// skip before it finished) going on to start playback for a track that isn't current
+    /// anymore; cleared once it lands (or is superseded).
+    private var pendingCacheSongId: String?
 
     /// Throttles how often playback position is written to disk — every time-observer tick would
     /// mean a disk write twice a second for as long as something is playing.
@@ -327,12 +340,45 @@ final class PlayerManager: ObservableObject {
 
     // MARK: - Item loading
 
+    /// Resolves `currentTrack` to a playable URL and hands it to `PlayerEngine` — or, while
+    /// `GaplessCacheSettings.isEnabled` and nothing playable is cached for it yet, kicks off
+    /// `cacheThenPlay(...)` instead, since that setting means the engine is never handed a live
+    /// network URL at all: everything it plays has to already be a real local file.
     private func loadCurrentItem(autoplay: Bool, startTime: TimeInterval = 0) {
         configureAudioSessionIfNeeded()
-        guard let track = currentTrack, let url = try? streamURL(for: track) else {
+        guard let track = currentTrack else {
             isPlaying = false
             return
         }
+        if let localURL = LocalDownloadIndex.shared.url(songId: track.id.raw) {
+            pendingCacheSongId = nil
+            isBuffering = false
+            startPlayback(for: track, url: localURL, autoplay: autoplay, startTime: startTime)
+            return
+        }
+        if GaplessCacheSettings.isEnabled {
+            if let entry = GaplessCacheStatus.shared.entry(for: track.id.raw), isGaplessCacheEntry(entry, validFor: track) {
+                pendingCacheSongId = nil
+                isBuffering = false
+                Task { await GaplessCacheService.shared.touch(songId: track.id.raw) }
+                startPlayback(for: track, url: entry.url, autoplay: autoplay, startTime: startTime)
+                return
+            }
+            cacheThenPlay(track: track, autoplay: autoplay, startTime: startTime)
+            return
+        }
+        guard let url = try? streamURL(for: track) else {
+            isPlaying = false
+            return
+        }
+        startPlayback(for: track, url: url, autoplay: autoplay, startTime: startTime)
+    }
+
+    /// The actual "give this URL to `PlayerEngine` and start/prepare playback" step, shared by
+    /// every `loadCurrentItem(...)` outcome — a URL that was already sitting there ready
+    /// (download, valid gapless-cache entry, or a live stream when caching is disabled) as well
+    /// as the "just finished caching it" continuation from `cacheThenPlay(...)` below.
+    private func startPlayback(for track: Child, url: URL, autoplay: Bool, startTime: TimeInterval) {
         hasLoadedItem = true
         engine.play(url: url)
         if !autoplay {
@@ -364,6 +410,58 @@ final class PlayerManager: ObservableObject {
         }
         updateNowPlayingPlaybackState()
         persistState()
+    }
+
+    /// `GaplessCacheSettings.isEnabled` means `PlayerEngine` never sees a live network URL — a
+    /// track with nothing downloaded or already gapless-cached for it has to be fully downloaded
+    /// to a real file first. Stops whatever was playing before (rather than letting it run on for
+    /// however long the download takes) and shows `isBuffering` until the cached file lands, then
+    /// starts playback from it via `startPlayback(...)`.
+    ///
+    /// A later call for a *different* track (the user skipped away before this one finished)
+    /// cancels this download rather than leaving it to run unbounded in the background — see the
+    /// `pendingCacheSongId` guard below and its cancellation of the previous id.
+    private func cacheThenPlay(track: Child, autoplay: Bool, startTime: TimeInterval) {
+        let songId = track.id.raw
+        // Already in the middle of caching exactly this track (e.g. the user tapped play/pause
+        // again while it was buffering) — let the existing wait finish rather than redundantly
+        // tearing down and re-arming the engine for no reason.
+        guard pendingCacheSongId != songId else { return }
+        guard let liveURL = try? liveStreamURL(for: track) else {
+            isPlaying = false
+            return
+        }
+        if let stale = pendingCacheSongId, stale != songId {
+            Task { await GaplessCacheService.shared.cancel(songId: stale) }
+        }
+        pendingCacheSongId = songId
+        isBuffering = true
+        engine.stop()
+        hasLoadedItem = false
+        duration = TimeInterval(track.duration ?? 0)
+        currentTime = startTime
+        updateArtworkURL()
+        updateNowPlayingInfo()
+        updateNowPlayingPlaybackState()
+        persistState()
+
+        let isTranscode = shouldTranscode(track)
+        let format = isTranscode ? TranscodingSettings.format.rawValue : "raw"
+        let bitrate = isTranscode ? TranscodingSettings.bitrate.rawValue : 0
+        let fallbackExtension = isTranscode ? TranscodingSettings.format.rawValue : (track.suffix ?? "mp3")
+        Task {
+            let cachedURL = await GaplessCacheService.shared.cacheAndWait(
+                song: track, url: liveURL, format: format, bitrate: bitrate, fallbackExtension: fallbackExtension
+            )
+            guard pendingCacheSongId == songId else { return }
+            pendingCacheSongId = nil
+            isBuffering = false
+            guard let cachedURL else {
+                isPlaying = false
+                return
+            }
+            startPlayback(for: track, url: cachedURL, autoplay: autoplay, startTime: startTime)
+        }
     }
 
     /// The natural end of the current track — as opposed to an explicit `next()`/`previous()`

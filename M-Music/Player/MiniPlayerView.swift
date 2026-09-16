@@ -20,11 +20,15 @@ struct MiniPlayerView: View {
                 ZStack {
                     PlayPauseBurst(trigger: playPauseBurstID, color: .mainText, endScale: 1.2)
                         .frame(width: 30, height: 30)
-                    // See PlayerView's play/pause button for why there's no
-                    // `.contentTransition(.symbolEffect(.replace))` here.
-                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 20))
-                        .symbolEffect(.bounce, value: player.isPlaying)
+                    if player.isBuffering {
+                        ProgressView()
+                    } else {
+                        // See PlayerView's play/pause button for why there's no
+                        // `.contentTransition(.symbolEffect(.replace))` here.
+                        Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 20))
+                            .symbolEffect(.bounce, value: player.isPlaying)
+                    }
                 }
                 .frame(width: 32, height: 32)
                 .contentShape(.rect)
