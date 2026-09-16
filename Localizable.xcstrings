@@ -595,6 +595,9 @@
         }
       }
     },
+    "Cache" : {
+
+    },
     "Cache size limit" : {
       "localizations" : {
         "ru" : {
@@ -822,6 +825,9 @@
           }
         }
       }
+    },
+    "Downloaded" : {
+
     },
     "Downloaded songs" : {
       "localizations" : {
@@ -1440,6 +1446,9 @@
         }
       }
     },
+    "Player" : {
+
+    },
     "Playlists" : {
       "localizations" : {
         "de" : {
@@ -1649,6 +1658,12 @@
         }
       }
     },
+    "Show audio info" : {
+
+    },
+    "Shows the current playback source, codec, and bitrate (or bit depth/sample rate for a lossless codec) below the artist name in the expanded Now Playing view." : {
+
+    },
     "Singles" : {
       "localizations" : {
         "ru" : {
@@ -1694,6 +1709,9 @@
           }
         }
       }
+    },
+    "Stream" : {
+
     },
     "Title" : {
       "localizations" : {

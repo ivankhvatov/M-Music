@@ -44,9 +44,38 @@ private extension PlayerControls {
                 .foregroundStyle(.white)
             MarqueeText(text: player.currentTrack?.artist ?? "")
                 .foregroundStyle(Color.transparentWhite)
+            if let audioInfoLine {
+                Text(audioInfoLine)
+                    .font(.caption)
+                    .foregroundStyle(Color.transparentWhite.opacity(0.7))
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, NowPlayingLayout.cardPaddings)
+    }
+
+    /// "Stream · FLAC · 24-bit/96 kHz" or "Downloaded · AAC · 256 kbps" — `nil` while the "Show
+    /// audio info" setting is off, nothing's playing, or the codec read
+    /// (`PlayerManager.audioFormatInfo`) hasn't landed yet for the current track.
+    var audioInfoLine: String? {
+        guard AudioInfoDisplaySettings.isEnabled, player.currentTrack != nil,
+              let source = player.playbackSource, let format = player.audioFormatInfo
+        else { return nil }
+        var parts = [source.displayName, format.codec]
+        if let bitDepth = format.bitDepth, let sampleRateHz = format.sampleRateHz {
+            parts.append("\(bitDepth)-bit/\(Self.formattedSampleRate(sampleRateHz))")
+        } else if let bitrateKbps = format.bitrateKbps {
+            parts.append("\(bitrateKbps) kbps")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    static func formattedSampleRate(_ hz: Double) -> String {
+        let khz = (hz / 1000 * 10).rounded() / 10
+        if khz == khz.rounded() {
+            return "\(Int(khz)) kHz"
+        }
+        return String(format: "%.1f kHz", khz)
     }
 
     /// The star (favorite) and AirPlay buttons flank the transport buttons in one row — star on

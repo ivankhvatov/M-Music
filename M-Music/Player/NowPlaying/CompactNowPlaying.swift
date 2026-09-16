@@ -33,7 +33,7 @@ struct CompactChrome: View {
 
             HStack(spacing: 0) {
                 PlayerButton(
-                    label: { PlayerButtonLabel(type: player.isPlaying ? .pause : .play, size: 16) },
+                    label: { playPauseLabel },
                     onEnded: { player.togglePlayPause() }
                 )
                 if !inlinedBottomAccessory {
@@ -78,6 +78,15 @@ struct CompactChrome: View {
     private var inlinedBottomAccessory: Bool {
         let padding = UIScreen.size.width - viewWidth
         return padding > 60
+    }
+
+    @ViewBuilder
+    private var playPauseLabel: some View {
+        if player.isBuffering {
+            ProgressView()
+        } else {
+            PlayerButtonLabel(type: player.isPlaying ? .pause : .play, size: 16)
+        }
     }
 }
 

@@ -12,6 +12,7 @@ struct AppearanceSettingsView: View {
     @AppStorage("library.groupReleaseVersions") private var groupReleaseVersionsEnabled = false
     @AppStorage("library.playlistsDisplayStyle") private var playlistsDisplayStyleStorage = LibraryDisplayStyle.grid.storageKey
     @AppStorage("library.albumsDisplayStyle") private var albumsDisplayStyleStorage = LibraryDisplayStyle.grid.storageKey
+    @AppStorage(AudioInfoDisplaySettings.Keys.isEnabled) private var showAudioInfo = false
 
     private var playlistsDisplayStyle: Binding<LibraryDisplayStyle> {
         Binding(
@@ -49,6 +50,13 @@ struct AppearanceSettingsView: View {
                         Text("Library")
                     } footer: {
                         Text("Separate artist's release types shows an artist's albums, EPs, singles, and other release types as separate rows instead of one grid; artists with only one release type are unaffected. Group release versions collapses multiple versions of the same album (e.g. a Deluxe or Remastered edition) down to just the plain edition, or the one with the shortest version name if there's no plain edition — except when Albums is filtered to Favorite only.")
+                    }
+                    Section {
+                        Toggle("Show audio info", isOn: $showAudioInfo)
+                    } header: {
+                        Text("Player")
+                    } footer: {
+                        Text("Shows the current playback source, codec, and bitrate (or bit depth/sample rate for a lossless codec) below the artist name in the expanded Now Playing view.")
                     }
                 }
                 .navigationTitle("Appearance")

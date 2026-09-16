@@ -19,6 +19,24 @@ import UIKit
 final class PlayerManager: ObservableObject {
     static let shared = PlayerManager()
 
+    /// Where a track's playable URL actually came from — surfaced to `PlayerView`'s optional
+    /// audio-info line, distinct from the internal 3-tier lookup order in `streamURL(for:)`:
+    /// `StreamCacheService`'s ephemeral prefetch is lumped in with `.stream` here (it's just an
+    /// implementation detail of live streaming, not the user-facing persistent "gapless cache").
+    enum PlaybackSource: Equatable {
+        case stream
+        case gaplessCache
+        case downloaded
+
+        var displayName: String {
+            switch self {
+            case .stream: return String(localized: "Stream")
+            case .gaplessCache: return String(localized: "Cache")
+            case .downloaded: return String(localized: "Downloaded")
+            }
+        }
+    }
+
     /// The full play queue, e.g. an album's track list. `currentIndex` points into it, so tracks
     /// before it are playback history (reachable via `previous()`) and tracks after it play next.
     @Published private(set) var queue: [Child] = []
@@ -32,6 +50,15 @@ final class PlayerManager: ObservableObject {
     /// first. Lets the mini/full player show a loading state instead of a play/pause icon that
     /// would otherwise look unresponsive for however long that download takes.
     @Published private(set) var isBuffering = false
+    /// Where the current track is actually being played from — `nil` until the first track ever
+    /// loads. Set alongside `audioFormatInfo` below; both feed `PlayerView`'s optional audio-info
+    /// line (`AudioInfoDisplaySettings.isEnabled`).
+    @Published private(set) var playbackSource: PlaybackSource?
+    /// The current track's real codec and bitrate/bit-depth, read off the loaded `AVPlayerItem`
+    /// itself (`PlayerEngine.currentAudioFormat(matching:)`) rather than assumed from settings —
+    /// a transcode can change the actual codec regardless of the source file's own format.
+    /// `nil` while that read is still in flight (briefly, on every track change) or unavailable.
+    @Published private(set) var audioFormatInfo: PlayerEngine.AudioFormatInfo?
     /// Whether the current track is starred, kept in sync with the lock screen / Control
     /// Center's "favorite" toggle (`MPRemoteCommandCenter.likeCommand`) as well as `PlayerView`'s
     /// own star button — both call `toggleStarred()` below.
@@ -69,6 +96,12 @@ final class PlayerManager: ObservableObject {
     /// the gapless handoff to it internally (nothing further to load) or whether it needs a fresh
     /// `engine.play(url:)` call (nothing was ready in time, or the queue changed since).
     private var gaplessPreloadedIndex: Int?
+
+    /// The source of whatever `engine.preloadForGapless(url:)` was last called with, paired with
+    /// `gaplessPreloadedIndex` — applied to `playbackSource` once `handleTrackFinishedNaturally()`
+    /// confirms the swap actually happened, since that path never goes through `startPlayback(...)`
+    /// (the engine already resolved the transition internally by the time it runs).
+    private var gaplessPreloadedSource: PlaybackSource?
 
     /// The song id `GaplessCacheService.enqueue` was last asked to cache, while that download is
     /// still in flight — cleared once it lands (or is superseded). Lets `prepareNextItem()` cancel
@@ -169,6 +202,7 @@ final class PlayerManager: ObservableObject {
                 guard gaplessPreloadedIndex == nil, isGaplessCacheEntry(entry, validFor: nextTrack) else { return }
                 engine.preloadForGapless(url: entry.url)
                 gaplessPreloadedIndex = nextIndex
+                gaplessPreloadedSource = .gaplessCache
             }
             .store(in: &subscriptions)
     }
@@ -353,7 +387,7 @@ final class PlayerManager: ObservableObject {
         if let localURL = LocalDownloadIndex.shared.url(songId: track.id.raw) {
             pendingCacheSongId = nil
             isBuffering = false
-            startPlayback(for: track, url: localURL, autoplay: autoplay, startTime: startTime)
+            startPlayback(for: track, url: localURL, source: .downloaded, autoplay: autoplay, startTime: startTime)
             return
         }
         if GaplessCacheSettings.isEnabled {
@@ -361,7 +395,7 @@ final class PlayerManager: ObservableObject {
                 pendingCacheSongId = nil
                 isBuffering = false
                 Task { await GaplessCacheService.shared.touch(songId: track.id.raw) }
-                startPlayback(for: track, url: entry.url, autoplay: autoplay, startTime: startTime)
+                startPlayback(for: track, url: entry.url, source: .gaplessCache, autoplay: autoplay, startTime: startTime)
                 return
             }
             cacheThenPlay(track: track, autoplay: autoplay, startTime: startTime)
@@ -371,14 +405,14 @@ final class PlayerManager: ObservableObject {
             isPlaying = false
             return
         }
-        startPlayback(for: track, url: url, autoplay: autoplay, startTime: startTime)
+        startPlayback(for: track, url: url, source: .stream, autoplay: autoplay, startTime: startTime)
     }
 
     /// The actual "give this URL to `PlayerEngine` and start/prepare playback" step, shared by
     /// every `loadCurrentItem(...)` outcome — a URL that was already sitting there ready
     /// (download, valid gapless-cache entry, or a live stream when caching is disabled) as well
     /// as the "just finished caching it" continuation from `cacheThenPlay(...)` below.
-    private func startPlayback(for track: Child, url: URL, autoplay: Bool, startTime: TimeInterval) {
+    private func startPlayback(for track: Child, url: URL, source: PlaybackSource, autoplay: Bool, startTime: TimeInterval) {
         hasLoadedItem = true
         engine.play(url: url)
         if !autoplay {
@@ -388,6 +422,8 @@ final class PlayerManager: ObservableObject {
 
         duration = TimeInterval(track.duration ?? 0)
         currentTime = startTime
+        playbackSource = source
+        refreshAudioFormatInfo(for: track, matching: url)
 
         updateArtworkURL()
         updateNowPlayingInfo()
@@ -460,7 +496,21 @@ final class PlayerManager: ObservableObject {
                 isPlaying = false
                 return
             }
-            startPlayback(for: track, url: cachedURL, autoplay: autoplay, startTime: startTime)
+            startPlayback(for: track, url: cachedURL, source: .gaplessCache, autoplay: autoplay, startTime: startTime)
+        }
+    }
+
+    /// Reads `track`'s real codec/bitrate off whatever `PlayerEngine` just loaded for `url`,
+    /// publishing it to `audioFormatInfo` once available — `PlayerView`'s optional audio-info line.
+    /// `nil`led out first so a stale reading doesn't linger on screen while the new one loads.
+    private func refreshAudioFormatInfo(for track: Child, matching url: URL) {
+        audioFormatInfo = nil
+        let trackId = track.id.raw
+        Task { [weak self] in
+            guard let self else { return }
+            let info = await self.engine.currentAudioFormat(matching: url)
+            guard self.currentTrack?.id.raw == trackId else { return }
+            self.audioFormatInfo = info
         }
     }
 
@@ -489,6 +539,11 @@ final class PlayerManager: ObservableObject {
             // for this case — do it here instead, for whichever track just became current.
             if let entry = GaplessCacheStatus.shared.entry(for: track.id.raw), isGaplessCacheEntry(entry, validFor: track) {
                 Task { await GaplessCacheService.shared.touch(songId: track.id.raw) }
+            }
+            playbackSource = gaplessPreloadedSource
+            gaplessPreloadedSource = nil
+            if let url = engine.currentPlaybackURL {
+                refreshAudioFormatInfo(for: track, matching: url)
             }
             updateArtworkURL()
             updateNowPlayingInfo()
@@ -638,12 +693,13 @@ final class PlayerManager: ObservableObject {
             return
         }
 
-        let localURL = LocalDownloadIndex.shared.url(songId: nextTrack.id.raw)
-            ?? StreamCacheStatus.shared.url(for: nextTrack.id.raw)
+        let downloadURL = LocalDownloadIndex.shared.url(songId: nextTrack.id.raw)
+        let localURL = downloadURL ?? StreamCacheStatus.shared.url(for: nextTrack.id.raw)
 
         guard let url = try? streamURL(for: nextTrack) else { return }
         engine.preloadForGapless(url: url)
         gaplessPreloadedIndex = nextIndex
+        gaplessPreloadedSource = downloadURL != nil ? .downloaded : .stream
 
         if localURL == nil, let liveURL = try? liveStreamURL(for: nextTrack) {
             Task {
@@ -673,11 +729,13 @@ final class PlayerManager: ObservableObject {
             Task { await GaplessCacheService.shared.removeIfPresent(songId: nextTrack.id.raw) }
             engine.preloadForGapless(url: downloadURL)
             gaplessPreloadedIndex = currentIndex.map { $0 + 1 }
+            gaplessPreloadedSource = .downloaded
             return
         }
         if let entry = GaplessCacheStatus.shared.entry(for: nextTrack.id.raw), isGaplessCacheEntry(entry, validFor: nextTrack) {
             engine.preloadForGapless(url: entry.url)
             gaplessPreloadedIndex = currentIndex.map { $0 + 1 }
+            gaplessPreloadedSource = .gaplessCache
             return
         }
 
@@ -703,6 +761,7 @@ final class PlayerManager: ObservableObject {
 
     private func clearGaplessPreload() {
         gaplessPreloadedIndex = nil
+        gaplessPreloadedSource = nil
     }
 
     private func handleTimeUpdate(_ time: TimeInterval) {

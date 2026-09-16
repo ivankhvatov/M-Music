@@ -23,7 +23,7 @@ struct PlayerButtons: View {
             )
 
             PlayerButton(
-                label: { PlayerButtonLabel(type: player.isPlaying ? .pause : .play, size: imageSize) },
+                label: { playPauseLabel },
                 onEnded: { player.togglePlayPause() }
             )
 
@@ -40,6 +40,15 @@ struct PlayerButtons: View {
             )
         }
         .playerButtonStyle(.expandedPlayer)
+    }
+
+    @ViewBuilder
+    private var playPauseLabel: some View {
+        if player.isBuffering {
+            ProgressView()
+        } else {
+            PlayerButtonLabel(type: player.isPlaying ? .pause : .play, size: imageSize)
+        }
     }
 }
 

@@ -98,9 +98,38 @@ struct PlayerView: View {
             MarqueeText(text: player.currentTrack?.artist ?? "")
                 .font(.subheadline)
                 .foregroundStyle(.transparentWhite)
+            if let audioInfoLine {
+                Text(audioInfoLine)
+                    .font(.caption)
+                    .foregroundStyle(.transparentWhite.opacity(0.7))
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.bottom, 6)
+    }
+
+    /// "Stream · FLAC · 24-bit/96 kHz" or "Downloaded · AAC · 256 kbps" — `nil` while the setting
+    /// is off, nothing's playing, or the codec read (`PlayerManager.audioFormatInfo`) hasn't
+    /// landed yet for the current track.
+    private var audioInfoLine: String? {
+        guard AudioInfoDisplaySettings.isEnabled, player.currentTrack != nil,
+              let source = player.playbackSource, let format = player.audioFormatInfo
+        else { return nil }
+        var parts = [source.displayName, format.codec]
+        if let bitDepth = format.bitDepth, let sampleRateHz = format.sampleRateHz {
+            parts.append("\(bitDepth)-bit/\(Self.formattedSampleRate(sampleRateHz))")
+        } else if let bitrateKbps = format.bitrateKbps {
+            parts.append("\(bitrateKbps) kbps")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private static func formattedSampleRate(_ hz: Double) -> String {
+        let khz = (hz / 1000 * 10).rounded() / 10
+        if khz == khz.rounded() {
+            return "\(Int(khz)) kHz"
+        }
+        return String(format: "%.1f kHz", khz)
     }
 
     func PlayerProgress() -> some View {

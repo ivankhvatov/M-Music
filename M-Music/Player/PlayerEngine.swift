@@ -1,4 +1,5 @@
 import AVFoundation
+import AudioToolbox
 import Combine
 import Foundation
 
@@ -264,6 +265,67 @@ final class PlayerEngine: ObservableObject {
 
     private func applyEffectiveVolume() {
         player.volume = max(0, min(volume * replayGainVolume, 1))
+    }
+
+    struct AudioFormatInfo: Equatable {
+        let codec: String
+        /// kbps — set for a lossy codec, `nil` for a lossless one (see `bitDepth`/`sampleRateHz`
+        /// instead, since a lossless codec doesn't have a single fixed bitrate worth reporting).
+        let bitrateKbps: Int?
+        let bitDepth: Int?
+        let sampleRateHz: Double?
+    }
+
+    private static let losslessCodecLabels: Set<String> = ["ALAC", "FLAC", "WAV"]
+
+    /// The URL currently loaded (or being swapped into) the player — so `PlayerManager` can pass
+    /// it back into `currentAudioFormat(matching:)` right after a gapless swap, when it has no
+    /// other way to know exactly what just became current.
+    var currentPlaybackURL: URL? { currentURL }
+
+    /// Reads the *real* codec (and bitrate, or bit depth/sample rate for a lossless codec) off the
+    /// currently loaded item's audio track — the only reliable source of truth, since transcoding
+    /// can silently change the codec the server actually sends regardless of what the source
+    /// file's extension implies. `url` must be whatever the caller believes is currently playing
+    /// (`play(url:)`'s argument, or `currentPlaybackURL` right after a gapless swap) — guards
+    /// against the current item having already changed again by the time the async metadata
+    /// loads finish, the same way `notifyFailure(for:token:)` guards against a stale failure.
+    /// Returns `nil` if nothing's loaded, the format metadata isn't available (yet), or that guard
+    /// trips.
+    func currentAudioFormat(matching url: URL) async -> AudioFormatInfo? {
+        guard currentURL == url, let asset = player.currentItem?.asset else { return nil }
+        guard let track = try? await asset.loadTracks(withMediaType: .audio).first else { return nil }
+        guard let formatDescriptions = try? await track.load(.formatDescriptions), let fd = formatDescriptions.first else {
+            return nil
+        }
+        guard currentURL == url else { return nil }
+        let codec = Self.codecLabel(forFormatID: CMFormatDescriptionGetMediaSubType(fd))
+        let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(fd)?.pointee
+        if Self.losslessCodecLabels.contains(codec), let asbd, asbd.mBitsPerChannel > 0 {
+            return AudioFormatInfo(codec: codec, bitrateKbps: nil, bitDepth: Int(asbd.mBitsPerChannel), sampleRateHz: asbd.mSampleRate)
+        }
+        let rate = (try? await track.load(.estimatedDataRate)) ?? 0
+        guard currentURL == url else { return nil }
+        let kbps = rate > 0 ? Int((rate / 1000).rounded()) : nil
+        return AudioFormatInfo(codec: codec, bitrateKbps: kbps, bitDepth: nil, sampleRateHz: asbd?.mSampleRate)
+    }
+
+    private static func codecLabel(forFormatID id: FourCharCode) -> String {
+        switch id {
+        case kAudioFormatAppleLossless: return "ALAC"
+        case kAudioFormatMPEG4AAC, kAudioFormatMPEG4AAC_HE, kAudioFormatMPEG4AAC_HE_V2,
+             kAudioFormatMPEG4AAC_LD, kAudioFormatMPEG4AAC_ELD: return "AAC"
+        case kAudioFormatFLAC: return "FLAC"
+        case kAudioFormatMPEGLayer1, kAudioFormatMPEGLayer2, kAudioFormatMPEGLayer3: return "MP3"
+        case kAudioFormatOpus: return "OPUS"
+        case kAudioFormatLinearPCM: return "WAV"
+        case kAudioFormatAC3: return "AC3"
+        default:
+            let bytes = [UInt8((id >> 24) & 0xff), UInt8((id >> 16) & 0xff),
+                         UInt8((id >> 8) & 0xff), UInt8(id & 0xff)]
+            let s = (String(bytes: bytes, encoding: .ascii) ?? "?").trimmingCharacters(in: .whitespacesAndNewlines)
+            return s.isEmpty ? "?" : s.uppercased()
+        }
     }
 
     func stop() {
