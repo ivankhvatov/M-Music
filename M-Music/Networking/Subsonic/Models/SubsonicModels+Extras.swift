@@ -15,6 +15,11 @@ struct PlaylistSummary: Decodable, Identifiable, Hashable, Sendable {
     let coverArt: String?
 }
 
+/// `Encodable` only for `LibraryCacheDatabase`, which re-serializes it to persist for offline
+/// browsing — `SubsonicClient` itself never re-encodes anything it decodes. Must live in this
+/// file: Swift can only synthesize `encode(to:)` in the same file as the type declaration.
+extension PlaylistSummary: Encodable {}
+
 struct Playlists: Decodable, Sendable {
     let playlist: [PlaylistSummary]
 }

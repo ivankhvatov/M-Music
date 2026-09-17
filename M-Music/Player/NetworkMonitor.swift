@@ -4,7 +4,7 @@ import Network
 /// Tracks the device's current connection type so transcoding decisions (`TranscodingSettings`)
 /// can be made against Wi-Fi vs. cellular without each call site standing up its own
 /// `NWPathMonitor`.
-final class NetworkMonitor {
+final class NetworkMonitor: ObservableObject {
     static let shared = NetworkMonitor()
 
     private let monitor = NWPathMonitor()
@@ -12,10 +12,19 @@ final class NetworkMonitor {
     private let lock = NSLock()
     private var path: NWPath?
 
+    /// A SwiftUI-observable mirror of `hasNetwork`, for views that gray out/disable content while
+    /// offline (`dimmedIfUnavailable`) — `hasNetwork` itself stays a plain lock-protected property
+    /// since it's also read from `StreamCacheService`, a background actor that can't safely
+    /// observe `@Published` the way a view can. Defaults to `true` so a normal, online launch
+    /// doesn't flash everything as unavailable before `NWPathMonitor`'s first callback arrives.
+    @Published private(set) var isOnline: Bool = true
+
     private init() {
         monitor.pathUpdateHandler = { [weak self] path in
             guard let self else { return }
             lock.withLock { self.path = path }
+            let isOnline = path.status == .satisfied
+            DispatchQueue.main.async { self.isOnline = isOnline }
         }
         monitor.start(queue: queue)
     }

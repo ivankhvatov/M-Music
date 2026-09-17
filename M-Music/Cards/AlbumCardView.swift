@@ -20,6 +20,9 @@ struct AlbumCardView: View {
     /// token-stripped key underneath. At grid scale that's a lot of redundant task churn.
     @State private var artworkURL: URL?
 
+    @ObservedObject private var downloads = DownloadStore.shared
+    @ObservedObject private var networkMonitor = NetworkMonitor.shared
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             artwork
@@ -35,9 +38,19 @@ struct AlbumCardView: View {
                 .foregroundColor(.gray)
                 .lineLimit(1)
         }
+        .dimmedIfUnavailable(isAvailable)
         .task(id: album.id) {
             artworkURL = try? SubsonicClient.shared.coverArtURL(forId: album.coverArt ?? album.id.raw)
         }
+    }
+
+    /// Nothing is ever "unavailable" while online (everything can still stream) — only offline
+    /// does whether this album has *any* downloaded song matter. Not the same question as
+    /// `AlbumView.isAlbumDownloaded` (every song downloaded, for the toolbar button). The
+    /// `NavigationLink` this card is normally the label of can't be disabled from in here — the
+    /// parent view that builds it computes this same expression again for that.
+    private var isAvailable: Bool {
+        networkMonitor.isOnline || downloads.hasDownloadedSong(inAlbum: album.id.raw)
     }
 
     private var subtitleText: String {

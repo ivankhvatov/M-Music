@@ -241,6 +241,11 @@ struct ArtistID3: Decodable, Identifiable, Hashable, Sendable {
     var isStarred: Bool { starred != nil }
 }
 
+/// `Encodable` only for `LibraryCacheDatabase`, which re-serializes it to persist for offline
+/// browsing — `SubsonicClient` itself never re-encodes anything it decodes. Must live in this
+/// file: Swift can only synthesize `encode(to:)` in the same file as the type declaration.
+extension ArtistID3: Encodable {}
+
 struct IndexID3: Decodable, Hashable, Sendable {
     let name: String
     let artist: [ArtistID3]
@@ -377,6 +382,11 @@ struct AlbumID3: Decodable, Identifiable, Hashable, Sendable {
         name = AlbumVersionParsing.strippingSuffix(forVersion: version, from: rawName)
     }
 }
+
+/// `Encodable` only for `LibraryCacheDatabase` — see `ArtistID3.Encodable`'s doc comment above
+/// for why, and why this has to live in this same file. Synthesis reuses the `CodingKeys` already
+/// declared above for the custom decoder.
+extension AlbumID3: Encodable {}
 
 struct ArtistWithAlbumsID3: Decodable, Sendable {
     let id: FlexibleID

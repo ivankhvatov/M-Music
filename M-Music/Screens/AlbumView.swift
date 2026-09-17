@@ -11,6 +11,7 @@ struct AlbumView: View {
     /// it instead, scoped to just the currently-visible rows.
     private let player = PlayerManager.shared
     @ObservedObject private var downloads = DownloadStore.shared
+    @ObservedObject private var networkMonitor = NetworkMonitor.shared
     @Environment(\.displayScale) private var displayScale
 
     /// Zoom transition for the "Other versions" / "More by artist" cards below — separate from
@@ -114,16 +115,27 @@ struct AlbumView: View {
 
     private func loadSongs() async {
         do {
-            let full = try await AlbumDetailsCache.shared.album(id: album.id.raw)
+            let full = try await client.getAlbum(id: album.id.raw)
             await MainActor.run {
                 songs = full.song ?? []
                 albumCodec = full.codec
                 isLoadingSongs = false
             }
+            Task { await LibraryCacheDatabase.shared.cacheAlbumSongs(full, albumId: album.id.raw) }
         } catch {
-            await MainActor.run {
-                loadError = error.localizedDescription
-                isLoadingSongs = false
+            // Offline, or the request otherwise failed — fall back to whatever this album's
+            // songs were cached as the last time it was opened successfully, if ever.
+            if let cached = await LibraryCacheDatabase.shared.cachedAlbumSongs(albumId: album.id.raw) {
+                await MainActor.run {
+                    songs = cached.song ?? []
+                    albumCodec = cached.codec
+                    isLoadingSongs = false
+                }
+            } else {
+                await MainActor.run {
+                    loadError = error.localizedDescription
+                    isLoadingSongs = false
+                }
             }
         }
     }
@@ -250,6 +262,7 @@ struct AlbumView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .disabled(!(networkMonitor.isOnline || downloads.isDownloaded(track.id.raw)))
             .listRowSeparator(.hidden)
             .listRowBackground(backgroundColor.darkened())
             // Every row's own vertical inset, rather than the system default a `List` row
@@ -297,13 +310,23 @@ struct AlbumView: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
+    /// `songs` itself while online; offline, only the ones actually downloaded — so playing
+    /// forward from a tapped (necessarily downloaded, since its row is disabled otherwise) track
+    /// never queues up something that's about to fail to stream with no network.
+    private var playableSongs: [Child] {
+        networkMonitor.isOnline ? songs : songs.filter { downloads.isDownloaded($0.id.raw) }
+    }
+
     private func playTrack(at index: Int) {
-        player.play(queue: songs, startAt: index)
+        let queue = playableSongs
+        guard let startAt = queue.firstIndex(where: { $0.id == songs[index].id }) else { return }
+        player.play(queue: queue, startAt: startAt)
     }
 
     private func shuffle() {
-        guard !songs.isEmpty else { return }
-        player.play(queue: songs.shuffled(), startAt: 0)
+        let queue = playableSongs
+        guard !queue.isEmpty else { return }
+        player.play(queue: queue.shuffled(), startAt: 0)
     }
 
     private var trackCountAndDuration: String {
@@ -540,20 +563,27 @@ private struct TrackRow: View {
     private let player = PlayerManager.shared
     @ObservedObject private var starStore = StarStore.shared
     @ObservedObject private var downloads = DownloadStore.shared
+    @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
     var body: some View {
         HStack(spacing: 12) {
-            TrackLeadingGlyph(track: track)
+            HStack(spacing: 12) {
+                TrackLeadingGlyph(track: track)
 
-            VStack(alignment: .leading) {
-                Text(track.title)
+                VStack(alignment: .leading) {
+                    Text(track.title)
 
-                if let trackArtist = track.artist, trackArtist != albumArtist {
-                    Text(trackArtist)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if let trackArtist = track.artist, trackArtist != albumArtist {
+                        Text(trackArtist)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
+            // Dims just the leading glyph/title — see `SongRow`'s identical comment for why the
+            // indicator and menu stay at full opacity regardless. Nothing is ever "unavailable"
+            // while online — everything can still stream.
+            .dimmedIfUnavailable(networkMonitor.isOnline || downloads.isDownloaded(track.id.raw))
 
             Spacer()
 

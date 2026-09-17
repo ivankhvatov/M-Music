@@ -37,6 +37,23 @@ final class DownloadStore: ObservableObject {
         downloadedSongIds.contains(songId)
     }
 
+    /// Whether *any* song from this album is downloaded — used to decide whether an album's own
+    /// preview card/row should read as available offline, as opposed to `AlbumView
+    /// .isAlbumDownloaded`'s stricter "every song downloaded" (that one drives the toolbar
+    /// download button, a different question).
+    func hasDownloadedSong(inAlbum albumId: String?) -> Bool {
+        guard let albumId else { return false }
+        return downloadedRecords.contains { $0.albumId == albumId }
+    }
+
+    /// Whether any downloaded song's `artist` field matches `artistName` — the only signal
+    /// available for this without a heavier artist-id lookup, since `DownloadRecord` only ever
+    /// stores the artist's name (the same string `ArtistID3.name` uses), not an id.
+    func hasDownloadedSong(byArtist artistName: String?) -> Bool {
+        guard let artistName else { return false }
+        return downloadedRecords.contains { $0.artist == artistName }
+    }
+
     func download(_ song: Child) {
         guard !downloadedSongIds.contains(song.id.raw) else { return }
         failedSongIds.remove(song.id.raw)

@@ -55,7 +55,7 @@ final class SubsonicClient: @unchecked Sendable {
         do {
             let license = try await getLicense()
             try SubsonicCredentialsStore.save(candidate)
-            AlbumDetailsCache.shared.invalidateAll()
+            await LibraryCacheDatabase.shared.clearAll()
             ImageCache.shared.invalidateAll()
             return license
         } catch {
@@ -68,7 +68,7 @@ final class SubsonicClient: @unchecked Sendable {
     func disconnect() {
         credentials = nil
         SubsonicCredentialsStore.clear()
-        AlbumDetailsCache.shared.invalidateAll()
+        Task { await LibraryCacheDatabase.shared.clearAll() }
         ImageCache.shared.invalidateAll()
     }
 

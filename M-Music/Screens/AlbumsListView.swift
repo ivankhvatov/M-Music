@@ -100,6 +100,9 @@ struct AlbumsListView: View {
     @State private var loadError: String?
     @State private var hasLoadedOnce = false
 
+    @ObservedObject private var downloads = DownloadStore.shared
+    @ObservedObject private var networkMonitor = NetworkMonitor.shared
+
     private let gridColumns = [
         GridItem(.flexible(), spacing: 16),
         GridItem(.flexible(), spacing: 16),
@@ -153,6 +156,7 @@ struct AlbumsListView: View {
                     AlbumCardView(album: album, zoomNamespace: albumZoomNamespace)
                 }
                 .buttonStyle(.plain)
+                .disabled(!isAvailable(album))
             }
         }
         .padding(.horizontal, 16)
@@ -166,9 +170,17 @@ struct AlbumsListView: View {
                     AlbumRow(album: album, zoomNamespace: albumZoomNamespace, displayScale: displayScale)
                 }
                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                .disabled(!isAvailable(album))
             }
         }
         .listStyle(.plain)
+    }
+
+    /// Same expression `AlbumCardView`/`AlbumRow` compute internally for their own dimming — this
+    /// is the only way to also `.disabled(...)` the `NavigationLink` they're the label of, since
+    /// that can't be done from inside the label itself.
+    private func isAvailable(_ album: AlbumID3) -> Bool {
+        networkMonitor.isOnline || downloads.hasDownloadedSong(inAlbum: album.id.raw)
     }
 
     private var displayedAlbums: [AlbumID3] {
@@ -228,7 +240,19 @@ struct AlbumsListView: View {
                     isLoading = false
                     hasLoadedOnce = true
                 }
+                Task { await LibraryCacheDatabase.shared.cacheAllAlbums(fetched) }
             } catch {
+                // Offline, or the request otherwise failed — fall back to whatever was cached
+                // the last time this list loaded successfully, if ever.
+                if let cached = await LibraryCacheDatabase.shared.cachedAllAlbums() {
+                    await MainActor.run {
+                        albums = cached
+                        loadError = nil
+                        isLoading = false
+                        hasLoadedOnce = true
+                    }
+                    return
+                }
                 await MainActor.run {
                     if !hasLoadedOnce {
                         loadError = error.localizedDescription
@@ -318,6 +342,9 @@ private struct AlbumRow: View {
     private let rowArtworkSize: CGFloat = 64
     private let artworkCornerRadius: CGFloat = 4
 
+    @ObservedObject private var downloads = DownloadStore.shared
+    @ObservedObject private var networkMonitor = NetworkMonitor.shared
+
     init(album: AlbumID3, zoomNamespace: Namespace.ID? = nil, displayScale: CGFloat) {
         self.album = album
         self.zoomNamespace = zoomNamespace
@@ -339,6 +366,7 @@ private struct AlbumRow: View {
                     .lineLimit(1)
             }
         }
+        .dimmedIfUnavailable(networkMonitor.isOnline || downloads.hasDownloadedSong(inAlbum: album.id.raw))
         // Full-size cover, prefetched in the background — see `artworkURL`'s doc comment. Keyed
         // to `album.id` so scrolling this row's cell to a different album (cell reuse) cancels
         // the stale prefetch and starts the right one.

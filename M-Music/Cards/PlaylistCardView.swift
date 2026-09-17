@@ -16,6 +16,10 @@ struct PlaylistCardView: View {
     /// every body evaluation would make `CachedAsyncImage` see a "new" URL each time.
     @State private var artworkURL: URL?
 
+    @ObservedObject private var downloads = DownloadStore.shared
+    @ObservedObject private var libraryCacheStatus = LibraryCacheStatus.shared
+    @ObservedObject private var networkMonitor = NetworkMonitor.shared
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             artwork
@@ -29,9 +33,22 @@ struct PlaylistCardView: View {
                 .foregroundColor(.gray)
                 .lineLimit(1)
         }
+        .dimmedIfUnavailable(isAvailable)
         .task(id: playlist.id) {
             artworkURL = try? SubsonicClient.shared.coverArtURL(forId: playlist.coverArt ?? playlist.id.raw)
         }
+    }
+
+    /// Nothing is ever "unavailable" while online — only offline does whether this playlist has
+    /// *any* downloaded song matter. Not the same question as `PlaylistView.isPlaylistDownloaded`
+    /// (every song downloaded, for the toolbar button). `nil` (this playlist's songs were never
+    /// cached) reads as "no" rather than "unknown" — there's nothing to cross-reference against.
+    /// The `NavigationLink` this card is normally the label of can't be disabled from in here —
+    /// the parent view that builds it computes this same expression again for that.
+    private var isAvailable: Bool {
+        guard !networkMonitor.isOnline else { return true }
+        let songIds = libraryCacheStatus.songIds(forPlaylist: playlist.id.raw) ?? []
+        return songIds.contains { downloads.isDownloaded($0) }
     }
 
     @ViewBuilder

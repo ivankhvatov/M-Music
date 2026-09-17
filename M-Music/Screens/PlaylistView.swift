@@ -16,6 +16,7 @@ struct PlaylistView: View {
     /// ever calls `player.play(queue:startAt:)`, never reads a `@Published` property in `body`.
     private let player = PlayerManager.shared
     @ObservedObject private var downloads = DownloadStore.shared
+    @ObservedObject private var networkMonitor = NetworkMonitor.shared
     @Environment(\.displayScale) private var displayScale
 
     @State private var songs: [Child] = []
@@ -86,14 +87,25 @@ struct PlaylistView: View {
     private func loadSongs() async {
         do {
             let full = try await client.getPlaylist(id: playlist.id.raw)
+            let entries = full.entry ?? []
             await MainActor.run {
-                songs = full.entry ?? []
+                songs = entries
                 isLoadingSongs = false
             }
+            Task { await LibraryCacheDatabase.shared.cachePlaylistSongs(entries, playlistId: playlist.id.raw) }
         } catch {
-            await MainActor.run {
-                loadError = error.localizedDescription
-                isLoadingSongs = false
+            // Offline, or the request otherwise failed — fall back to whatever this playlist's
+            // songs were cached as the last time it was opened successfully, if ever.
+            if let cached = await LibraryCacheDatabase.shared.cachedPlaylistSongs(playlistId: playlist.id.raw) {
+                await MainActor.run {
+                    songs = cached
+                    isLoadingSongs = false
+                }
+            } else {
+                await MainActor.run {
+                    loadError = error.localizedDescription
+                    isLoadingSongs = false
+                }
             }
         }
     }
@@ -153,6 +165,7 @@ struct PlaylistView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .disabled(!(networkMonitor.isOnline || downloads.isDownloaded(track.id.raw)))
             .listRowSeparator(.hidden)
             .listRowBackground(backgroundColor.darkened())
             .listRowInsets(EdgeInsets(
@@ -186,13 +199,21 @@ struct PlaylistView: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
+    /// See `AlbumView.playableSongs`'s identical doc comment.
+    private var playableSongs: [Child] {
+        networkMonitor.isOnline ? songs : songs.filter { downloads.isDownloaded($0.id.raw) }
+    }
+
     private func playTrack(at index: Int) {
-        player.play(queue: songs, startAt: index)
+        let queue = playableSongs
+        guard let startAt = queue.firstIndex(where: { $0.id == songs[index].id }) else { return }
+        player.play(queue: queue, startAt: startAt)
     }
 
     private func shuffle() {
-        guard !songs.isEmpty else { return }
-        player.play(queue: songs.shuffled(), startAt: 0)
+        let queue = playableSongs
+        guard !queue.isEmpty else { return }
+        player.play(queue: queue.shuffled(), startAt: 0)
     }
 
     private var trackCountAndDuration: String {

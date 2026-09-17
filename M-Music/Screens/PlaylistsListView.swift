@@ -22,6 +22,10 @@ struct PlaylistsListView: View {
 
     @AppStorage("library.playlistsDisplayStyle") private var displayStyleStorage = LibraryDisplayStyle.grid.storageKey
 
+    @ObservedObject private var downloads = DownloadStore.shared
+    @ObservedObject private var libraryCacheStatus = LibraryCacheStatus.shared
+    @ObservedObject private var networkMonitor = NetworkMonitor.shared
+
     private var displayStyle: LibraryDisplayStyle {
         LibraryDisplayStyle(storageKey: displayStyleStorage)
     }
@@ -64,6 +68,9 @@ struct PlaylistsListView: View {
             .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
             .onAppear {
                 refresh()
+                // So playlists cached in an earlier session gray out correctly before any
+                // playlist is opened this session — guarded internally, cheap to call again.
+                Task { await LibraryCacheStatus.shared.preload() }
             }
         }
     }
@@ -75,6 +82,7 @@ struct PlaylistsListView: View {
                     PlaylistCardView(playlist: playlist, zoomNamespace: playlistZoomNamespace)
                 }
                 .buttonStyle(.plain)
+                .disabled(!isAvailable(playlist))
             }
         }
         .padding(.horizontal, 16)
@@ -88,9 +96,18 @@ struct PlaylistsListView: View {
                     PlaylistRow(playlist: playlist, zoomNamespace: playlistZoomNamespace, displayScale: displayScale)
                 }
                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                .disabled(!isAvailable(playlist))
             }
         }
         .listStyle(.plain)
+    }
+
+    /// Same expression `PlaylistCardView`/`PlaylistRow` compute internally for their own dimming
+    /// — this is the only way to also `.disabled(...)` the `NavigationLink` they're the label of.
+    private func isAvailable(_ playlist: PlaylistSummary) -> Bool {
+        guard !networkMonitor.isOnline else { return true }
+        let songIds = libraryCacheStatus.songIds(forPlaylist: playlist.id.raw) ?? []
+        return songIds.contains { downloads.isDownloaded($0) }
     }
 
     private var displayedPlaylists: [PlaylistSummary] {
@@ -121,7 +138,19 @@ struct PlaylistsListView: View {
                     isLoading = false
                     hasLoadedOnce = true
                 }
+                Task { await LibraryCacheDatabase.shared.cacheAllPlaylists(fetched) }
             } catch {
+                // Offline, or the request otherwise failed — fall back to whatever was cached
+                // the last time this list loaded successfully, if ever.
+                if let cached = await LibraryCacheDatabase.shared.cachedAllPlaylists() {
+                    await MainActor.run {
+                        playlists = cached
+                        loadError = nil
+                        isLoading = false
+                        hasLoadedOnce = true
+                    }
+                    return
+                }
                 await MainActor.run {
                     if !hasLoadedOnce {
                         loadError = error.localizedDescription
@@ -157,6 +186,10 @@ private struct PlaylistRow: View {
     private let rowArtworkSize: CGFloat = 64
     private let artworkCornerRadius: CGFloat = 4
 
+    @ObservedObject private var downloads = DownloadStore.shared
+    @ObservedObject private var libraryCacheStatus = LibraryCacheStatus.shared
+    @ObservedObject private var networkMonitor = NetworkMonitor.shared
+
     init(playlist: PlaylistSummary, zoomNamespace: Namespace.ID? = nil, displayScale: CGFloat) {
         self.playlist = playlist
         self.zoomNamespace = zoomNamespace
@@ -178,12 +211,20 @@ private struct PlaylistRow: View {
                     .lineLimit(1)
             }
         }
+        .dimmedIfUnavailable(isAvailable)
         // Full-size cover, prefetched in the background — see `artworkURL`'s doc comment. Keyed
         // to `playlist.id` so scrolling this row's cell to a different playlist (cell reuse)
         // cancels the stale prefetch and starts the right one.
         .task(id: playlist.id) {
             ImageCache.shared.prefetch(try? SubsonicClient.shared.coverArtURL(forId: playlist.coverArt ?? playlist.id.raw))
         }
+    }
+
+    /// See `PlaylistCardView.isAvailable`'s doc comment — same check, same reasoning.
+    private var isAvailable: Bool {
+        guard !networkMonitor.isOnline else { return true }
+        let songIds = libraryCacheStatus.songIds(forPlaylist: playlist.id.raw) ?? []
+        return songIds.contains { downloads.isDownloaded($0) }
     }
 
     @ViewBuilder

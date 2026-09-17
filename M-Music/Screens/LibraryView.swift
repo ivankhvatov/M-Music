@@ -13,6 +13,9 @@ struct LibraryView: View {
     @State private var loadError: String?
     @State private var hasLoadedOnce = false
 
+    @ObservedObject private var downloads = DownloadStore.shared
+    @ObservedObject private var networkMonitor = NetworkMonitor.shared
+
     var body: some View {
             NavigationStack {
                 ScrollView {
@@ -123,7 +126,21 @@ struct LibraryView: View {
                 // grid, instead of waiting for each card to scroll into view and start its own
                 // fetch — by the time anything is tapped, ImageCache should already have it.
                 prefetchArtwork(for: albums)
+                Task { await LibraryCacheDatabase.shared.cacheRecentAlbums(albums) }
             } catch {
+                // Offline, or the request otherwise failed — fall back to whatever was cached
+                // the last time this grid loaded successfully, if ever.
+                if let cached = await LibraryCacheDatabase.shared.cachedRecentAlbums() {
+                    await MainActor.run {
+                        recentAlbums = cached
+                        loadError = nil
+                        isLoadingAlbums = false
+                        isFetchingAlbums = false
+                        hasLoadedOnce = true
+                    }
+                    prefetchArtwork(for: cached)
+                    return
+                }
                 await MainActor.run {
                     if !hasLoadedOnce {
                         loadError = error.localizedDescription
@@ -174,6 +191,7 @@ struct LibraryView: View {
                         AlbumCardView(album: album, zoomNamespace: albumZoomNamespace)
                     }
                     .buttonStyle(.plain)
+                    .disabled(!(networkMonitor.isOnline || downloads.hasDownloadedSong(inAlbum: album.id.raw)))
                 }
             }
             .padding(.horizontal, 16)

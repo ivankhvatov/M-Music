@@ -53,6 +53,9 @@ struct ArtistsListView: View {
     @AppStorage("artistsList.filterOption") private var filterOptionStorage = ArtistFilterOption.all.storageKey
     @AppStorage("artistsList.sortOrder") private var sortOrderStorage = ArtistSortOrder.ascending.storageKey
 
+    @ObservedObject private var downloads = DownloadStore.shared
+    @ObservedObject private var networkMonitor = NetworkMonitor.shared
+
     private var filterOption: Binding<ArtistFilterOption> {
         Binding(
             get: { ArtistFilterOption(storageKey: filterOptionStorage) },
@@ -91,6 +94,7 @@ struct ArtistsListView: View {
                                 ArtistRow(artist: artist)
                             }
                             .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                            .disabled(!isAvailable(artist))
                         }
                     }
                     .listStyle(.plain)
@@ -182,7 +186,19 @@ struct ArtistsListView: View {
                     isLoading = false
                     hasLoadedOnce = true
                 }
+                Task { await LibraryCacheDatabase.shared.cacheAllArtists(fetched) }
             } catch {
+                // Offline, or the request otherwise failed — fall back to whatever was cached
+                // the last time this list loaded successfully, if ever.
+                if let cached = await LibraryCacheDatabase.shared.cachedAllArtists() {
+                    await MainActor.run {
+                        artists = cached
+                        loadError = nil
+                        isLoading = false
+                        hasLoadedOnce = true
+                    }
+                    return
+                }
                 await MainActor.run {
                     if !hasLoadedOnce {
                         loadError = error.localizedDescription
@@ -192,6 +208,12 @@ struct ArtistsListView: View {
             }
         }
     }
+
+    /// Same expression `ArtistRow` computes internally for its own dimming — this is the only
+    /// way to also `.disabled(...)` the `NavigationLink` it's the label of.
+    private func isAvailable(_ artist: ArtistID3) -> Bool {
+        networkMonitor.isOnline || downloads.hasDownloadedSong(byArtist: artist.name)
+    }
 }
 
 private struct ArtistRow: View {
@@ -200,6 +222,9 @@ private struct ArtistRow: View {
     @State private var artworkURL: URL?
 
     private let rowArtworkSize: CGFloat = 54
+
+    @ObservedObject private var downloads = DownloadStore.shared
+    @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
     var body: some View {
         HStack(spacing: 16) {
@@ -221,6 +246,7 @@ private struct ArtistRow: View {
             Text(artist.name)
                 .font(.title3)
         }
+        .dimmedIfUnavailable(networkMonitor.isOnline || downloads.hasDownloadedSong(byArtist: artist.name))
         .task(id: artist.id) {
             artworkURL = try? SubsonicClient.shared.coverArtURL(forId: artist.coverArt ?? artist.id.raw)
         }

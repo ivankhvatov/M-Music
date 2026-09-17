@@ -79,6 +79,9 @@ struct ArtistAlbumsView: View {
     @State private var isLoadingQueue = false
     @State private var isStarred: Bool
 
+    @ObservedObject private var downloads = DownloadStore.shared
+    @ObservedObject private var networkMonitor = NetworkMonitor.shared
+
     @AppStorage("artistAlbums.sortField") private var sortFieldStorage = ArtistAlbumSortField.title.storageKey
     @AppStorage("artistAlbums.sortOrder") private var sortOrderStorage = ArtistAlbumSortOrder.ascending.storageKey
     @AppStorage("library.separateReleaseTypes") private var separateReleaseTypesEnabled = false
@@ -216,6 +219,7 @@ struct ArtistAlbumsView: View {
                         AlbumCardView(album: album, zoomNamespace: albumZoomNamespace, subtitle: .year)
                     }
                     .buttonStyle(.plain)
+                    .disabled(!isAvailable(album))
                 }
             }
             .padding(.horizontal, 16)
@@ -281,11 +285,18 @@ struct ArtistAlbumsView: View {
                                 .frame(width: 160)
                         }
                         .buttonStyle(.plain)
+                        .disabled(!isAvailable(album))
                     }
                 }
                 .padding(.horizontal, 16)
             }
         }
+    }
+
+    /// Same expression `AlbumCardView` computes internally for its own dimming — this is the
+    /// only way to also `.disabled(...)` the `NavigationLink` it's the label of.
+    private func isAvailable(_ album: AlbumID3) -> Bool {
+        networkMonitor.isOnline || downloads.hasDownloadedSong(inAlbum: album.id.raw)
     }
 
     @ToolbarContentBuilder
@@ -366,7 +377,19 @@ struct ArtistAlbumsView: View {
                     isLoading = false
                     hasLoadedOnce = true
                 }
+                Task { await LibraryCacheDatabase.shared.cacheArtistAlbums(fetched.album, artistId: artist.id.raw) }
             } catch {
+                // Offline, or the request otherwise failed — fall back to whatever was cached
+                // the last time this artist loaded successfully, if ever.
+                if let cached = await LibraryCacheDatabase.shared.cachedArtistAlbums(artistId: artist.id.raw) {
+                    await MainActor.run {
+                        albums = cached
+                        loadError = nil
+                        isLoading = false
+                        hasLoadedOnce = true
+                    }
+                    return
+                }
                 await MainActor.run {
                     if !hasLoadedOnce {
                         loadError = error.localizedDescription
@@ -408,9 +431,12 @@ struct ArtistAlbumsView: View {
         isLoadingQueue = true
         Task {
             let songs = (try? await fetchAllSongs()) ?? []
+            // Never queue up a song that's about to fail to stream with no network — see
+            // `AlbumView.playableSongs`'s identical reasoning.
+            let playableSongs = networkMonitor.isOnline ? songs : songs.filter { downloads.isDownloaded($0.id.raw) }
             await MainActor.run {
                 isLoadingQueue = false
-                let queue = transform(songs)
+                let queue = transform(playableSongs)
                 guard !queue.isEmpty else { return }
                 player.play(queue: queue, startAt: 0)
             }

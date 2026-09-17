@@ -67,6 +67,8 @@ struct SongsListView: View {
     /// scoped to just the currently-visible rows.
     private let player = PlayerManager.shared
     @ObservedObject private var starStore = StarStore.shared
+    @ObservedObject private var downloads = DownloadStore.shared
+    @ObservedObject private var networkMonitor = NetworkMonitor.shared
     @Environment(\.displayScale) private var displayScale
 
     @State private var searchText = ""
@@ -138,6 +140,7 @@ struct SongsListView: View {
                             }
                             .buttonStyle(.plain)
                             .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                            .disabled(!(networkMonitor.isOnline || downloads.isDownloaded(track.id.raw)))
                         }
                     }
                     .listStyle(.plain)
@@ -161,9 +164,17 @@ struct SongsListView: View {
         }
     }
 
+    /// `displayedSongs` itself while online; offline, only the ones actually downloaded — so
+    /// playing forward from a tapped (necessarily downloaded, since its row is disabled
+    /// otherwise) track never queues up something that's about to fail to stream with no network.
+    private var playableSongs: [Child] {
+        networkMonitor.isOnline ? displayedSongs : displayedSongs.filter { downloads.isDownloaded($0.id.raw) }
+    }
+
     private func play(_ track: Child) {
-        guard let index = displayedSongs.firstIndex(where: { $0.id == track.id }) else { return }
-        player.play(queue: displayedSongs, startAt: index)
+        let queue = playableSongs
+        guard let index = queue.firstIndex(where: { $0.id == track.id }) else { return }
+        player.play(queue: queue, startAt: index)
     }
 
     private func updateDisplayedSongs() {
@@ -218,7 +229,19 @@ struct SongsListView: View {
                     isLoading = false
                     hasLoadedOnce = true
                 }
+                Task { await LibraryCacheDatabase.shared.cacheAllSongs(fetched) }
             } catch {
+                // Offline, or the request otherwise failed — fall back to whatever was cached
+                // the last time this list loaded successfully, if ever.
+                if let cached = await LibraryCacheDatabase.shared.cachedAllSongs() {
+                    await MainActor.run {
+                        songs = cached
+                        loadError = nil
+                        isLoading = false
+                        hasLoadedOnce = true
+                    }
+                    return
+                }
                 await MainActor.run {
                     if !hasLoadedOnce {
                         loadError = error.localizedDescription
@@ -326,6 +349,7 @@ struct SongRow: View {
     private let player = PlayerManager.shared
     @ObservedObject private var starStore = StarStore.shared
     @ObservedObject private var downloads = DownloadStore.shared
+    @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
     /// Resolved once, in `init` — `coverArtURL` signs every call with a fresh random token, so
     /// recomputing it inline in `body` would hand `CachedAsyncImage` a "new" URL (and restart its
@@ -344,17 +368,24 @@ struct SongRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            artwork
+            HStack(spacing: 12) {
+                artwork
 
-            VStack(alignment: .leading) {
-                Text(track.title)
+                VStack(alignment: .leading) {
+                    Text(track.title)
 
-                if let trackArtist = track.artist {
-                    Text(trackArtist)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if let trackArtist = track.artist {
+                        Text(trackArtist)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
+            // Dims just the artwork/title — not the indicator or menu below, which should stay
+            // fully legible/actionable (e.g. still show a download in progress, or let the user
+            // start one) regardless of this track's current download state. Nothing is ever
+            // "unavailable" while online — everything can still stream.
+            .dimmedIfUnavailable(networkMonitor.isOnline || downloads.isDownloaded(track.id.raw))
 
             Spacer()
 
