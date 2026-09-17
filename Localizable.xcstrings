@@ -493,6 +493,12 @@
     },
     "All artists" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alle Künstler*innen"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -523,17 +529,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Внешний вид"
-          }
-        }
-      }
-    },
-    "Applies only to new downloads — songs already saved to this device keep whatever quality they were downloaded at." : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Распространяется только на новые загрузки — сохраненные  ранее песни останутся в том же качестве, в котором были загружены."
           }
         }
       }
@@ -597,7 +592,14 @@
       }
     },
     "Cache" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Кэш"
+          }
+        }
+      }
     },
     "Cache size limit" : {
       "localizations" : {
@@ -636,7 +638,14 @@
       }
     },
     "Clear Cache" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Очистить кэш"
+          }
+        }
+      }
     },
     "Compilations" : {
       "localizations" : {
@@ -711,7 +720,14 @@
       }
     },
     "Delete all cached songs?" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удалить все кэшированные песни?"
+          }
+        }
+      }
     },
     "Delete All Downloads" : {
       "localizations" : {
@@ -828,7 +844,14 @@
       }
     },
     "Downloaded" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Загружено"
+          }
+        }
+      }
     },
     "Downloaded songs" : {
       "localizations" : {
@@ -867,15 +890,11 @@
       }
     },
     "Downloads every track to this device before playing it, instead of streaming, so transitions have no gap even over a transcoded or slow connection. A track not played again within the limit above is automatically removed." : {
-
-    },
-    "Downloads the next track ahead of time so the transition into it has no gap, even when streaming a transcoded or slow connection. A track not played again within the limit above is automatically removed." : {
-      "extractionState" : "stale",
       "localizations" : {
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Предварительная загрузка следующего трека для бесшовного перехода при транскодировании или слабом соединении. Не воспроизводимые долгое время треки в пределах объёма кэша удаляются автоматически."
+            "value" : "Загрузка песен перед воспроизведением для бесшовного перехода при транскодировании или слабом соединении. Песни, не воспроизводимые в течение указанного времени, удаляются автоматически."
           }
         }
       }
@@ -1005,7 +1024,14 @@
       }
     },
     "Format/bitrate apply only to new downloads — songs already saved to this device keep whatever quality they were downloaded at. When Prioritize downloads is on, a downloaded song always plays from the download regardless of its format; when off, a download only plays if its format still matches the current Transcoding setting above, otherwise the gapless cache or streaming is used instead." : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Формат и битрейт применяется только к новым загрузкам — сохраненные ранее песни останутся в том формате, в котором были загружены. Если приоритет загрузок включен, загруженные песни воспроизводятся вне зависимости от их формата; иначе, воспроизводятся только если их формат совпадает с настройками транскодирования."
+          }
+        }
+      }
     },
     "Gapless Caching" : {
       "localizations" : {
@@ -1264,7 +1290,14 @@
       }
     },
     "No cached songs." : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Нет кэшированных песен."
+          }
+        }
+      }
     },
     "No Downloads" : {
       "localizations" : {
@@ -1451,7 +1484,14 @@
       }
     },
     "Player" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Проигрыватель"
+          }
+        }
+      }
     },
     "Playlists" : {
       "localizations" : {
@@ -1502,7 +1542,14 @@
       }
     },
     "Prioritize downloads" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Приоритет загрузок"
+          }
+        }
+      }
     },
     "Radio" : {
       "localizations" : {
@@ -1631,7 +1678,14 @@
       }
     },
     "Separate artist's release types shows an artist's albums, EPs, singles, and other release types as separate rows instead of one grid; artists with only one release type are unaffected. Group release versions collapses multiple versions of the same album (e.g. a Deluxe or Remastered edition) down to just the plain edition, or the one with the shortest version name if there's no plain edition — except when Albums is filtered to Favorite only." : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Разделение типов релизов артиста показывает альбомы, мини-альбомы синглы и другие типы релизов в отдельных рядах вместо общей сетки. Группировка версий релизов сокращает все версии одного и того же альбома (например, расширенное издание или ремастеринг) до одного издания — не применяется при фильтрации избранных альбомов."
+          }
+        }
+      }
     },
     "Server" : {
       "localizations" : {
@@ -1666,10 +1720,24 @@
       }
     },
     "Show audio info" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Показывать информацию об аудио"
+          }
+        }
+      }
     },
     "Shows the current playback source, codec, and bitrate (or bit depth/sample rate for a lossless codec) below the artist name in the expanded Now Playing view." : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Информация об источнике, кодеке и битрейте (или глубины кодирования и частоты дискредитации для файлов без потерь) на экране проигрывателя."
+          }
+        }
+      }
     },
     "Singles" : {
       "localizations" : {
@@ -1718,7 +1786,14 @@
       }
     },
     "Stream" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Стриминг"
+          }
+        }
+      }
     },
     "Title" : {
       "localizations" : {

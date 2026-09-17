@@ -25,7 +25,13 @@ struct GaplessCacheRecord: Codable, Identifiable, FetchableRecord, PersistableRe
     var albumId: String?
 
     var id: String { songId }
-    var fileURL: URL { URL(fileURLWithPath: filePath) }
+    /// Reconstructed from the *current* `GaplessCacheDatabase.rootDirectory()` plus just the
+    /// stored path's filename — see `DownloadRecord.fileURL`'s doc comment for why: iOS doesn't
+    /// guarantee an app's sandbox container path stays the same across installs, so trusting
+    /// `filePath`'s stored directory prefix as-is can point at a container that no longer exists.
+    var fileURL: URL {
+        GaplessCacheDatabase.rootDirectory().appendingPathComponent(URL(fileURLWithPath: filePath).lastPathComponent)
+    }
 
     static let databaseTableName = "gapless_cache"
 }

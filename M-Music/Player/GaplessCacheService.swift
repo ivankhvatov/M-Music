@@ -155,7 +155,7 @@ actor GaplessCacheService {
         guard !didLoadExisting else { return }
         didLoadExisting = true
         let records = await GaplessCacheDatabase.shared.allRecords()
-        for record in records where FileManager.default.fileExists(atPath: record.filePath) {
+        for record in records where FileManager.default.fileExists(atPath: record.fileURL.path) {
             let entry = GaplessCacheStatus.Entry(url: record.fileURL, format: record.format, bitrate: record.bitrate)
             await MainActor.run { GaplessCacheStatus.shared.markCached(record.songId, entry: entry) }
         }

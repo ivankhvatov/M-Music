@@ -51,7 +51,14 @@ struct DownloadRecord: Codable, Identifiable, FetchableRecord, PersistableRecord
     var format: String?
 
     var id: String { songId }
-    var fileURL: URL { URL(fileURLWithPath: filePath) }
+    /// Reconstructed from the *current* `DownloadDatabase.rootDirectory()` plus just the stored
+    /// path's filename, rather than trusting `filePath`'s directory prefix as-is — iOS doesn't
+    /// guarantee an app's sandbox container path stays the same across installs (even one that
+    /// overwrites the previous build in place), so a `filePath` written in an earlier install can
+    /// point at a container that no longer exists. Self-heals on every read; no migration needed.
+    var fileURL: URL {
+        DownloadDatabase.rootDirectory().appendingPathComponent(URL(fileURLWithPath: filePath).lastPathComponent)
+    }
 
     static let databaseTableName = "downloads"
 
