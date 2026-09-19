@@ -533,6 +533,9 @@
         }
       }
     },
+    "Applies only to new downloads — songs already saved to this device keep whatever container they were downloaded in. Lossless downloads (FLAC, WAV, AIFF) are converted to Apple Lossless (ALAC); Opus downloads are repackaged into a .caf container. Both keep full audio quality — no lossy re-encoding is involved." : {
+
+    },
     "Artist" : {
       "localizations" : {
         "de" : {
@@ -682,6 +685,15 @@
           }
         }
       }
+    },
+    "Conversion" : {
+
+    },
+    "Convert lossless to ALAC" : {
+
+    },
+    "Convert Opus to .caf" : {
+
     },
     "Currently cached" : {
       "localizations" : {

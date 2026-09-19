@@ -10,6 +10,8 @@ import SwiftUI
 struct DownloadsSettingsView: View {
     @ObservedObject private var downloads = DownloadStore.shared
     @State private var showingDeleteAllConfirmation = false
+    @AppStorage(DownloadConversionSettings.Keys.convertLosslessToALAC) private var convertLosslessToALAC = false
+    @AppStorage(DownloadConversionSettings.Keys.convertOpusToCAF) private var convertOpusToCAF = false
 
     private var recordsByAlbum: [(albumId: String?, albumTitle: String, records: [DownloadRecord])] {
         let grouped = Dictionary(grouping: downloads.downloadedRecords) { $0.albumId }
@@ -36,6 +38,15 @@ struct DownloadsSettingsView: View {
                         Text("\(downloads.downloadedRecords.count)")
                             .foregroundStyle(.secondary)
                     }
+                }
+
+                Section {
+                    Toggle("Convert lossless to ALAC", isOn: $convertLosslessToALAC)
+                    Toggle("Convert Opus to .caf", isOn: $convertOpusToCAF)
+                } header: {
+                    Text("Conversion")
+                } footer: {
+                    Text("Applies only to new downloads — songs already saved to this device keep whatever container they were downloaded in. Lossless downloads (FLAC, WAV, AIFF) are converted to Apple Lossless (ALAC); Opus downloads are repackaged into a .caf container. Both keep full audio quality — no lossy re-encoding is involved.")
                 }
 
                 if !downloads.downloadedRecords.isEmpty {

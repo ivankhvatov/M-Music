@@ -241,21 +241,30 @@ actor DownloadService {
         defer { clearJob(taskIdentifier: taskIdentifier, songId: job.songId) }
 
         do {
-            let byteSize = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? NSNumber)?.int64Value ?? 0
+            let downloadedByteSize = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? NSNumber)?.int64Value ?? 0
             let validation = try await DownloadPayloadValidator.validate(
-                fileURL: fileURL, byteSize: byteSize, statusCode: statusCode, mimeType: mimeType,
+                fileURL: fileURL, byteSize: downloadedByteSize, statusCode: statusCode, mimeType: mimeType,
                 fallbackFileExtension: job.fallbackExtension
             )
-            let ext = (validation.fileExtension ?? job.fallbackExtension).pathSafeFileExtension()
-            let destination = DownloadDatabase.rootDirectory().appendingPathComponent("\(job.songId.pathSafeComponent).\(ext)")
+            var ext = (validation.fileExtension ?? job.fallbackExtension).pathSafeFileExtension()
+            var destination = DownloadDatabase.rootDirectory().appendingPathComponent("\(job.songId.pathSafeComponent).\(ext)")
             try? FileManager.default.removeItem(at: destination)
             try FileManager.default.moveItem(at: fileURL, to: destination)
+
+            var byteSize = downloadedByteSize
+            var contentType = validation.contentType
+            if let converted = await convertIfNeeded(originalURL: destination, ext: ext, songId: job.songId) {
+                destination = converted.url
+                ext = converted.ext
+                byteSize = converted.byteSize
+                contentType = converted.contentType
+            }
 
             let record = DownloadRecord(
                 songId: job.songId, title: job.title, artist: job.artist, album: job.album, albumId: job.albumId,
                 coverArt: job.coverArt, track: job.track, discNumber: job.discNumber, duration: job.duration,
                 year: job.year, genre: job.genre, filePath: destination.path, fileExtension: ext,
-                contentType: validation.contentType, bitRate: job.bitRate, byteSize: byteSize,
+                contentType: contentType, bitRate: job.bitRate, byteSize: byteSize,
                 replayGainTrackGain: job.replayGainTrackGain, replayGainAlbumGain: job.replayGainAlbumGain,
                 addedAt: Date(), format: job.format
             )
@@ -267,6 +276,60 @@ actor DownloadService {
         } catch {
             continuation?.yield(Update(songId: job.songId, state: .failed(message: error.localizedDescription)))
         }
+    }
+
+    private struct ConversionResult {
+        let url: URL
+        let ext: String
+        let byteSize: Int64
+        let contentType: String?
+    }
+
+    private static let losslessConversionExtensions: Set<String> = ["flac", "wav", "aiff"]
+
+    /// Runs the on-device post-download conversion configured in `DownloadConversionSettings`, if
+    /// any applies to `ext`. On success, `originalURL` has already been deleted and the returned
+    /// `ConversionResult` points at the new file the caller should use in its place. On failure —
+    /// a corrupt/unsupported source, a multichannel Opus file, disk pressure, ... — this asserts
+    /// (visible in debug builds, a no-op in release) and returns `nil`; the caller keeps using
+    /// `originalURL` untouched. A user always ends up with a playable file either way — a
+    /// conversion bug should never turn a successful download into a failed one.
+    private func convertIfNeeded(originalURL: URL, ext: String, songId: String) async -> ConversionResult? {
+        do {
+            if DownloadConversionSettings.convertLosslessToALAC, Self.losslessConversionExtensions.contains(ext) {
+                let convertedURL = try await LosslessToALACConverter.convert(sourceURL: originalURL)
+                return try finalizeConversion(
+                    convertedURL: convertedURL, originalURL: originalURL, songId: songId, ext: "m4a", contentType: "audio/mp4"
+                )
+            }
+            if DownloadConversionSettings.convertOpusToCAF, ext == "opus" {
+                let convertedURL = try await OpusToCAFRemuxer.remux(sourceURL: originalURL)
+                return try finalizeConversion(
+                    convertedURL: convertedURL, originalURL: originalURL, songId: songId, ext: "caf", contentType: nil
+                )
+            }
+            return nil
+        } catch {
+            assertionFailure("Download conversion failed for song \(songId) (.\(ext)), keeping original file: \(error)")
+            return nil
+        }
+    }
+
+    /// Moves a converter's temp-directory output into the real downloads directory (same naming
+    /// scheme, new extension), only then deletes the now-superseded original, and measures the
+    /// final byte size. `originalURL` is never touched until the converted file is confirmed
+    /// moved into place, so a thrown error here still leaves a fully intact, playable original —
+    /// `convertIfNeeded`'s catch treats it identically to any other conversion failure.
+    private func finalizeConversion(
+        convertedURL: URL, originalURL: URL, songId: String, ext: String, contentType: String?
+    ) throws -> ConversionResult {
+        defer { try? FileManager.default.removeItem(at: convertedURL) }
+        let destination = DownloadDatabase.rootDirectory().appendingPathComponent("\(songId.pathSafeComponent).\(ext)")
+        try? FileManager.default.removeItem(at: destination)
+        try FileManager.default.moveItem(at: convertedURL, to: destination)
+        try? FileManager.default.removeItem(at: originalURL)
+        let byteSize = (try? FileManager.default.attributesOfItem(atPath: destination.path)[.size] as? NSNumber)?.int64Value ?? 0
+        return ConversionResult(url: destination, ext: ext, byteSize: byteSize, contentType: contentType)
     }
 
     fileprivate func handleTaskCompletion(taskIdentifier: Int, error: Error?) {
