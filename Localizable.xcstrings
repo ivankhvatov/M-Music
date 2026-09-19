@@ -855,6 +855,9 @@
         }
       }
     },
+    "Download format" : {
+
+    },
     "Downloaded" : {
       "localizations" : {
         "ru" : {
@@ -1036,6 +1039,7 @@
       }
     },
     "Format/bitrate apply only to new downloads — songs already saved to this device keep whatever quality they were downloaded at. When Prioritize downloads is on, a downloaded song always plays from the download regardless of its format; when off, a download only plays if its format still matches the current Transcoding setting above, otherwise the gapless cache or streaming is used instead." : {
+      "extractionState" : "stale",
       "localizations" : {
         "ru" : {
           "stringUnit" : {
@@ -1044,6 +1048,9 @@
           }
         }
       }
+    },
+    "Format/bitrate apply only to new downloads — songs already saved to this device keep whatever quality they were downloaded at. When Prioritize downloads is on, a downloaded song always plays from the download regardless of its format; when off, a download only plays if its format still matches the current Transcoding setting in Playback settings, otherwise the gapless cache or streaming is used instead." : {
+
     },
     "Gapless Caching" : {
       "localizations" : {

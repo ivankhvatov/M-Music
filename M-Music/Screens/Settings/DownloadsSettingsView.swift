@@ -10,6 +10,11 @@ import SwiftUI
 struct DownloadsSettingsView: View {
     @ObservedObject private var downloads = DownloadStore.shared
     @State private var showingDeleteAllConfirmation = false
+    @AppStorage(DownloadTranscodingSettings.Keys.isEnabled) private var isDownloadTranscodingEnabled = false
+    @AppStorage(DownloadTranscodingSettings.Keys.format) private var downloadFormat = TranscodingFormat.mp3
+    @AppStorage(DownloadTranscodingSettings.Keys.bitrate) private var downloadBitrate = TranscodingBitrate.k192
+    // Default here must match DownloadTranscodingSettings.defaultPrioritizeDownloads.
+    @AppStorage(DownloadTranscodingSettings.Keys.prioritizeDownloads) private var prioritizeDownloads = true
     @AppStorage(DownloadConversionSettings.Keys.convertLosslessToALAC) private var convertLosslessToALAC = false
     @AppStorage(DownloadConversionSettings.Keys.convertOpusToCAF) private var convertOpusToCAF = false
 
@@ -26,6 +31,41 @@ struct DownloadsSettingsView: View {
         NavigationStack {
             List {
                 Section {
+                    Toggle("Enable download transcoding", isOn: $isDownloadTranscodingEnabled)
+
+                    Picker("Format", selection: $downloadFormat) {
+                        ForEach(TranscodingFormat.allCases) { option in
+                            Text(option.displayName).tag(option)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .disabled(!isDownloadTranscodingEnabled)
+
+                    Picker("Bitrate", selection: $downloadBitrate) {
+                        ForEach(TranscodingBitrate.allCases) { option in
+                            Text(option.displayName).tag(option)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .disabled(!isDownloadTranscodingEnabled)
+
+                    Toggle("Prioritize downloads", isOn: $prioritizeDownloads)
+                } header: {
+                    Text("Download format")
+                } footer: {
+                    Text("Format/bitrate apply only to new downloads — songs already saved to this device keep whatever quality they were downloaded at. When Prioritize downloads is on, a downloaded song always plays from the download regardless of its format; when off, a download only plays if its format still matches the current Transcoding setting in Playback settings, otherwise the gapless cache or streaming is used instead.")
+                }
+
+                Section {
+                    Toggle("Convert lossless to ALAC", isOn: $convertLosslessToALAC)
+                    Toggle("Convert Opus to .caf", isOn: $convertOpusToCAF)
+                } header: {
+                    Text("Conversion")
+                } footer: {
+                    Text("Applies only to new downloads — songs already saved to this device keep whatever container they were downloaded in. Lossless downloads (FLAC, WAV, AIFF) are converted to Apple Lossless (ALAC); Opus downloads are repackaged into a .caf container. Both keep full audio quality — no lossy re-encoding is involved.")
+                }
+
+                Section {
                     HStack {
                         Text("Total size")
                         Spacer()
@@ -40,16 +80,13 @@ struct DownloadsSettingsView: View {
                     }
                 }
 
-                Section {
-                    Toggle("Convert lossless to ALAC", isOn: $convertLosslessToALAC)
-                    Toggle("Convert Opus to .caf", isOn: $convertOpusToCAF)
-                } header: {
-                    Text("Conversion")
-                } footer: {
-                    Text("Applies only to new downloads — songs already saved to this device keep whatever container they were downloaded in. Lossless downloads (FLAC, WAV, AIFF) are converted to Apple Lossless (ALAC); Opus downloads are repackaged into a .caf container. Both keep full audio quality — no lossy re-encoding is involved.")
-                }
-
                 if !downloads.downloadedRecords.isEmpty {
+                    Section {
+                        Button("Delete All Downloads", role: .destructive) {
+                            showingDeleteAllConfirmation = true
+                        }
+                    }
+
                     ForEach(recordsByAlbum, id: \.albumTitle) { group in
                         Section(group.albumTitle) {
                             ForEach(group.records.sorted { ($0.track ?? 0) < ($1.track ?? 0) }) { record in
@@ -75,12 +112,6 @@ struct DownloadsSettingsView: View {
                                     }
                                 }
                             }
-                        }
-                    }
-
-                    Section {
-                        Button("Delete All Downloads", role: .destructive) {
-                            showingDeleteAllConfirmation = true
                         }
                     }
                 } else {

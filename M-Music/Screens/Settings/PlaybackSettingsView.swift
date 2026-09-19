@@ -21,12 +21,6 @@ struct PlaybackSettingsView: View {
     @AppStorage(ReplayGainSettings.Keys.preAmp) private var preAmp: Double = 0
     @AppStorage(ReplayGainSettings.Keys.defaultGain) private var defaultGain: Double = 0
 
-    @AppStorage(DownloadTranscodingSettings.Keys.isEnabled) private var isDownloadTranscodingEnabled = false
-    @AppStorage(DownloadTranscodingSettings.Keys.format) private var downloadFormat = TranscodingFormat.mp3
-    @AppStorage(DownloadTranscodingSettings.Keys.bitrate) private var downloadBitrate = TranscodingBitrate.k192
-    // Default here must match DownloadTranscodingSettings.defaultPrioritizeDownloads.
-    @AppStorage(DownloadTranscodingSettings.Keys.prioritizeDownloads) private var prioritizeDownloads = true
-
     @AppStorage(GaplessCacheSettings.Keys.isEnabled) private var isGaplessCacheEnabled = false
     @AppStorage(GaplessCacheSettings.Keys.sizeLimit) private var gaplessCacheSizeLimit = GaplessCacheSizeLimit.mb500
     @AppStorage(GaplessCacheSettings.Keys.retention) private var gaplessCacheRetention = GaplessCacheRetention.day3
@@ -138,32 +132,6 @@ struct PlaybackSettingsView: View {
                         Text("ReplayGain")
                     } footer: {
                         Text("Adjusts playback volume so tracks and albums sound equally loud, using ReplayGain tags from your library.")
-                    }
-
-                    Section {
-                        Toggle("Enable download transcoding", isOn: $isDownloadTranscodingEnabled)
-
-                        Picker("Format", selection: $downloadFormat) {
-                            ForEach(TranscodingFormat.allCases) { option in
-                                Text(option.displayName).tag(option)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .disabled(!isDownloadTranscodingEnabled)
-
-                        Picker("Bitrate", selection: $downloadBitrate) {
-                            ForEach(TranscodingBitrate.allCases) { option in
-                                Text(option.displayName).tag(option)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .disabled(!isDownloadTranscodingEnabled)
-
-                        Toggle("Prioritize downloads", isOn: $prioritizeDownloads)
-                    } header: {
-                        Text("Downloads")
-                    } footer: {
-                        Text("Format/bitrate apply only to new downloads — songs already saved to this device keep whatever quality they were downloaded at. When Prioritize downloads is on, a downloaded song always plays from the download regardless of its format; when off, a download only plays if its format still matches the current Transcoding setting above, otherwise the gapless cache or streaming is used instead.")
                     }
 
                     Section {
