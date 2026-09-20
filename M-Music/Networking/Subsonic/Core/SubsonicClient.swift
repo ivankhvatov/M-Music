@@ -57,6 +57,7 @@ final class SubsonicClient: @unchecked Sendable {
             try SubsonicCredentialsStore.save(candidate)
             await LibraryCacheDatabase.shared.clearAll()
             ImageCache.shared.invalidateAll()
+            await LibrarySyncService.shared.start(client: self)
             return license
         } catch {
             credentials = previous

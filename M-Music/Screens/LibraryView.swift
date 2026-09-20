@@ -99,6 +99,10 @@ struct LibraryView: View {
     /// update `recentAlbums` in place once done, so the grid's view identity (and the
     /// ScrollView's scroll position) stays stable instead of being torn down and rebuilt,
     /// which was also breaking the album's zoom-dismiss transition mid-animation.
+    ///
+    /// Stale-while-revalidate: shows cached recent albums immediately (no spinner) if any are
+    /// cached, then revalidates against the server in the background and only touches the
+    /// displayed grid (and re-caches) if the fresh result actually differs from what's shown.
     private func refresh() {
         isConnected = client.isConfigured
         guard client.isConfigured else {
@@ -108,45 +112,47 @@ struct LibraryView: View {
         }
         guard !isFetchingAlbums else { return }
         isFetchingAlbums = true
-
         if !hasLoadedOnce {
             isLoadingAlbums = true
         }
+
         Task {
+            if recentAlbums.isEmpty, let cached = await LibraryCacheDatabase.shared.cachedRecentAlbums() {
+                await MainActor.run {
+                    recentAlbums = cached
+                    hasLoadedOnce = true
+                    isLoadingAlbums = false
+                }
+                prefetchArtwork(for: cached)
+            }
+
             do {
                 let albums = try await client.getAlbumList2(type: .recent, size: 30)
+                let changed = albums != recentAlbums
                 await MainActor.run {
-                    recentAlbums = albums
                     loadError = nil
                     isLoadingAlbums = false
                     isFetchingAlbums = false
                     hasLoadedOnce = true
+                    if changed { recentAlbums = albums }
                 }
-                // Kick off every album's artwork now, before the user has even looked at the
-                // grid, instead of waiting for each card to scroll into view and start its own
-                // fetch — by the time anything is tapped, ImageCache should already have it.
-                prefetchArtwork(for: albums)
-                Task { await LibraryCacheDatabase.shared.cacheRecentAlbums(albums) }
+                if changed {
+                    // Kick off every album's artwork now, before the user has even looked at the
+                    // grid, instead of waiting for each card to scroll into view and start its
+                    // own fetch — by the time anything is tapped, ImageCache should already have it.
+                    prefetchArtwork(for: albums)
+                    await LibraryCacheDatabase.shared.cacheRecentAlbums(albums)
+                }
             } catch {
-                // Offline, or the request otherwise failed — fall back to whatever was cached
-                // the last time this grid loaded successfully, if ever.
-                if let cached = await LibraryCacheDatabase.shared.cachedRecentAlbums() {
-                    await MainActor.run {
-                        recentAlbums = cached
-                        loadError = nil
-                        isLoadingAlbums = false
-                        isFetchingAlbums = false
-                        hasLoadedOnce = true
-                    }
-                    prefetchArtwork(for: cached)
-                    return
-                }
+                // Offline, or the request otherwise failed — keep showing whatever's already on
+                // screen (cache, or an earlier successful fetch); only surface an error if
+                // there's truly nothing to show.
                 await MainActor.run {
-                    if !hasLoadedOnce {
-                        loadError = error.localizedDescription
-                    }
                     isLoadingAlbums = false
                     isFetchingAlbums = false
+                    if recentAlbums.isEmpty {
+                        loadError = error.localizedDescription
+                    }
                 }
             }
         }

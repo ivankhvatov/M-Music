@@ -399,7 +399,7 @@ struct ArtistWithAlbumsID3: Decodable, Sendable {
 }
 extension ArtistWithAlbumsID3: SubsonicPayload { static let responseKey = "artist" }
 
-struct AlbumWithSongsID3: Codable, Sendable {
+struct AlbumWithSongsID3: Codable, Equatable, Sendable {
     let id: FlexibleID
     /// Clean album title — see `AlbumID3.name`'s doc comment; same deal here.
     let name: String

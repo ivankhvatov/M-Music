@@ -45,6 +45,22 @@ extension SubsonicClient {
         return try await send("getAlbumList2", params, as: AlbumList2.self)?.album ?? []
     }
 
+    /// Every album in the library, paged to exhaustion via `getAlbumList2`. Shared by
+    /// `AlbumsListView` and `LibrarySyncService` — there's no dedicated "list every album"
+    /// endpoint, so this pages alphabetically 500 at a time until a short page signals the end.
+    func allAlbums() async throws -> [AlbumID3] {
+        var result: [AlbumID3] = []
+        var offset = 0
+        let pageSize = 500
+        while true {
+            let page = try await getAlbumList2(type: .alphabeticalByName, size: pageSize, offset: offset)
+            result.append(contentsOf: page)
+            if page.count < pageSize { break }
+            offset += pageSize
+        }
+        return result
+    }
+
     func getRandomSongs(
         size: Int = 10, genre: String? = nil, fromYear: Int? = nil, toYear: Int? = nil, musicFolderId: String? = nil
     ) async throws -> [Child] {

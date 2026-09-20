@@ -209,6 +209,9 @@ struct SongsListView: View {
         displayedSongs = result
     }
 
+    /// Stale-while-revalidate: shows cached songs immediately (no spinner) if any are cached,
+    /// then revalidates against the server in the background and only touches the displayed list
+    /// (and re-caches) if the fresh result actually differs from what's already shown.
     private func refresh() {
         guard client.isConfigured else {
             songs = []
@@ -216,57 +219,46 @@ struct SongsListView: View {
             return
         }
         guard !isLoading else { return }
-
+        // Only the very first load shows the spinner (and thus swaps out the list) — a quiet
+        // reappearance must never briefly tear down the list's identity, or it resets scroll
+        // position.
         if !hasLoadedOnce {
             isLoading = true
         }
+
         Task {
-            do {
-                let fetched = try await fetchAllSongs()
+            if songs.isEmpty, let cached = await LibraryCacheDatabase.shared.cachedAllSongs() {
                 await MainActor.run {
-                    songs = fetched
-                    loadError = nil
-                    isLoading = false
+                    songs = cached
                     hasLoadedOnce = true
-                }
-                Task { await LibraryCacheDatabase.shared.cacheAllSongs(fetched) }
-            } catch {
-                // Offline, or the request otherwise failed — fall back to whatever was cached
-                // the last time this list loaded successfully, if ever.
-                if let cached = await LibraryCacheDatabase.shared.cachedAllSongs() {
-                    await MainActor.run {
-                        songs = cached
-                        loadError = nil
-                        isLoading = false
-                        hasLoadedOnce = true
-                    }
-                    return
-                }
-                await MainActor.run {
-                    if !hasLoadedOnce {
-                        loadError = error.localizedDescription
-                    }
                     isLoading = false
                 }
             }
-        }
-    }
 
-    /// There's no dedicated "list every song" endpoint in the Subsonic API — an empty `search3`
-    /// query matches every track, which is the standard way clients browse the full library.
-    private func fetchAllSongs() async throws -> [Child] {
-        var result: [Child] = []
-        var offset = 0
-        let pageSize = 500
-        while true {
-            let page = try await client.search3(
-                query: "", artistCount: 0, albumCount: 0, songCount: pageSize, songOffset: offset
-            ).song ?? []
-            result.append(contentsOf: page)
-            if page.count < pageSize { break }
-            offset += pageSize
+            do {
+                let fetched = try await client.allSongs()
+                let changed = fetched != songs
+                await MainActor.run {
+                    loadError = nil
+                    isLoading = false
+                    hasLoadedOnce = true
+                    if changed { songs = fetched }
+                }
+                if changed {
+                    await LibraryCacheDatabase.shared.cacheAllSongs(fetched)
+                }
+            } catch {
+                // Offline, or the request otherwise failed — keep showing whatever's already on
+                // screen (cache, or an earlier successful fetch); only surface an error if
+                // there's truly nothing to show.
+                await MainActor.run {
+                    isLoading = false
+                    if songs.isEmpty {
+                        loadError = error.localizedDescription
+                    }
+                }
+            }
         }
-        return result
     }
 
     @ToolbarContentBuilder

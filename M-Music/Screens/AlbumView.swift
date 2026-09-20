@@ -22,6 +22,10 @@ struct AlbumView: View {
     @State private var albumCodec: String?
     @State private var isLoadingSongs = true
     @State private var loadError: String?
+    /// The full fetched/cached album detail `songs`/`albumCodec` were last derived from — kept
+    /// only so `loadSongs()` can diff a fresh fetch against it (fields beyond `.song`, e.g. play
+    /// count/rating, are captured too), not surfaced anywhere else.
+    @State private var currentAlbumDetail: AlbumWithSongsID3?
 
     @State private var otherVersions: [AlbumID3] = []
     @State private var moreByArtist: [AlbumID3] = []
@@ -113,28 +117,44 @@ struct AlbumView: View {
         .tint(.primary)
     }
 
+    /// Stale-while-revalidate: shows this album's cached songs immediately (no spinner) if
+    /// cached, then revalidates against the server in the background and only touches the
+    /// displayed songs/codec (and re-caches) if the fresh result actually differs from what's
+    /// shown — compared via the full `AlbumWithSongsID3`, not just its `.song` array, so a
+    /// change to any cached field (not only the track list) still triggers an update.
     private func loadSongs() async {
-        do {
-            let full = try await client.getAlbum(id: album.id.raw)
+        if currentAlbumDetail == nil, let cached = await LibraryCacheDatabase.shared.cachedAlbumSongs(albumId: album.id.raw) {
             await MainActor.run {
-                songs = full.song ?? []
-                albumCodec = full.codec
+                currentAlbumDetail = cached
+                songs = cached.song ?? []
+                albumCodec = cached.codec
                 isLoadingSongs = false
             }
-            Task { await LibraryCacheDatabase.shared.cacheAlbumSongs(full, albumId: album.id.raw) }
-        } catch {
-            // Offline, or the request otherwise failed — fall back to whatever this album's
-            // songs were cached as the last time it was opened successfully, if ever.
-            if let cached = await LibraryCacheDatabase.shared.cachedAlbumSongs(albumId: album.id.raw) {
-                await MainActor.run {
-                    songs = cached.song ?? []
-                    albumCodec = cached.codec
-                    isLoadingSongs = false
+        }
+
+        do {
+            let full = try await client.getAlbum(id: album.id.raw)
+            let changed = full != currentAlbumDetail
+            await MainActor.run {
+                isLoadingSongs = false
+                loadError = nil
+                if changed {
+                    currentAlbumDetail = full
+                    songs = full.song ?? []
+                    albumCodec = full.codec
                 }
-            } else {
-                await MainActor.run {
+            }
+            if changed {
+                await LibraryCacheDatabase.shared.cacheAlbumSongs(full, albumId: album.id.raw)
+            }
+        } catch {
+            // Offline, or the request otherwise failed — keep showing whatever's already on
+            // screen (cache, or an earlier successful fetch); only surface an error if there's
+            // truly nothing to show.
+            await MainActor.run {
+                isLoadingSongs = false
+                if songs.isEmpty {
                     loadError = error.localizedDescription
-                    isLoadingSongs = false
                 }
             }
         }

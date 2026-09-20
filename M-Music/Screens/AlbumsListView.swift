@@ -220,6 +220,9 @@ struct AlbumsListView: View {
         return result
     }
 
+    /// Stale-while-revalidate: shows cached albums immediately (no spinner) if any are cached,
+    /// then revalidates against the server in the background and only touches the displayed list
+    /// (and re-caches) if the fresh result actually differs from what's already shown.
     private func refresh() {
         guard client.isConfigured else {
             albums = []
@@ -227,53 +230,47 @@ struct AlbumsListView: View {
             return
         }
         guard !isLoading else { return }
-
+        // Only the very first load shows the spinner (and thus swaps out the grid) — a quiet
+        // reappearance (e.g. popping back from a pushed `AlbumView`) must never briefly tear
+        // down the grid's identity, or it resets scroll position and breaks an in-flight
+        // zoom-dismiss transition (the grid row IS the transition's source view).
         if !hasLoadedOnce {
             isLoading = true
         }
+
         Task {
-            do {
-                let fetched = try await fetchAllAlbums()
+            if albums.isEmpty, let cached = await LibraryCacheDatabase.shared.cachedAllAlbums() {
                 await MainActor.run {
-                    albums = fetched
-                    loadError = nil
-                    isLoading = false
+                    albums = cached
                     hasLoadedOnce = true
-                }
-                Task { await LibraryCacheDatabase.shared.cacheAllAlbums(fetched) }
-            } catch {
-                // Offline, or the request otherwise failed — fall back to whatever was cached
-                // the last time this list loaded successfully, if ever.
-                if let cached = await LibraryCacheDatabase.shared.cachedAllAlbums() {
-                    await MainActor.run {
-                        albums = cached
-                        loadError = nil
-                        isLoading = false
-                        hasLoadedOnce = true
-                    }
-                    return
-                }
-                await MainActor.run {
-                    if !hasLoadedOnce {
-                        loadError = error.localizedDescription
-                    }
                     isLoading = false
                 }
             }
-        }
-    }
 
-    private func fetchAllAlbums() async throws -> [AlbumID3] {
-        var result: [AlbumID3] = []
-        var offset = 0
-        let pageSize = 500
-        while true {
-            let page = try await client.getAlbumList2(type: .alphabeticalByName, size: pageSize, offset: offset)
-            result.append(contentsOf: page)
-            if page.count < pageSize { break }
-            offset += pageSize
+            do {
+                let fetched = try await client.allAlbums()
+                let changed = fetched != albums
+                await MainActor.run {
+                    loadError = nil
+                    isLoading = false
+                    hasLoadedOnce = true
+                    if changed { albums = fetched }
+                }
+                if changed {
+                    await LibraryCacheDatabase.shared.cacheAllAlbums(fetched)
+                }
+            } catch {
+                // Offline, or the request otherwise failed — keep showing whatever's already on
+                // screen (cache, or an earlier successful fetch); only surface an error if
+                // there's truly nothing to show.
+                await MainActor.run {
+                    isLoading = false
+                    if albums.isEmpty {
+                        loadError = error.localizedDescription
+                    }
+                }
+            }
         }
-        return result
     }
 
     @ToolbarContentBuilder

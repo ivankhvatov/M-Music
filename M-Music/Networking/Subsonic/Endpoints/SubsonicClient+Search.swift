@@ -44,4 +44,23 @@ extension SubsonicClient {
         if let musicFolderId { params.append(URLQueryItem(name: "musicFolderId", value: musicFolderId)) }
         return try await send("search3", params, as: SearchResult3.self) ?? SearchResult3(artist: nil, album: nil, song: nil)
     }
+
+    /// Every song in the library, paged to exhaustion. Shared by `SongsListView` and
+    /// `LibrarySyncService` — there's no dedicated "list every song" endpoint, so an empty
+    /// `search3` query (matches everything) is the standard way clients browse the full library,
+    /// paged 500 at a time until a short page signals the end.
+    func allSongs() async throws -> [Child] {
+        var result: [Child] = []
+        var offset = 0
+        let pageSize = 500
+        while true {
+            let page = try await search3(
+                query: "", artistCount: 0, albumCount: 0, songCount: pageSize, songOffset: offset
+            ).song ?? []
+            result.append(contentsOf: page)
+            if page.count < pageSize { break }
+            offset += pageSize
+        }
+        return result
+    }
 }

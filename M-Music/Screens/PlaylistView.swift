@@ -84,27 +84,37 @@ struct PlaylistView: View {
         .tint(.primary)
     }
 
+    /// Stale-while-revalidate: shows this playlist's cached songs immediately (no spinner) if
+    /// any are cached, then revalidates against the server in the background and only touches
+    /// the displayed list (and re-caches) if the fresh result actually differs from what's shown.
     private func loadSongs() async {
+        if songs.isEmpty, let cached = await LibraryCacheDatabase.shared.cachedPlaylistSongs(playlistId: playlist.id.raw) {
+            await MainActor.run {
+                songs = cached
+                isLoadingSongs = false
+            }
+        }
+
         do {
             let full = try await client.getPlaylist(id: playlist.id.raw)
             let entries = full.entry ?? []
+            let changed = entries != songs
             await MainActor.run {
-                songs = entries
                 isLoadingSongs = false
+                loadError = nil
+                if changed { songs = entries }
             }
-            Task { await LibraryCacheDatabase.shared.cachePlaylistSongs(entries, playlistId: playlist.id.raw) }
+            if changed {
+                await LibraryCacheDatabase.shared.cachePlaylistSongs(entries, playlistId: playlist.id.raw)
+            }
         } catch {
-            // Offline, or the request otherwise failed — fall back to whatever this playlist's
-            // songs were cached as the last time it was opened successfully, if ever.
-            if let cached = await LibraryCacheDatabase.shared.cachedPlaylistSongs(playlistId: playlist.id.raw) {
-                await MainActor.run {
-                    songs = cached
-                    isLoadingSongs = false
-                }
-            } else {
-                await MainActor.run {
+            // Offline, or the request otherwise failed — keep showing whatever's already on
+            // screen (cache, or an earlier successful fetch); only surface an error if there's
+            // truly nothing to show.
+            await MainActor.run {
+                isLoadingSongs = false
+                if songs.isEmpty {
                     loadError = error.localizedDescription
-                    isLoadingSongs = false
                 }
             }
         }

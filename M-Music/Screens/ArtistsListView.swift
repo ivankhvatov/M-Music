@@ -165,6 +165,9 @@ struct ArtistsListView: View {
         }
     }
 
+    /// Stale-while-revalidate: shows cached artists immediately (no spinner) if any are cached,
+    /// then revalidates against the server in the background and only touches the displayed list
+    /// (and re-caches) if the fresh result actually differs from what's already shown.
     private func refresh() {
         guard client.isConfigured else {
             artists = []
@@ -172,38 +175,45 @@ struct ArtistsListView: View {
             return
         }
         guard !isLoading else { return }
-
+        // Only the very first load shows the spinner (and thus swaps out the list) — a quiet
+        // reappearance (e.g. popping back from a pushed detail screen) must never briefly tear
+        // down the list's identity, or it resets scroll position and breaks an in-flight
+        // zoom-dismiss transition.
         if !hasLoadedOnce {
             isLoading = true
         }
+
         Task {
+            if artists.isEmpty, let cached = await LibraryCacheDatabase.shared.cachedAllArtists() {
+                await MainActor.run {
+                    artists = cached
+                    hasLoadedOnce = true
+                    isLoading = false
+                }
+            }
+
             do {
                 let result = try await client.getArtists()
                 let fetched = result.index.flatMap(\.artist)
+                let changed = fetched != artists
                 await MainActor.run {
-                    artists = fetched
                     loadError = nil
                     isLoading = false
                     hasLoadedOnce = true
+                    if changed { artists = fetched }
                 }
-                Task { await LibraryCacheDatabase.shared.cacheAllArtists(fetched) }
+                if changed {
+                    await LibraryCacheDatabase.shared.cacheAllArtists(fetched)
+                }
             } catch {
-                // Offline, or the request otherwise failed — fall back to whatever was cached
-                // the last time this list loaded successfully, if ever.
-                if let cached = await LibraryCacheDatabase.shared.cachedAllArtists() {
-                    await MainActor.run {
-                        artists = cached
-                        loadError = nil
-                        isLoading = false
-                        hasLoadedOnce = true
-                    }
-                    return
-                }
+                // Offline, or the request otherwise failed — keep showing whatever's already on
+                // screen (cache, or an earlier successful fetch); only surface an error if
+                // there's truly nothing to show.
                 await MainActor.run {
-                    if !hasLoadedOnce {
+                    isLoading = false
+                    if artists.isEmpty {
                         loadError = error.localizedDescription
                     }
-                    isLoading = false
                 }
             }
         }

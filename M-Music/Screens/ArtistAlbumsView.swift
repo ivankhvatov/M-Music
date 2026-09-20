@@ -357,6 +357,9 @@ struct ArtistAlbumsView: View {
     /// update `albums` in place once done, so the grid's view identity (and the ScrollView's
     /// scroll position) stays stable instead of being torn down and rebuilt, which was also
     /// breaking the album's zoom-dismiss transition mid-animation. Mirrors `LibraryView.refresh()`.
+    /// Stale-while-revalidate: shows this artist's cached albums immediately (no spinner) if
+    /// any are cached, then revalidates against the server in the background and only touches
+    /// the displayed list (and re-caches) if the fresh result actually differs from what's shown.
     private func refresh() {
         guard client.isConfigured else {
             albums = []
@@ -364,37 +367,44 @@ struct ArtistAlbumsView: View {
             return
         }
         guard !isLoading else { return }
-
+        // Only the very first load shows the spinner (and thus swaps out the grid) — a quiet
+        // reappearance (e.g. popping back from a pushed `AlbumView`) must never briefly tear
+        // down the grid's identity, or it resets scroll position and breaks an in-flight
+        // zoom-dismiss transition (the grid/carousel row IS the transition's source view).
         if !hasLoadedOnce {
             isLoading = true
         }
+
         Task {
+            if albums.isEmpty, let cached = await LibraryCacheDatabase.shared.cachedArtistAlbums(artistId: artist.id.raw) {
+                await MainActor.run {
+                    albums = cached
+                    hasLoadedOnce = true
+                    isLoading = false
+                }
+            }
+
             do {
                 let fetched = try await client.getArtist(id: artist.id.raw)
+                let changed = fetched.album != albums
                 await MainActor.run {
-                    albums = fetched.album
                     loadError = nil
                     isLoading = false
                     hasLoadedOnce = true
+                    if changed { albums = fetched.album }
                 }
-                Task { await LibraryCacheDatabase.shared.cacheArtistAlbums(fetched.album, artistId: artist.id.raw) }
+                if changed {
+                    await LibraryCacheDatabase.shared.cacheArtistAlbums(fetched.album, artistId: artist.id.raw)
+                }
             } catch {
-                // Offline, or the request otherwise failed — fall back to whatever was cached
-                // the last time this artist loaded successfully, if ever.
-                if let cached = await LibraryCacheDatabase.shared.cachedArtistAlbums(artistId: artist.id.raw) {
-                    await MainActor.run {
-                        albums = cached
-                        loadError = nil
-                        isLoading = false
-                        hasLoadedOnce = true
-                    }
-                    return
-                }
+                // Offline, or the request otherwise failed — keep showing whatever's already on
+                // screen (cache, or an earlier successful fetch); only surface an error if
+                // there's truly nothing to show.
                 await MainActor.run {
-                    if !hasLoadedOnce {
+                    isLoading = false
+                    if albums.isEmpty {
                         loadError = error.localizedDescription
                     }
-                    isLoading = false
                 }
             }
         }
