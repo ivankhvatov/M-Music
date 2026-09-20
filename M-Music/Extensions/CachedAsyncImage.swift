@@ -16,6 +16,11 @@ final class ImageCache: @unchecked Sendable {
     private let memory = NSCache<NSString, UIImage>()
     private let fileManager = FileManager.default
     private let directory: URL?
+    /// A second, durable disk tier under `Application Support/DownloadedArtwork/` — unlike
+    /// `directory` (`Caches/`), iOS never purges this under storage pressure with no notice.
+    /// Populated only by `precacheDurably(_:)` (called when a song finishes downloading), never
+    /// by the normal `load(_:)` path, so browsing alone doesn't grow it unboundedly.
+    private let durableDirectory: URL?
 
     private let lock = NSLock()
     /// Requests in flight, keyed the same stable way, so a prefetch and a view's own load (or
@@ -30,6 +35,16 @@ final class ImageCache: @unchecked Sendable {
             directory = dir
         } else {
             directory = nil
+        }
+        if let support = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            var dir = support.appendingPathComponent("DownloadedArtwork", isDirectory: true)
+            try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            try? dir.setResourceValues(values)
+            durableDirectory = dir
+        } else {
+            durableDirectory = nil
         }
     }
 
@@ -82,6 +97,10 @@ final class ImageCache: @unchecked Sendable {
             memory.setObject(onDisk, forKey: key as NSString)
             return onDisk
         }
+        if let durable = durableImage(forKey: key) {
+            memory.setObject(durable, forKey: key as NSString)
+            return durable
+        }
         guard let data = try? await URLSession.shared.data(from: url).0, let image = decodedImage(from: data) else { return nil }
         memory.setObject(image, forKey: key as NSString)
         writeToDisk(data, forKey: key)
@@ -93,6 +112,30 @@ final class ImageCache: @unchecked Sendable {
     func prefetch(_ url: URL?) {
         guard let url else { return }
         Task { await load(url) }
+    }
+
+    /// Fetches `url`'s image if not already cached anywhere, and stores it durably under
+    /// Application Support (survives `Caches/` eviction) in addition to the normal memory/
+    /// Caches-disk tiers. For downloaded songs' artwork, so it's still available offline even
+    /// under storage pressure. Returns whether the image ended up durably cached — already was,
+    /// or was just fetched and stored — `false` only on a genuine failure (offline, deleted on
+    /// server, ...).
+    @discardableResult
+    func precacheDurably(_ url: URL) async -> Bool {
+        let key = stableKey(for: url)
+        if let durableURL = durableURL(forKey: key), fileManager.fileExists(atPath: durableURL.path) {
+            return true
+        }
+        if let cachesURL = diskURL(forKey: key), let data = try? Data(contentsOf: cachesURL) {
+            writeDurably(data, forKey: key)
+            if let image = decodedImage(from: data) { memory.setObject(image, forKey: key as NSString) }
+            return true
+        }
+        guard let data = try? await URLSession.shared.data(from: url).0 else { return false }
+        writeToDisk(data, forKey: key)
+        writeDurably(data, forKey: key)
+        if let image = decodedImage(from: data) { memory.setObject(image, forKey: key as NSString) }
+        return true
     }
 
     /// Drops every cached entry (memory and disk), e.g. when switching to a different server.
@@ -130,6 +173,23 @@ final class ImageCache: @unchecked Sendable {
 
     private func writeToDisk(_ data: Data, forKey key: String) {
         guard let fileURL = diskURL(forKey: key) else { return }
+        try? data.write(to: fileURL, options: .atomic)
+    }
+
+    // MARK: - Durable disk layer (Application Support, survives Caches/ eviction)
+
+    private func durableURL(forKey key: String) -> URL? {
+        guard let durableDirectory else { return nil }
+        return durableDirectory.appendingPathComponent(SubsonicClient.md5Hex(key)).appendingPathExtension("img")
+    }
+
+    private func durableImage(forKey key: String) -> UIImage? {
+        guard let fileURL = durableURL(forKey: key), let data = try? Data(contentsOf: fileURL) else { return nil }
+        return decodedImage(from: data)
+    }
+
+    private func writeDurably(_ data: Data, forKey key: String) {
+        guard let fileURL = durableURL(forKey: key) else { return }
         try? data.write(to: fileURL, options: .atomic)
     }
 
