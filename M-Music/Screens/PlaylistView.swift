@@ -252,15 +252,15 @@ struct PlaylistView: View {
     func playlistArtwork() -> some View {
         // Same URL PlaylistCardView requests (original size, no `size` param), so this reuses the
         // image straight from ImageCache instead of triggering a second fetch.
-        CachedAsyncImage(url: artworkURL) { image in
+        CachedAsyncImage(url: artworkURL, onLoad: { uiImage in
+            Task.detached(priority: .userInitiated) {
+                guard let color = uiImage.averageColor() else { return }
+                await MainActor.run { backgroundColor = color }
+            }
+        }) { image in
             image
                 .resizable()
                 .scaledToFit()
-                .onAppear {
-                    if let color = image.averageColor() {
-                        backgroundColor = color
-                    }
-                }
         } placeholder: {
             Rectangle()
                 .fill(Color.secondary.opacity(0.2))

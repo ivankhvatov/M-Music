@@ -78,6 +78,7 @@ struct ArtistAlbumsView: View {
     @State private var hasLoadedOnce = false
     @State private var isLoadingQueue = false
     @State private var isStarred: Bool
+    @State private var pendingAlbum: AlbumID3?
 
     @ObservedObject private var downloads = DownloadStore.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
@@ -137,6 +138,9 @@ struct ArtistAlbumsView: View {
             // So "is this album fully downloaded" reads correctly offline even before any live
             // fetch has happened this session — guarded internally, cheap to call again.
             Task { await LibraryCacheStatus.shared.preload() }
+        }
+        .navigationDestination(item: $pendingAlbum) { album in
+            AlbumView(album: album, zoomNamespace: albumZoomNamespace)
         }
     }
 
@@ -220,10 +224,9 @@ struct ArtistAlbumsView: View {
         } else {
             LazyVGrid(columns: gridColumns, spacing: 16) {
                 ForEach(sortedAlbums) { album in
-                    NavigationLink(destination: AlbumView(album: album, zoomNamespace: albumZoomNamespace)) {
+                    AlbumOpenButton(album: album, onOpen: { pendingAlbum = $0 }) {
                         AlbumCardView(album: album, zoomNamespace: albumZoomNamespace, subtitle: .year)
                     }
-                    .buttonStyle(.plain)
                     .disabled(!isAvailable(album))
                 }
             }
@@ -291,11 +294,10 @@ struct ArtistAlbumsView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 16) {
                     ForEach(albums) { album in
-                        NavigationLink(destination: AlbumView(album: album, zoomNamespace: albumZoomNamespace)) {
+                        AlbumOpenButton(album: album, onOpen: { pendingAlbum = $0 }) {
                             AlbumCardView(album: album, zoomNamespace: albumZoomNamespace, subtitle: .year)
                                 .frame(width: 160)
                         }
-                        .buttonStyle(.plain)
                         .disabled(!isAvailable(album))
                     }
                 }

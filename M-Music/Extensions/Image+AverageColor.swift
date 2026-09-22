@@ -25,13 +25,6 @@ extension UIImage {
     }
 }
 
-extension Image {
-    @MainActor
-    func averageColor() -> Color? {
-        ImageRenderer(content: self).uiImage?.averageColor()
-    }
-}
-
 extension UIImage {
     /// Extracts up to `count` visually distinct dominant colors, ordered by prevalence.
     ///

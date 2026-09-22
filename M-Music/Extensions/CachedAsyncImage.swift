@@ -114,6 +114,19 @@ final class ImageCache: @unchecked Sendable {
         Task { await load(url) }
     }
 
+    /// Waits for `url` to finish loading (memory/disk/durable tiers, or network), giving up after
+    /// `timeout` seconds — the underlying fetch keeps running regardless and will still populate
+    /// the cache for next time, but a caller gating something user-visible (like a screen
+    /// transition) on "is this ready yet" needs a bounded wait, not `load(_:)`'s unbounded one.
+    func load(_ url: URL, timeout: TimeInterval) async {
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { _ = await self.load(url) }
+            group.addTask { try? await Task.sleep(for: .seconds(timeout)) }
+            await group.next()
+            group.cancelAll()
+        }
+    }
+
     /// Fetches `url`'s image if not already cached anywhere, and stores it durably under
     /// Application Support (survives `Caches/` eviction) in addition to the normal memory/
     /// Caches-disk tiers. For downloaded songs' artwork, so it's still available offline even
@@ -226,6 +239,11 @@ final class ImageCache: @unchecked Sendable {
 /// flashing the placeholder while a redundant fetch happens.
 struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     private let url: URL?
+    /// Fires whenever a `UIImage` is obtained for `url` (a cache hit or a fresh load) — lets a
+    /// caller that needs the raw bitmap itself (e.g. to sample its average color) get it directly,
+    /// instead of re-deriving one from the wrapped `Image` via `ImageRenderer`, which would mean
+    /// redundantly re-rendering an image that's already been decoded.
+    private let onLoad: ((UIImage) -> Void)?
     private let content: (Image) -> Content
     private let placeholder: () -> Placeholder
 
@@ -238,15 +256,18 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
 
     init(
         url: URL?,
+        onLoad: ((UIImage) -> Void)? = nil,
         @ViewBuilder content: @escaping (Image) -> Content,
         @ViewBuilder placeholder: @escaping () -> Placeholder
     ) {
         self.url = url
+        self.onLoad = onLoad
         self.content = content
         self.placeholder = placeholder
         let cached = url.flatMap(ImageCache.shared.image(for:))
         _uiImage = State(initialValue: cached)
         _loadedURL = State(initialValue: cached != nil ? url : nil)
+        if let cached { onLoad?(cached) }
     }
 
     var body: some View {
@@ -272,6 +293,7 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
         if let cached = ImageCache.shared.image(for: url) {
             uiImage = cached
             loadedURL = url
+            onLoad?(cached)
             return
         }
         guard let image = await ImageCache.shared.load(url) else { return }
@@ -279,6 +301,7 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
             if self.url == url {
                 uiImage = image
                 loadedURL = url
+                onLoad?(image)
             }
         }
     }

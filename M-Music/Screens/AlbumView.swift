@@ -53,6 +53,7 @@ struct AlbumView: View {
     /// translucent nav bar (see `listBackground`).
     @State private var scrollEdgeOffsets = ScrollEdgeOffsets()
     @State private var showingRemoveDownloadConfirmation = false
+    @State private var pendingRelatedAlbum: AlbumID3?
 
     init(album: AlbumID3, zoomNamespace: Namespace.ID? = nil) {
         self.album = album
@@ -77,6 +78,9 @@ struct AlbumView: View {
         }
         .task {
             await loadRelatedAlbums()
+        }
+        .navigationDestination(item: $pendingRelatedAlbum) { relatedAlbum in
+            AlbumView(album: relatedAlbum, zoomNamespace: relatedAlbumZoomNamespace)
         }
     }
 
@@ -222,11 +226,10 @@ struct AlbumView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 16) {
                     ForEach(albums) { relatedAlbum in
-                        NavigationLink(destination: AlbumView(album: relatedAlbum, zoomNamespace: relatedAlbumZoomNamespace)) {
+                        AlbumOpenButton(album: relatedAlbum, onOpen: { pendingRelatedAlbum = $0 }) {
                             AlbumCardView(album: relatedAlbum, zoomNamespace: relatedAlbumZoomNamespace, subtitle: .year)
                                 .frame(width: 160)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -389,15 +392,15 @@ struct AlbumView: View {
         // Same URL AlbumCardView requests (original size, no `size` param), so this reuses the
         // image straight from ImageCache instead of re-fetching — the whole point being no lag
         // when this view opens.
-        CachedAsyncImage(url: artworkURL) { image in
+        CachedAsyncImage(url: artworkURL, onLoad: { uiImage in
+            Task.detached(priority: .userInitiated) {
+                guard let color = uiImage.averageColor() else { return }
+                await MainActor.run { backgroundColor = color }
+            }
+        }) { image in
             image
                 .resizable()
                 .scaledToFit()
-                .onAppear {
-                    if let color = image.averageColor() {
-                        backgroundColor = color
-                    }
-                }
         } placeholder: {
             Rectangle()
                 .fill(Color.secondary.opacity(0.2))

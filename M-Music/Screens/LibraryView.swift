@@ -12,6 +12,7 @@ struct LibraryView: View {
     @State private var isFetchingAlbums = false
     @State private var loadError: String?
     @State private var hasLoadedOnce = false
+    @State private var pendingAlbum: AlbumID3?
 
     @ObservedObject private var downloads = DownloadStore.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
@@ -33,6 +34,9 @@ struct LibraryView: View {
                 }
                 .onAppear {
                     refresh()
+                }
+                .navigationDestination(item: $pendingAlbum) { album in
+                    AlbumView(album: album, zoomNamespace: albumZoomNamespace)
                 }
             }
             .environment(\.colorScheme, colorScheme)
@@ -193,10 +197,9 @@ struct LibraryView: View {
         } else {
             LazyVGrid(columns: gridColumns, spacing: 16) {
                 ForEach(recentAlbums) { album in
-                    NavigationLink(destination: AlbumView(album: album, zoomNamespace: albumZoomNamespace)) {
+                    AlbumOpenButton(album: album, onOpen: { pendingAlbum = $0 }) {
                         AlbumCardView(album: album, zoomNamespace: albumZoomNamespace)
                     }
-                    .buttonStyle(.plain)
                     .disabled(!(networkMonitor.isOnline || downloads.hasDownloadedSong(inAlbum: album.id.raw)))
                 }
             }
