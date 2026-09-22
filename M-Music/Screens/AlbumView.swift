@@ -243,7 +243,7 @@ struct AlbumView: View {
     }
 
     /// Matches the leading edge of a track row's title: the row's own horizontal padding plus the track number's frame width and its spacing to the title.
-    private let trackTitleLeadingInset: CGFloat = 4 + 20 + 12
+    private let trackTitleLeadingInset: CGFloat = 20 + 12
 
     @ViewBuilder
     func trackListSection() -> some View {
@@ -613,7 +613,7 @@ private struct TrackLeadingGlyph: View {
                 PlayingIndicator(isPlaying: player.isPlaying)
             } else {
                 Text(track.track.map(String.init) ?? "")
-                    .font(.body)
+                    .font(.system(size: 16))
                     .foregroundColor(.secondary)
             }
         }
@@ -636,8 +636,8 @@ private struct TrackRow: View {
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
     var body: some View {
-        HStack(spacing: 12) {
-            HStack(spacing: 12) {
+        HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 TrackLeadingGlyph(track: track)
 
                 VStack(alignment: .leading) {
@@ -649,13 +649,17 @@ private struct TrackRow: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                // Without this, a wrapping `Text` here loses the width tug-of-war against the
+                // trailing `Spacer()` below — both read as similarly flexible to the layout
+                // engine, so the title/artist column gets shortchanged to less than the row
+                // actually has room for, wrapping a word to its second line that would've fit on
+                // the first. Claiming all available width explicitly settles that in its favor.
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             // Dims just the leading glyph/title — see `SongRow`'s identical comment for why the
             // indicator and menu stay at full opacity regardless. Nothing is ever "unavailable"
             // while online — everything can still stream.
             .dimmedIfUnavailable(networkMonitor.isOnline || downloads.isDownloaded(track.id.raw))
-
-            Spacer()
 
             DownloadStatusIndicator(state: downloads.state(for: track.id.raw))
 

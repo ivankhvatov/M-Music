@@ -373,6 +373,7 @@ struct SongRow: View {
 
                 VStack(alignment: .leading) {
                     Text(track.title)
+                        .font(.system(size: 16))
 
                     if let trackArtist = track.artist {
                         Text(trackArtist)
