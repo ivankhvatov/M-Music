@@ -265,6 +265,15 @@ struct RecordLabel: Codable, Hashable, Sendable {
     let name: String
 }
 
+/// The OpenSubsonic `releaseDate` field, sourced from the album's DATE tag — `month`/`day` are
+/// `nil` when the tag only specifies a year (or a year and month), since ID3/Vorbis date tags
+/// don't require full precision.
+struct ItemDate: Codable, Hashable, Sendable {
+    let year: Int?
+    let month: Int?
+    let day: Int?
+}
+
 /// Mirrors Navidrome's `appendSuffix` helper — used server-side to bake an ALBUMVERSION tag
 /// into an album's display name (`name`/`FullName()`) and each of its songs' album name
 /// (`FullAlbumName()`) when the admin has `AppendAlbumVersion` enabled — so a title it applied
@@ -326,11 +335,13 @@ struct AlbumID3: Decodable, Identifiable, Hashable, Sendable {
     /// From the ALBUMVERSION tag (OpenSubsonic `version` field) — e.g. "Deluxe Edition",
     /// "Remastered". `nil` if the album has no ALBUMVERSION tag.
     let version: String?
+    /// From the DATE tag (OpenSubsonic extension).
+    var releaseDate: ItemDate? = nil
     var isStarred: Bool { starred != nil }
 
     enum CodingKeys: String, CodingKey {
         case id, name, artist, artistId, coverArt, songCount, duration, playCount, created
-        case starred, year, genre, userRating, recordLabels, releaseTypes, version
+        case starred, year, genre, userRating, recordLabels, releaseTypes, version, releaseDate
     }
 
     /// A custom `Decodable.init(from:)` (below) suppresses Swift's automatic memberwise init,
@@ -339,7 +350,8 @@ struct AlbumID3: Decodable, Identifiable, Hashable, Sendable {
         id: FlexibleID, name: String, artist: String?, artistId: FlexibleID?, coverArt: String?,
         songCount: Int, duration: Int, playCount: Int?, created: String?, starred: String?,
         year: Int?, genre: String?, userRating: Int?,
-        recordLabels: [RecordLabel]? = nil, releaseTypes: [String]? = nil, version: String? = nil
+        recordLabels: [RecordLabel]? = nil, releaseTypes: [String]? = nil, version: String? = nil,
+        releaseDate: ItemDate? = nil
     ) {
         self.id = id
         self.name = name
@@ -357,6 +369,7 @@ struct AlbumID3: Decodable, Identifiable, Hashable, Sendable {
         self.recordLabels = recordLabels
         self.releaseTypes = releaseTypes
         self.version = version
+        self.releaseDate = releaseDate
     }
 
     init(from decoder: Decoder) throws {
@@ -375,6 +388,7 @@ struct AlbumID3: Decodable, Identifiable, Hashable, Sendable {
         userRating = try c.decodeIfPresent(Int.self, forKey: .userRating)
         recordLabels = try c.decodeIfPresent([RecordLabel].self, forKey: .recordLabels)
         releaseTypes = try c.decodeIfPresent([String].self, forKey: .releaseTypes)
+        releaseDate = try c.decodeIfPresent(ItemDate.self, forKey: .releaseDate)
 
         let rawName = try c.decode(String.self, forKey: .name)
         let rawVersion = try c.decodeIfPresent(String.self, forKey: .version)?.trimmingCharacters(in: .whitespaces)

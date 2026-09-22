@@ -384,8 +384,31 @@ struct AlbumView: View {
         return recordLabels.map(\.name).joined(separator: ", ")
     }
 
+    /// Localized full release date (e.g. "April 10, 2026") — only when the DATE tag has
+    /// day-level precision. A year-only or year+month tag can't be rendered as a real calendar
+    /// date without inventing a day, so this stays `nil` for those rather than showing something
+    /// misleading.
+    private var releaseDateText: String? {
+        guard let releaseDate = album.releaseDate,
+              let year = releaseDate.year, let month = releaseDate.month, let day = releaseDate.day
+        else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        guard let date = calendar.date(from: DateComponents(year: year, month: month, day: day)) else { return nil }
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.locale = .autoupdatingCurrent
+        formatter.dateStyle = .long
+        return formatter.string(from: date)
+    }
+
     func albumFooter() -> some View {
         VStack(alignment: .leading, spacing: 4) {
+            if let releaseDateText {
+                Text(releaseDateText)
+            }
+
             Text(trackCountAndDuration)
 
             if let recordLabelText {
