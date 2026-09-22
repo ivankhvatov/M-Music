@@ -132,6 +132,16 @@ struct AlbumView: View {
         .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { _, newValue in
             scrollOffsetTracker.fromTop = newValue
         }
+        // Returning here via the zoom-transition pop from a related album (tap a card in
+        // `relatedAlbumsSection()`, then close it) can leave `ScrollAwareListBackdrop`'s backing
+        // layer showing a stale frame — the undarkened artwork color instead of the correct
+        // darkened blend — until something forces a fresh redraw. Scrolling does that (it
+        // publishes a new `fromTop`, which is exactly what makes it snap back correct instantly);
+        // republishing the same value here on reappear forces that same redraw proactively,
+        // without the user having to scroll first.
+        .onAppear {
+            scrollOffsetTracker.fromTop = scrollOffsetTracker.fromTop
+        }
         .scrollBounceBehavior(.basedOnSize)
         .toolbar {
             downloadButton
