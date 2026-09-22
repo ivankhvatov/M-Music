@@ -99,7 +99,6 @@ struct AlbumsListView: View {
     @State private var isLoading = false
     @State private var loadError: String?
     @State private var hasLoadedOnce = false
-    @State private var pendingAlbum: AlbumID3?
 
     @ObservedObject private var downloads = DownloadStore.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
@@ -152,18 +151,16 @@ struct AlbumsListView: View {
                 // live fetch has happened this session — guarded internally, cheap to call again.
                 Task { await LibraryCacheStatus.shared.preload() }
             }
-            .navigationDestination(item: $pendingAlbum) { album in
-                AlbumView(album: album, zoomNamespace: albumZoomNamespace)
-            }
         }
     }
 
     private var albumsGrid: some View {
         LazyVGrid(columns: gridColumns, spacing: 16) {
             ForEach(displayedAlbums) { album in
-                AlbumOpenButton(album: album, onOpen: { pendingAlbum = $0 }) {
+                NavigationLink(destination: AlbumView(album: album, zoomNamespace: albumZoomNamespace)) {
                     AlbumCardView(album: album, zoomNamespace: albumZoomNamespace)
                 }
+                .buttonStyle(.plain)
                 .disabled(!isAvailable(album))
             }
         }
@@ -174,7 +171,7 @@ struct AlbumsListView: View {
     private var albumsList: some View {
         List {
             ForEach(displayedAlbums) { album in
-                AlbumOpenButton(album: album, onOpen: { pendingAlbum = $0 }) {
+                NavigationLink(destination: AlbumView(album: album, zoomNamespace: albumZoomNamespace)) {
                     AlbumRow(album: album, zoomNamespace: albumZoomNamespace, displayScale: displayScale)
                 }
                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))

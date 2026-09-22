@@ -53,7 +53,6 @@ struct AlbumView: View {
     /// translucent nav bar (see `listBackground`).
     @State private var scrollEdgeOffsets = ScrollEdgeOffsets()
     @State private var showingRemoveDownloadConfirmation = false
-    @State private var pendingRelatedAlbum: AlbumID3?
 
     init(album: AlbumID3, zoomNamespace: Namespace.ID? = nil) {
         self.album = album
@@ -78,9 +77,6 @@ struct AlbumView: View {
         }
         .task {
             await loadRelatedAlbums()
-        }
-        .navigationDestination(item: $pendingRelatedAlbum) { relatedAlbum in
-            AlbumView(album: relatedAlbum, zoomNamespace: relatedAlbumZoomNamespace)
         }
     }
 
@@ -226,10 +222,11 @@ struct AlbumView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 16) {
                     ForEach(albums) { relatedAlbum in
-                        AlbumOpenButton(album: relatedAlbum, onOpen: { pendingRelatedAlbum = $0 }) {
+                        NavigationLink(destination: AlbumView(album: relatedAlbum, zoomNamespace: relatedAlbumZoomNamespace)) {
                             AlbumCardView(album: relatedAlbum, zoomNamespace: relatedAlbumZoomNamespace, subtitle: .year)
                                 .frame(width: 160)
                         }
+                        .buttonStyle(.plain)
                     }
                 }
                 .padding(.horizontal, 16)

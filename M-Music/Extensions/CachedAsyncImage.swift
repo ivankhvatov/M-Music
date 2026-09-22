@@ -114,19 +114,6 @@ final class ImageCache: @unchecked Sendable {
         Task { await load(url) }
     }
 
-    /// Waits for `url` to finish loading (memory/disk/durable tiers, or network), giving up after
-    /// `timeout` seconds — the underlying fetch keeps running regardless and will still populate
-    /// the cache for next time, but a caller gating something user-visible (like a screen
-    /// transition) on "is this ready yet" needs a bounded wait, not `load(_:)`'s unbounded one.
-    func load(_ url: URL, timeout: TimeInterval) async {
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { _ = await self.load(url) }
-            group.addTask { try? await Task.sleep(for: .seconds(timeout)) }
-            await group.next()
-            group.cancelAll()
-        }
-    }
-
     /// Fetches `url`'s image if not already cached anywhere, and stores it durably under
     /// Application Support (survives `Caches/` eviction) in addition to the normal memory/
     /// Caches-disk tiers. For downloaded songs' artwork, so it's still available offline even
