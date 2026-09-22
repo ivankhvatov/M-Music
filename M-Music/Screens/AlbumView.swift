@@ -32,6 +32,7 @@ struct AlbumView: View {
     @State private var hasRelatedAlbums: Bool = false
 
     @AppStorage("library.groupReleaseVersions") private var groupReleaseVersionsEnabled = false
+    @AppStorage(OfflineModeSettings.Keys.showUnavailableInAlbums) private var showUnavailableInAlbums = true
 
     @State private var isStarred: Bool
     @State private var backgroundColor: Color
@@ -266,8 +267,18 @@ struct AlbumView: View {
     // per rebuild (worse the taller a row got, e.g. one showing a displayed artist name). One real
     // `List` row per song sidesteps that: each row (and its separator overlay) is laid out from
     // its own height alone — see `PlaylistView.trackList()`, fixed the same way.
+    /// `songs`, minus any "Show unavailable in albums" would hide (offline + not downloaded).
+    /// Feeds `trackList()`'s `ForEach` directly — a hidden track must never be constructed at
+    /// all, since `trackList()`'s row indices drive first/last-row layout and `playTrack(at:)`'s
+    /// lookup. `playableSongs` (the actual playback queue) is unaffected by this setting — it
+    /// only ever changes what's rendered, never what's playable.
+    private var visibleSongs: [Child] {
+        guard !networkMonitor.isOnline, !showUnavailableInAlbums else { return songs }
+        return songs.filter { downloads.isDownloaded($0.id.raw) }
+    }
+
     func trackList() -> some View {
-        ForEach(Array(songs.enumerated()), id: \.element.id) { index, track in
+        ForEach(Array(visibleSongs.enumerated()), id: \.element.id) { index, track in
             // A `Button` (rather than `.onTapGesture` on the row) so the trailing `Menu`'s own
             // taps take priority correctly — `.onTapGesture` on a container is a separate
             // gesture recognizer that can swallow taps meant for a nested interactive control
@@ -297,7 +308,7 @@ struct AlbumView: View {
             .listRowInsets(EdgeInsets(
                 top: index == 0 ? 12 : 0,
                 leading: 16,
-                bottom: index == songs.count - 1 ? 12 : 0,
+                bottom: index == visibleSongs.count - 1 ? 12 : 0,
                 trailing: 16
             ))
             .overlay(alignment: .top) {
@@ -306,7 +317,7 @@ struct AlbumView: View {
                 }
             }
             .overlay(alignment: .bottom) {
-                if index < songs.count - 1 {
+                if index < visibleSongs.count - 1 {
                     trackSeparator()
                         .padding(.leading, trackTitleLeadingInset)
                 } else {
@@ -339,7 +350,7 @@ struct AlbumView: View {
 
     private func playTrack(at index: Int) {
         let queue = playableSongs
-        guard let startAt = queue.firstIndex(where: { $0.id == songs[index].id }) else { return }
+        guard let startAt = queue.firstIndex(where: { $0.id == visibleSongs[index].id }) else { return }
         player.play(queue: queue, startAt: startAt)
     }
 

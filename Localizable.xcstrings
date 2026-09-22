@@ -1392,6 +1392,9 @@
         }
       }
     },
+    "Offline mode" : {
+
+    },
     "Opus" : {
       "localizations" : {
         "de" : {
@@ -1748,6 +1751,15 @@
         }
       }
     },
+    "Show unavailable in albums" : {
+
+    },
+    "Show unavailable in lists" : {
+
+    },
+    "Show unavailable in playlists" : {
+
+    },
     "Shows the current playback source, codec, and bitrate (or bit depth/sample rate for a lossless codec) below the artist name in the expanded Now Playing view." : {
       "localizations" : {
         "ru" : {
@@ -2031,6 +2043,9 @@
           }
         }
       }
+    },
+    "When offline, controls whether content you haven't downloaded is shown dimmed (on) or hidden entirely (off): songs in Songs, fully-downloaded playlists/albums/artists in their list screens, and individual tracks inside an album or playlist." : {
+
     },
     "Wi-Fi" : {
       "localizations" : {

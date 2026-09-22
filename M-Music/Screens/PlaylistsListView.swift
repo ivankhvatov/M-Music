@@ -21,6 +21,7 @@ struct PlaylistsListView: View {
     @State private var hasLoadedOnce = false
 
     @AppStorage("library.playlistsDisplayStyle") private var displayStyleStorage = LibraryDisplayStyle.grid.storageKey
+    @AppStorage(OfflineModeSettings.Keys.showUnavailableInLists) private var showUnavailableInLists = true
 
     @ObservedObject private var downloads = DownloadStore.shared
     @ObservedObject private var libraryCacheStatus = LibraryCacheStatus.shared
@@ -110,12 +111,26 @@ struct PlaylistsListView: View {
         return songIds.contains { downloads.isDownloaded($0) }
     }
 
+    /// Stricter than `isAvailable(_:)` (which only needs one downloaded song) — used to decide
+    /// whether to hide a playlist entirely when "Show unavailable in lists" is off, as opposed to
+    /// just dimming it.
+    private func isFullyDownloaded(_ playlist: PlaylistSummary) -> Bool {
+        let songIds = libraryCacheStatus.songIds(forPlaylist: playlist.id.raw) ?? []
+        return !songIds.isEmpty && songIds.allSatisfy { downloads.isDownloaded($0) }
+    }
+
     private var displayedPlaylists: [PlaylistSummary] {
-        guard !searchText.isEmpty else { return playlists }
-        return playlists.filter {
-            $0.name.localizedCaseInsensitiveContains(searchText)
-                || ($0.owner?.localizedCaseInsensitiveContains(searchText) ?? false)
+        var result = playlists
+        if !searchText.isEmpty {
+            result = result.filter {
+                $0.name.localizedCaseInsensitiveContains(searchText)
+                    || ($0.owner?.localizedCaseInsensitiveContains(searchText) ?? false)
+            }
         }
+        if !networkMonitor.isOnline, !showUnavailableInLists {
+            result = result.filter { isFullyDownloaded($0) }
+        }
+        return result
     }
 
     /// Stale-while-revalidate: shows cached playlists immediately (no spinner) if any are

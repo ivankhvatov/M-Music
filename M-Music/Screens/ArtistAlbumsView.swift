@@ -81,6 +81,8 @@ struct ArtistAlbumsView: View {
 
     @ObservedObject private var downloads = DownloadStore.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
+    @ObservedObject private var libraryCacheStatus = LibraryCacheStatus.shared
+    @AppStorage(OfflineModeSettings.Keys.showUnavailableInLists) private var showUnavailableInLists = true
 
     @AppStorage("artistAlbums.sortField") private var sortFieldStorage = ArtistAlbumSortField.title.storageKey
     @AppStorage("artistAlbums.sortOrder") private var sortOrderStorage = ArtistAlbumSortOrder.ascending.storageKey
@@ -132,6 +134,9 @@ struct ArtistAlbumsView: View {
         }
         .onAppear {
             refresh()
+            // So "is this album fully downloaded" reads correctly offline even before any live
+            // fetch has happened this session — guarded internally, cheap to call again.
+            Task { await LibraryCacheStatus.shared.preload() }
         }
     }
 
@@ -228,7 +233,13 @@ struct ArtistAlbumsView: View {
     }
 
     private var displayAlbums: [AlbumID3] {
-        groupReleaseVersionsEnabled ? albums.groupedByPreferredVersion() : albums
+        var result = groupReleaseVersionsEnabled ? albums.groupedByPreferredVersion() : albums
+        if !networkMonitor.isOnline, !showUnavailableInLists {
+            result = result.filter {
+                libraryCacheStatus.isAlbumFullyDownloaded(albumId: $0.id.raw, downloads: downloads)
+            }
+        }
+        return result
     }
 
     private var sortedAlbums: [AlbumID3] {

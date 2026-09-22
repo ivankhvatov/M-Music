@@ -76,6 +76,7 @@ struct SongsListView: View {
     @AppStorage("songsList.filterOption") private var filterOptionStorage = SongFilterOption.all.storageKey
     @AppStorage("songsList.sortField") private var sortFieldStorage = SongSortField.title.storageKey
     @AppStorage("songsList.sortOrder") private var sortOrderStorage = SongSortOrder.ascending.storageKey
+    @AppStorage(OfflineModeSettings.Keys.showUnavailableInLists) private var showUnavailableInLists = true
 
     private var filterOption: Binding<SongFilterOption> {
         Binding(
@@ -161,6 +162,9 @@ struct SongsListView: View {
             .onChange(of: sortFieldStorage) { updateDisplayedSongs() }
             .onChange(of: sortOrderStorage) { updateDisplayedSongs() }
             .onChange(of: starStore.overrides) { updateDisplayedSongs() }
+            .onChange(of: showUnavailableInLists) { updateDisplayedSongs() }
+            .onChange(of: networkMonitor.isOnline) { updateDisplayedSongs() }
+            .onChange(of: downloads.downloadedSongIds) { updateDisplayedSongs() }
         }
     }
 
@@ -189,6 +193,10 @@ struct SongsListView: View {
                 $0.title.localizedCaseInsensitiveContains(searchText)
                     || ($0.artist?.localizedCaseInsensitiveContains(searchText) ?? false)
             }
+        }
+
+        if !networkMonitor.isOnline, !showUnavailableInLists {
+            result = result.filter { downloads.isDownloaded($0.id.raw) }
         }
 
         result.sort { lhs, rhs in

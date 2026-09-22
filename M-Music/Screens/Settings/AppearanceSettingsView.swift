@@ -13,6 +13,9 @@ struct AppearanceSettingsView: View {
     @AppStorage("library.playlistsDisplayStyle") private var playlistsDisplayStyleStorage = LibraryDisplayStyle.grid.storageKey
     @AppStorage("library.albumsDisplayStyle") private var albumsDisplayStyleStorage = LibraryDisplayStyle.grid.storageKey
     @AppStorage(AudioInfoDisplaySettings.Keys.isEnabled) private var showAudioInfo = false
+    @AppStorage(OfflineModeSettings.Keys.showUnavailableInLists) private var showUnavailableInLists = true
+    @AppStorage(OfflineModeSettings.Keys.showUnavailableInAlbums) private var showUnavailableInAlbums = true
+    @AppStorage(OfflineModeSettings.Keys.showUnavailableInPlaylists) private var showUnavailableInPlaylists = true
 
     private var playlistsDisplayStyle: Binding<LibraryDisplayStyle> {
         Binding(
@@ -57,6 +60,15 @@ struct AppearanceSettingsView: View {
                         Text("Player")
                     } footer: {
                         Text("Shows the current playback source, codec, and bitrate (or bit depth/sample rate for a lossless codec) below the artist name in the expanded Now Playing view.")
+                    }
+                    Section {
+                        Toggle("Show unavailable in lists", isOn: $showUnavailableInLists)
+                        Toggle("Show unavailable in albums", isOn: $showUnavailableInAlbums)
+                        Toggle("Show unavailable in playlists", isOn: $showUnavailableInPlaylists)
+                    } header: {
+                        Text("Offline mode")
+                    } footer: {
+                        Text("When offline, controls whether content you haven't downloaded is shown dimmed (on) or hidden entirely (off): songs in Songs, fully-downloaded playlists/albums/artists in their list screens, and individual tracks inside an album or playlist.")
                     }
                 }
                 .navigationTitle("Appearance")

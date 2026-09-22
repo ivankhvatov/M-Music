@@ -52,9 +52,11 @@ struct ArtistsListView: View {
 
     @AppStorage("artistsList.filterOption") private var filterOptionStorage = ArtistFilterOption.all.storageKey
     @AppStorage("artistsList.sortOrder") private var sortOrderStorage = ArtistSortOrder.ascending.storageKey
+    @AppStorage(OfflineModeSettings.Keys.showUnavailableInLists) private var showUnavailableInLists = true
 
     @ObservedObject private var downloads = DownloadStore.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
+    @ObservedObject private var libraryCacheStatus = LibraryCacheStatus.shared
 
     private var filterOption: Binding<ArtistFilterOption> {
         Binding(
@@ -108,6 +110,10 @@ struct ArtistsListView: View {
             }
             .onAppear {
                 refresh()
+                // So "does this artist have a fully-downloaded album" reads correctly offline
+                // even before any live fetch has happened this session — guarded internally,
+                // cheap to call again.
+                Task { await LibraryCacheStatus.shared.preload() }
             }
         }
     }
@@ -121,6 +127,12 @@ struct ArtistsListView: View {
 
         if !searchText.isEmpty {
             result = result.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+        }
+
+        if !networkMonitor.isOnline, !showUnavailableInLists {
+            result = result.filter {
+                libraryCacheStatus.hasFullyDownloadedAlbum(artistId: $0.id.raw, downloads: downloads)
+            }
         }
 
         result.sort { lhs, rhs in

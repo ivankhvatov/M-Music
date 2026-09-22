@@ -102,6 +102,8 @@ struct AlbumsListView: View {
 
     @ObservedObject private var downloads = DownloadStore.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
+    @ObservedObject private var libraryCacheStatus = LibraryCacheStatus.shared
+    @AppStorage(OfflineModeSettings.Keys.showUnavailableInLists) private var showUnavailableInLists = true
 
     private let gridColumns = [
         GridItem(.flexible(), spacing: 16),
@@ -145,6 +147,9 @@ struct AlbumsListView: View {
             }
             .onAppear {
                 refresh()
+                // So "is this album fully downloaded" reads correctly offline even before any
+                // live fetch has happened this session — guarded internally, cheap to call again.
+                Task { await LibraryCacheStatus.shared.preload() }
             }
         }
     }
@@ -199,6 +204,12 @@ struct AlbumsListView: View {
             result = result.filter {
                 $0.name.localizedCaseInsensitiveContains(searchText)
                     || ($0.artist?.localizedCaseInsensitiveContains(searchText) ?? false)
+            }
+        }
+
+        if !networkMonitor.isOnline, !showUnavailableInLists {
+            result = result.filter {
+                libraryCacheStatus.isAlbumFullyDownloaded(albumId: $0.id.raw, downloads: downloads)
             }
         }
 

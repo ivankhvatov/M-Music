@@ -18,6 +18,7 @@ struct PlaylistView: View {
     @ObservedObject private var downloads = DownloadStore.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
     @Environment(\.displayScale) private var displayScale
+    @AppStorage(OfflineModeSettings.Keys.showUnavailableInPlaylists) private var showUnavailableInPlaylists = true
 
     @State private var songs: [Child] = []
     @State private var isLoadingSongs = true
@@ -165,8 +166,16 @@ struct PlaylistView: View {
     /// here — deliberately, rather than relying on whatever default row inset a single
     /// `AlbumView`-style row would have picked up — to keep the action buttons and footer from
     /// sitting flush against the tracklist's boundary rules.
+    /// `songs`, minus any "Show unavailable in playlists" would hide (offline + not downloaded).
+    /// Feeds `trackList()`'s `ForEach` directly — see `AlbumView.visibleSongs`'s identical doc
+    /// comment for why a hidden track must never be constructed at all.
+    private var visibleSongs: [Child] {
+        guard !networkMonitor.isOnline, !showUnavailableInPlaylists else { return songs }
+        return songs.filter { downloads.isDownloaded($0.id.raw) }
+    }
+
     func trackList() -> some View {
-        ForEach(Array(songs.enumerated()), id: \.element.id) { index, track in
+        ForEach(Array(visibleSongs.enumerated()), id: \.element.id) { index, track in
             Button {
                 playTrack(at: index)
             } label: {
@@ -181,7 +190,7 @@ struct PlaylistView: View {
             .listRowInsets(EdgeInsets(
                 top: index == 0 ? 12 : 0,
                 leading: 16,
-                bottom: index == songs.count - 1 ? 12 : 0,
+                bottom: index == visibleSongs.count - 1 ? 12 : 0,
                 trailing: 16
             ))
             .overlay(alignment: .top) {
@@ -190,7 +199,7 @@ struct PlaylistView: View {
                 }
             }
             .overlay(alignment: .bottom) {
-                if index < songs.count - 1 {
+                if index < visibleSongs.count - 1 {
                     trackSeparator()
                         .padding(.leading, trackTitleLeadingInset)
                 } else {
@@ -216,7 +225,7 @@ struct PlaylistView: View {
 
     private func playTrack(at index: Int) {
         let queue = playableSongs
-        guard let startAt = queue.firstIndex(where: { $0.id == songs[index].id }) else { return }
+        guard let startAt = queue.firstIndex(where: { $0.id == visibleSongs[index].id }) else { return }
         player.play(queue: queue, startAt: startAt)
     }
 

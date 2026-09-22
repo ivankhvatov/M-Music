@@ -116,6 +116,25 @@ actor LibraryCacheDatabase {
         }
         return result
     }
+
+    /// Every cached artist's album list, keyed by artist id — used once, at first appearance of
+    /// any of `AlbumsListView`/`ArtistsListView`/`ArtistAlbumsView`, to preload `LibraryCacheStatus`
+    /// with whatever was already cached in an earlier session (same reasoning as
+    /// `allPlaylistSongIds()` — without this, "is this album/artist fully downloaded" reads as
+    /// false for everything until a live fetch happens to run this session, which never happens
+    /// at all in an offline-only session).
+    func allCachedArtistAlbums() async -> [String: [AlbumID3]] {
+        let entries = (try? await dbQueue.read { db in
+            try CachedEntry.filter(Column("category") == LibraryCacheCategory.artistAlbums).fetchAll(db)
+        }) ?? []
+        var result: [String: [AlbumID3]] = [:]
+        for entry in entries {
+            guard let data = entry.json.data(using: .utf8), let albums = try? JSONDecoder().decode([AlbumID3].self, from: data)
+            else { continue }
+            result[entry.key] = albums
+        }
+        return result
+    }
 }
 
 /// The `category` values `CachedEntry` rows are keyed by — `allAlbums`/`recentAlbums`/
@@ -138,6 +157,7 @@ private enum LibraryCacheCategory {
 extension LibraryCacheDatabase {
     func cacheAllAlbums(_ albums: [AlbumID3]) async {
         await set(albums, category: LibraryCacheCategory.allAlbums, key: Self.wholeCatalogKey)
+        await MainActor.run { LibraryCacheStatus.shared.mergeAlbumSongCounts(albums) }
     }
 
     func cachedAllAlbums() async -> [AlbumID3]? {
@@ -146,6 +166,7 @@ extension LibraryCacheDatabase {
 
     func cacheRecentAlbums(_ albums: [AlbumID3]) async {
         await set(albums, category: LibraryCacheCategory.recentAlbums, key: Self.wholeCatalogKey)
+        await MainActor.run { LibraryCacheStatus.shared.mergeAlbumSongCounts(albums) }
     }
 
     func cachedRecentAlbums() async -> [AlbumID3]? {
@@ -162,6 +183,10 @@ extension LibraryCacheDatabase {
 
     func cacheArtistAlbums(_ albums: [AlbumID3], artistId: String) async {
         await set(albums, category: LibraryCacheCategory.artistAlbums, key: artistId)
+        await MainActor.run {
+            LibraryCacheStatus.shared.mergeAlbumSongCounts(albums)
+            LibraryCacheStatus.shared.setAlbumIds(albums.map { $0.id.raw }, forArtist: artistId)
+        }
     }
 
     func cachedArtistAlbums(artistId: String) async -> [AlbumID3]? {

@@ -1,15 +1,21 @@
 import Foundation
 
-/// A synchronous, `@MainActor` mirror of `LibraryCacheDatabase`'s `playlistSongs` category —
-/// exists for the same reason `LocalDownloadIndex`/`GaplessCacheStatus` exist alongside their own
-/// actor-backed databases: `PlaylistCardView`/`PlaylistsListView`'s row need an instant,
-/// non-`await`-able answer to "does this playlist have any downloaded song" (cross-referencing
-/// against `DownloadStore.shared.isDownloaded(_:)`), and an `actor` can't offer that.
+/// A synchronous, `@MainActor` mirror of parts of `LibraryCacheDatabase` — exists for the same
+/// reason `LocalDownloadIndex`/`GaplessCacheStatus` exist alongside their own actor-backed
+/// databases: views need an instant, non-`await`-able answer to "is this available offline"
+/// (cross-referencing against `DownloadStore`), and an `actor` can't offer that.
 @MainActor
 final class LibraryCacheStatus: ObservableObject {
     static let shared = LibraryCacheStatus()
 
     @Published private(set) var songIdsByPlaylistId: [String: [String]] = [:]
+    /// Each album's total track count, mirrored in whenever its `AlbumID3` is cached/fetched
+    /// anywhere (`LibraryCacheDatabase.cacheAllAlbums`/`cacheRecentAlbums`/`cacheArtistAlbums`) —
+    /// `DownloadRecord` alone only tells us how many of an album's songs are downloaded, never
+    /// how many it actually has, so "fully downloaded" needs this too.
+    @Published private(set) var albumSongCounts: [String: Int] = [:]
+    /// Each artist's album ids, mirrored in whenever `cacheArtistAlbums` runs.
+    @Published private(set) var albumIdsByArtistId: [String: [String]] = [:]
 
     private init() {}
 
@@ -21,14 +27,47 @@ final class LibraryCacheStatus: ObservableObject {
         songIdsByPlaylistId[playlistId] = songIds
     }
 
-    /// Loads every previously-cached playlist's song-id list — called once, lazily, from
-    /// `PlaylistsListView`'s first appearance, so playlists cached in an earlier session gray out
-    /// correctly before any playlist is opened this session.
+    func mergeAlbumSongCounts(_ albums: [AlbumID3]) {
+        for album in albums { albumSongCounts[album.id.raw] = album.songCount }
+    }
+
+    func setAlbumIds(_ albumIds: [String], forArtist artistId: String) {
+        albumIdsByArtistId[artistId] = albumIds
+    }
+
+    /// Every song in this album is downloaded.
+    func isAlbumFullyDownloaded(albumId: String, downloads: DownloadStore) -> Bool {
+        guard let totalCount = albumSongCounts[albumId], totalCount > 0 else { return false }
+        let downloadedCount = downloads.downloadedRecords.lazy.filter { $0.albumId == albumId }.count
+        return downloadedCount >= totalCount
+    }
+
+    /// At least one of this artist's albums (any release type/version) is fully downloaded.
+    func hasFullyDownloadedAlbum(artistId: String, downloads: DownloadStore) -> Bool {
+        (albumIdsByArtistId[artistId] ?? []).contains { isAlbumFullyDownloaded(albumId: $0, downloads: downloads) }
+    }
+
+    /// Loads everything previously cached (playlist song-id lists, the whole album catalog, and
+    /// every artist's album list) — called once, lazily, from the first appearance of any of
+    /// `PlaylistsListView`/`AlbumsListView`/`ArtistsListView`/`ArtistAlbumsView`, so offline
+    /// availability reads correctly before anything's been fetched live this session. Without
+    /// this, `albumSongCounts`/`albumIdsByArtistId` only ever got populated as a side effect of a
+    /// live fetch succeeding — meaning "is this fully downloaded" read as `false` for everything
+    /// in a session that starts offline, even though the answer was already sitting on disk.
     private var didPreload = false
     func preload() async {
         guard !didPreload else { return }
         didPreload = true
         let byPlaylistId = await LibraryCacheDatabase.shared.allPlaylistSongIds()
         songIdsByPlaylistId.merge(byPlaylistId) { _, new in new }
+
+        if let allAlbums = await LibraryCacheDatabase.shared.cachedAllAlbums() {
+            mergeAlbumSongCounts(allAlbums)
+        }
+        let byArtistId = await LibraryCacheDatabase.shared.allCachedArtistAlbums()
+        for (artistId, albums) in byArtistId {
+            mergeAlbumSongCounts(albums)
+            setAlbumIds(albums.map { $0.id.raw }, forArtist: artistId)
+        }
     }
 }
