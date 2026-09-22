@@ -25,6 +25,10 @@ struct PlaylistView: View {
     @State private var loadError: String?
 
     @State private var backgroundColor: Color
+    /// Cached `backgroundColor.darkened()` — see `AlbumView.darkenedBackgroundColor`'s identical
+    /// doc comment for why: recomputed only at the two points `backgroundColor` itself changes,
+    /// rather than on every row of every re-render.
+    @State private var darkenedBackgroundColor: Color
 
     /// See `AlbumView.artworkURL`'s doc comment — computed synchronously in `init` for the same
     /// reason: a real URL ready at first render lets an already-cached cover (e.g. from
@@ -41,6 +45,7 @@ struct PlaylistView: View {
         self.playlist = playlist
         self.zoomNamespace = zoomNamespace
         _backgroundColor = State(initialValue: Color(.systemBackground))
+        _darkenedBackgroundColor = State(initialValue: Color(.systemBackground).darkened())
         _artworkURL = State(initialValue: try? SubsonicClient.shared.coverArtURL(forId: playlist.coverArt ?? playlist.id.raw))
     }
 
@@ -65,18 +70,18 @@ struct PlaylistView: View {
                 playlistHeader()
             }
             .listRowSeparator(.hidden)
-            .listRowBackground(backgroundColor.darkened())
+            .listRowBackground(darkenedBackgroundColor)
 
             trackListSection()
 
             playlistFooter()
                 .listRowSeparator(.hidden)
-                .listRowBackground(backgroundColor.darkened())
+                .listRowBackground(darkenedBackgroundColor)
                 .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 16, trailing: 16))
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        .background(backgroundColor.darkened().ignoresSafeArea())
+        .background(darkenedBackgroundColor.ignoresSafeArea())
         .scrollBounceBehavior(.basedOnSize)
         .toolbar {
             downloadButton
@@ -128,7 +133,7 @@ struct PlaylistView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 24)
                 .listRowSeparator(.hidden)
-                .listRowBackground(backgroundColor.darkened())
+                .listRowBackground(darkenedBackgroundColor)
         } else if let loadError {
             Text(loadError)
                 .font(.subheadline)
@@ -137,7 +142,7 @@ struct PlaylistView: View {
                 .multilineTextAlignment(.center)
                 .padding(.vertical, 24)
                 .listRowSeparator(.hidden)
-                .listRowBackground(backgroundColor.darkened())
+                .listRowBackground(darkenedBackgroundColor)
         } else {
             // Not a single row holding a hand-stacked `VStack` of all songs (which is how
             // `AlbumView.trackList` does it): that shape ties every separator's vertical
@@ -175,7 +180,11 @@ struct PlaylistView: View {
     }
 
     func trackList() -> some View {
-        ForEach(Array(visibleSongs.enumerated()), id: \.element.id) { index, track in
+        // Hoisted rather than reading the `visibleSongs` computed property (which filters the
+        // whole `songs` array) again below for the row-count checks — see
+        // `AlbumView.trackList()`'s identical comment.
+        let visibleSongs = self.visibleSongs
+        return ForEach(Array(visibleSongs.enumerated()), id: \.element.id) { index, track in
             Button {
                 playTrack(at: index)
             } label: {
@@ -186,7 +195,7 @@ struct PlaylistView: View {
             .buttonStyle(.plain)
             .disabled(!(networkMonitor.isOnline || downloads.isDownloaded(track.id.raw)))
             .listRowSeparator(.hidden)
-            .listRowBackground(backgroundColor.darkened())
+            .listRowBackground(darkenedBackgroundColor)
             .listRowInsets(EdgeInsets(
                 top: index == 0 ? 12 : 0,
                 leading: 16,
@@ -255,7 +264,10 @@ struct PlaylistView: View {
         CachedAsyncImage(url: artworkURL, onLoad: { uiImage in
             Task.detached(priority: .userInitiated) {
                 guard let color = uiImage.averageColor() else { return }
-                await MainActor.run { backgroundColor = color }
+                await MainActor.run {
+                    backgroundColor = color
+                    darkenedBackgroundColor = color.darkened()
+                }
             }
         }) { image in
             image
@@ -364,7 +376,7 @@ struct PlaylistView: View {
                         .font(.system(size: 16))
                         .fontWeight(.semibold)
                 }
-                .foregroundStyle(backgroundColor.darkened())
+                .foregroundStyle(darkenedBackgroundColor)
                 .padding(.horizontal, 20)
                 .frame(height: 48)
                 .background(Color.white)

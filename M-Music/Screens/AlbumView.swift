@@ -36,6 +36,14 @@ struct AlbumView: View {
 
     @State private var isStarred: Bool
     @State private var backgroundColor: Color
+    /// Cached `backgroundColor.darkened()`/`.darkened().darkened(by: 0.8)` — recomputed only at
+    /// the two points `backgroundColor` itself changes (`init` below, and `CachedAsyncImage`'s
+    /// `onLoad`), rather than on every read. `.darkened()` bridges through `UIColor` to do an HSB
+    /// conversion, and this view has ~9 call sites for it (row backgrounds, the header/footer,
+    /// the "Play" button); recomputing all of them from scratch on every row of every re-render
+    /// added up to real CPU cost during scrolling.
+    @State private var darkenedBackgroundColor: Color
+    @State private var darkenedRelatedSectionBackground: Color
 
     /// Computed once, in `init` (not inline in `albumArtwork()`, and not deferred to a `.task`)
     /// and cached — `coverArtURL` signs every call with a fresh random token, and this view
@@ -50,8 +58,16 @@ struct AlbumView: View {
 
     /// How far the list is scrolled from its top edge — drives a smooth blend between the artwork
     /// color and the related-albums section's darker shade as the top of the list nears the
-    /// translucent nav bar (see `listBackground`).
-    @State private var scrollEdgeOffsets = ScrollEdgeOffsets()
+    /// translucent nav bar. A plain `let`-held reference type rather than `@State` on this view:
+    /// `.onScrollGeometryChange` fires on every scroll frame, and a `@State` write re-evaluates
+    /// this whole view's `body` (rebuilding the entire tracklist) on every one of them. Scoping it
+    /// to `ScrollAwareListBackdrop` instead — the only thing that actually needs to react to it —
+    /// means scrolling now re-renders just that one small view. Not a singleton like
+    /// `PlayerManager`/`StarStore`: a fresh instance per `AlbumView` init. If SwiftUI ever re-runs
+    /// `init` while preserving this view's identity, `fromTop` would reset to 0 for one frame;
+    /// harmless, since `.onScrollGeometryChange` immediately reports the live offset again before
+    /// that's visible.
+    private let scrollOffsetTracker = ScrollOffsetTracker()
     @State private var showingRemoveDownloadConfirmation = false
 
     init(album: AlbumID3, zoomNamespace: Namespace.ID? = nil) {
@@ -59,6 +75,8 @@ struct AlbumView: View {
         self.zoomNamespace = zoomNamespace
         _isStarred = State(initialValue: album.isStarred)
         _backgroundColor = State(initialValue: Color(.systemBackground))
+        _darkenedBackgroundColor = State(initialValue: Color(.systemBackground).darkened())
+        _darkenedRelatedSectionBackground = State(initialValue: Color(.systemBackground).darkened().darkened(by: 0.8))
         _artworkURL = State(initialValue: try? SubsonicClient.shared.coverArtURL(forId: album.coverArt ?? album.id.raw))
     }
 
@@ -86,29 +104,33 @@ struct AlbumView: View {
                 albumHeader()
             }
             .listRowSeparator(.hidden)
-            .listRowBackground(backgroundColor.darkened())
+            .listRowBackground(darkenedBackgroundColor)
 
             trackListSection()
 
             albumFooter()
                 .listRowSeparator(.hidden)
-                .listRowBackground(backgroundColor.darkened())
+                .listRowBackground(darkenedBackgroundColor)
                 .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 16, trailing: 16))
 
             relatedAlbumsSection()
                 .listRowSeparator(.hidden)
                 .listRowInsets(EdgeInsets())
-                .listRowBackground(relatedSectionBackground)
+                .listRowBackground(darkenedRelatedSectionBackground)
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(
-            hasRelatedAlbums ? listBackground.ignoresSafeArea() : backgroundColor.darkened().ignoresSafeArea()
+            ScrollAwareListBackdrop(
+                tracker: scrollOffsetTracker,
+                hasRelatedAlbums: hasRelatedAlbums,
+                darkenedBackgroundColor: darkenedBackgroundColor,
+                darkenedRelatedSectionBackground: darkenedRelatedSectionBackground
+            )
+            .ignoresSafeArea()
         )
-        .onScrollGeometryChange(for: ScrollEdgeOffsets.self) { geometry in
-            ScrollEdgeOffsets(fromTop: geometry.contentOffset.y)
-        } action: { _, newValue in
-            scrollEdgeOffsets = newValue
+        .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { _, newValue in
+            scrollOffsetTracker.fromTop = newValue
         }
         .scrollBounceBehavior(.basedOnSize)
         .toolbar {
@@ -184,20 +206,6 @@ struct AlbumView: View {
         }
     }
 
-    /// A shade darker than the main artwork-derived background, so this section reads as visually
-    /// distinct from the tracklist above it.
-    private var relatedSectionBackground: Color {
-        backgroundColor.darkened().darkened(by: 0.8)
-    }
-
-    /// Blends from the artwork color to `relatedSectionBackground` as the list scrolls within
-    /// 50pt of its top edge, so the area behind the translucent nav bar transitions smoothly
-    /// alongside the scroll instead of snapping between the two colors.
-    private var listBackground: Color {
-        let fraction = min(max(scrollEdgeOffsets.fromTop / 50, 0), 1)
-        return backgroundColor.darkened().interpolated(to: relatedSectionBackground, fraction: fraction)
-    }
-
     @ViewBuilder
     private func relatedAlbumsSection() -> some View {
         if !otherVersions.isEmpty || !moreByArtist.isEmpty {
@@ -244,7 +252,7 @@ struct AlbumView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 24)
                 .listRowSeparator(.hidden)
-                .listRowBackground(backgroundColor.darkened())
+                .listRowBackground(darkenedBackgroundColor)
         } else if let loadError {
             Text(loadError)
                 .font(.subheadline)
@@ -253,7 +261,7 @@ struct AlbumView: View {
                 .multilineTextAlignment(.center)
                 .padding(.vertical, 24)
                 .listRowSeparator(.hidden)
-                .listRowBackground(backgroundColor.darkened())
+                .listRowBackground(darkenedBackgroundColor)
         } else {
             trackList()
         }
@@ -278,7 +286,11 @@ struct AlbumView: View {
     }
 
     func trackList() -> some View {
-        ForEach(Array(visibleSongs.enumerated()), id: \.element.id) { index, track in
+        // Hoisted rather than reading the `visibleSongs` computed property (which filters the
+        // whole `songs` array) again below for the row-count checks — that would otherwise
+        // re-filter once more per row on every render.
+        let visibleSongs = self.visibleSongs
+        return ForEach(Array(visibleSongs.enumerated()), id: \.element.id) { index, track in
             // A `Button` (rather than `.onTapGesture` on the row) so the trailing `Menu`'s own
             // taps take priority correctly — `.onTapGesture` on a container is a separate
             // gesture recognizer that can swallow taps meant for a nested interactive control
@@ -295,7 +307,7 @@ struct AlbumView: View {
             .buttonStyle(.plain)
             .disabled(!(networkMonitor.isOnline || downloads.isDownloaded(track.id.raw)))
             .listRowSeparator(.hidden)
-            .listRowBackground(backgroundColor.darkened())
+            .listRowBackground(darkenedBackgroundColor)
             // Every row's own vertical inset, rather than the system default a `List` row
             // otherwise picks up — that default only ever applied once to the whole tracklist
             // back when every track lived in one hand-stacked row; now that each track is its
@@ -392,7 +404,11 @@ struct AlbumView: View {
         CachedAsyncImage(url: artworkURL, onLoad: { uiImage in
             Task.detached(priority: .userInitiated) {
                 guard let color = uiImage.averageColor() else { return }
-                await MainActor.run { backgroundColor = color }
+                await MainActor.run {
+                    backgroundColor = color
+                    darkenedBackgroundColor = color.darkened()
+                    darkenedRelatedSectionBackground = color.darkened().darkened(by: 0.8)
+                }
             }
         }) { image in
             image
@@ -468,7 +484,7 @@ struct AlbumView: View {
                         .font(.system(size: 16))
                         .fontWeight(.semibold)
                 }
-                .foregroundStyle(backgroundColor.darkened())
+                .foregroundStyle(darkenedBackgroundColor)
                 .padding(.horizontal, 20)
                 .frame(height: 48)
                 .background(Color.white)
@@ -550,9 +566,32 @@ struct AlbumView: View {
 }
 
 /// How far `AlbumView`'s list is scrolled from its top edge, in points — `0` means flush against
-/// the top.
-private struct ScrollEdgeOffsets: Equatable {
-    var fromTop: CGFloat = 0
+/// the top. See the `scrollOffsetTracker` property's doc comment for why this is a plain
+/// `ObservableObject`, not `AlbumView`'s own `@State`.
+private final class ScrollOffsetTracker: ObservableObject {
+    @Published var fromTop: CGFloat = 0
+}
+
+/// The `List`'s background — a plain darkened artwork color normally, blending smoothly to
+/// `darkenedRelatedSectionBackground` as the list scrolls within 50pt of its top edge (so the
+/// area behind the translucent nav bar transitions instead of snapping) when related albums are
+/// shown below the tracklist. Isolated into its own leaf view, observing only `tracker`, so a
+/// scroll update re-renders just this small view instead of all of `AlbumView.body` — the same
+/// scoping `TrackLeadingGlyph` below does for `PlayerManager` ticks.
+private struct ScrollAwareListBackdrop: View {
+    @ObservedObject var tracker: ScrollOffsetTracker
+    let hasRelatedAlbums: Bool
+    let darkenedBackgroundColor: Color
+    let darkenedRelatedSectionBackground: Color
+
+    var body: some View {
+        if hasRelatedAlbums {
+            let fraction = min(max(tracker.fromTop / 20, 0), 1)
+            darkenedBackgroundColor.interpolated(to: darkenedRelatedSectionBackground, fraction: fraction)
+        } else {
+            darkenedBackgroundColor
+        }
+    }
 }
 
 /// A single track row's content (playing indicator/track number, title/artist, download status,
