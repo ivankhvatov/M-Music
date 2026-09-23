@@ -101,10 +101,9 @@ struct AlbumView: View {
             .padding(.horizontal, 16)
 
             relatedAlbumsSection()
-                .padding(.bottom, 1000)
+                .padding(.bottom, 10000)
                 .background(darkenedRelatedSectionBackground)
         }
-        .listStyle(.plain)
         .background(darkenedBackgroundColor)
         // No separate backdrop behind the list: every row already paints its own correct
         // background (`darkenedBackgroundColor`/`darkenedRelatedSectionBackground`), tiling
@@ -117,7 +116,7 @@ struct AlbumView: View {
         // it in place for layout/background purposes — so scrolling still physically stops right
         // where the last carousel ends, verified directly (built a throwaway harness reproducing
         // this exact padding-vs-margin shape and confirmed further swipes don't move it at all).
-        .contentMargins(.bottom, -1000, for: .scrollContent)
+        .contentMargins(.bottom, -10000, for: .scrollContent)
         .toolbar {
             downloadButton
             moreButton
