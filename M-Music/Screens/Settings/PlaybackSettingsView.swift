@@ -28,6 +28,8 @@ struct PlaybackSettingsView: View {
     @State private var cachedRecords: [GaplessCacheRecord] = []
     @State private var isCachedListExpanded = false
     @State private var showingClearCacheConfirmation = false
+    @AppStorage(GaplessCacheSettings.Keys.convertLosslessToALAC) private var convertLosslessToALAC = false
+    @AppStorage(GaplessCacheSettings.Keys.convertOpusToCAF) private var convertOpusToCAF = false
     @State private var showingNeverConfirmation = false
 
     /// Picking "Never" wipes the persistent cache, so when there's something to lose it's held
@@ -189,6 +191,11 @@ struct PlaybackSettingsView: View {
                         } message: {
                             Text("Choosing Never deletes every cached song now. From then on, the upcoming track is cached only while it's in the queue.")
                         }
+
+                        Toggle("Convert lossless to ALAC", isOn: $convertLosslessToALAC)
+                            .disabled(!isGaplessCacheEnabled)
+                        Toggle("Convert Opus to .caf", isOn: $convertOpusToCAF)
+                            .disabled(!isGaplessCacheEnabled)
 
                         if gaplessCacheRetention != .never {
                             DisclosureGroup(isExpanded: $isCachedListExpanded) {

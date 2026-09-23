@@ -201,6 +201,12 @@
     },
     "1 day" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 Tag"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -211,6 +217,12 @@
     },
     "1 GB" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 GB"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -221,6 +233,12 @@
     },
     "2 GB" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "2 GB"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -231,6 +249,12 @@
     },
     "3 days" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "3 Tage"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -241,6 +265,12 @@
     },
     "7 days" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "7 Tage"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -251,6 +281,12 @@
     },
     "14 days" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "14 Tage"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -325,6 +361,12 @@
     },
     "250 MB" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "250 MB"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -367,6 +409,12 @@
     },
     "500 MB" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "500 MB"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -525,6 +573,12 @@
     },
     "Appearance" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anzeige"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -534,7 +588,14 @@
       }
     },
     "Applies only to new downloads — songs already saved to this device keep whatever container they were downloaded in. Lossless downloads (FLAC, WAV, AIFF) are converted to Apple Lossless (ALAC); Opus downloads are repackaged into a .caf container. Both keep full audio quality — no lossy re-encoding is involved." : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Применяется только к новым загрузкам — сохраненные ранее песни останутся в том формате, в котором были загружены. Файлы без потерь (FLAC, WAV, AIFF) конвертируются в Apple Lossless (ALAC); файлы Opus помещаются в контейнер .caf. Качество аудио остается прежним — транспонирования с потерей качества не происходит."
+          }
+        }
+      }
     },
     "Artist" : {
       "localizations" : {
@@ -640,8 +701,15 @@
         }
       }
     },
-    "Choosing Never deletes every cached song now. From then on, only the upcoming track is cached, temporarily." : {
-
+    "Choosing Never deletes every cached song now. From then on, the upcoming track is cached only while it's in the queue." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Выбор «Никогда» удалит все кэшированные песни. Загружаться будут только следующие песни в очереди."
+          }
+        }
+      }
     },
     "Clear Cache" : {
       "localizations" : {
@@ -690,13 +758,34 @@
       }
     },
     "Conversion" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Конвертация"
+          }
+        }
+      }
     },
     "Convert lossless to ALAC" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Конвертировать файлы без потерь в ALAC"
+          }
+        }
+      }
     },
     "Convert Opus to .caf" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Конвертировать файлы Opus в .caf"
+          }
+        }
+      }
     },
     "Currently cached" : {
       "localizations" : {
@@ -765,7 +854,14 @@
       }
     },
     "Delete Cache and Stop Keeping Songs" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Очистить кэш и прекратить сохранять песни"
+          }
+        }
+      }
     },
     "Delete the album from this device?" : {
       "localizations" : {
@@ -862,7 +958,14 @@
       }
     },
     "Download format" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Формат загрузки"
+          }
+        }
+      }
     },
     "Downloaded" : {
       "localizations" : {
@@ -1044,19 +1147,15 @@
         }
       }
     },
-    "Format/bitrate apply only to new downloads — songs already saved to this device keep whatever quality they were downloaded at. When Prioritize downloads is on, a downloaded song always plays from the download regardless of its format; when off, a download only plays if its format still matches the current Transcoding setting above, otherwise the gapless cache or streaming is used instead." : {
-      "extractionState" : "stale",
+    "Format/bitrate apply only to new downloads — songs already saved to this device keep whatever quality they were downloaded at. When Prioritize downloads is on, a downloaded song always plays from the download regardless of its format; when off, a download only plays if its format still matches the current Transcoding setting in Playback settings, otherwise the gapless cache or streaming is used instead." : {
       "localizations" : {
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Формат и битрейт применяется только к новым загрузкам — сохраненные ранее песни останутся в том формате, в котором были загружены. Если приоритет загрузок включен, загруженные песни воспроизводятся вне зависимости от их формата; иначе, воспроизводятся только если их формат совпадает с настройками транскодирования."
+            "value" : "Формат и битрейт применяется только к новым загрузкам — сохраненные ранее песни останутся в том формате, в котором были загружены. Если приоритет загрузок включен, загруженные песни воспроизводятся вне зависимости от их формата; иначе, воспроизводятся только если их формат совпадает с настройками транскодирования в разделе «Воспроизведение», ."
           }
         }
       }
-    },
-    "Format/bitrate apply only to new downloads — songs already saved to this device keep whatever quality they were downloaded at. When Prioritize downloads is on, a downloaded song always plays from the download regardless of its format; when off, a download only plays if its format still matches the current Transcoding setting in Playback settings, otherwise the gapless cache or streaming is used instead." : {
-
     },
     "Gapless Caching" : {
       "localizations" : {
@@ -1254,6 +1353,12 @@
     },
     "Name: A-Z" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Name: A-Z"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1264,6 +1369,12 @@
     },
     "Name: Z-A" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Name: Z-A"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1289,7 +1400,20 @@
       }
     },
     "Never" : {
-
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nie"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Никогда"
+          }
+        }
+      }
     },
     "No albums found." : {
       "localizations" : {
@@ -1309,6 +1433,12 @@
     },
     "No artists found." : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keine Künstler*innen gefunden."
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1402,7 +1532,14 @@
       }
     },
     "Offline mode" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Оффлайн-режим"
+          }
+        }
+      }
     },
     "Opus" : {
       "localizations" : {
@@ -1432,6 +1569,12 @@
     },
     "Other" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Andere"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1761,13 +1904,34 @@
       }
     },
     "Show unavailable in albums" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Показывать недоступное в альбомах"
+          }
+        }
+      }
     },
     "Show unavailable in lists" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Показывать недоступное в списках"
+          }
+        }
+      }
     },
     "Show unavailable in playlists" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Показывать недоступное в плейлистах"
+          }
+        }
+      }
     },
     "Shows the current playback source, codec, and bitrate (or bit depth/sample rate for a lossless codec) below the artist name in the expanded Now Playing view." : {
       "localizations" : {
@@ -1835,8 +1999,15 @@
         }
       }
     },
-    "The upcoming track is cached only long enough to play it gaplessly, and is deleted as soon as it's no longer the current or next track — nothing is kept." : {
-
+    "The upcoming track is cached so it can play gaplessly, and stays cached only while it's in the queue — once it's removed from the queue, it's deleted." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Следующий трек загружается для бесшовного воспроизведения и очищается как только удаляется из очереди."
+          }
+        }
+      }
     },
     "Title" : {
       "localizations" : {
@@ -2057,7 +2228,14 @@
       }
     },
     "When offline, controls whether content you haven't downloaded is shown dimmed (on) or hidden entirely (off): songs in Songs, fully-downloaded playlists/albums/artists in their list screens, and individual tracks inside an album or playlist." : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "При отсутствии соединения отображает незагруженный контент как скрытый (вкл.), либо скрывает полностью (выкл.): загруженные песни, плечисты, альбомы и артисты в соответствующих разделах, а также песни внутри альбомов и плейлистов."
+          }
+        }
+      }
     },
     "Wi-Fi" : {
       "localizations" : {

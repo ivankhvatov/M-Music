@@ -174,16 +174,30 @@ actor GaplessCacheService {
                 return
             }
             let http = response as? HTTPURLResponse
-            let byteSize = (try? FileManager.default.attributesOfItem(atPath: tmpURL.path)[.size] as? NSNumber)?.int64Value ?? 0
+            var byteSize = (try? FileManager.default.attributesOfItem(atPath: tmpURL.path)[.size] as? NSNumber)?.int64Value ?? 0
             let validation = try await DownloadPayloadValidator.validate(
                 fileURL: tmpURL, byteSize: byteSize, statusCode: http?.statusCode, mimeType: http?.mimeType,
                 fallbackFileExtension: fallbackExtension
             )
-            let ext = (validation.fileExtension ?? fallbackExtension).pathSafeFileExtension()
+            var ext = (validation.fileExtension ?? fallbackExtension).pathSafeFileExtension()
             try? FileManager.default.createDirectory(at: Self.destinationDirectory(), withIntermediateDirectories: true)
-            let destination = Self.destinationURL(songId: songId, ext: ext)
+            var destination = Self.destinationURL(songId: songId, ext: ext)
             try? FileManager.default.removeItem(at: destination)
             try FileManager.default.moveItem(at: tmpURL, to: destination)
+
+            if let converted = await AudioContainerConversion.convertIfNeeded(
+                originalURL: destination, ext: ext,
+                losslessToALAC: GaplessCacheSettings.convertLosslessToALAC,
+                opusToCAF: GaplessCacheSettings.convertOpusToCAF
+            ) {
+                destination = converted.url
+                ext = converted.ext
+                byteSize = converted.byteSize
+            }
+            guard !Task.isCancelled else {
+                try? FileManager.default.removeItem(at: destination)
+                return
+            }
 
             let now = Date()
             let record = GaplessCacheRecord(

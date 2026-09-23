@@ -58,6 +58,19 @@ enum GaplessCacheSettings {
         static let isEnabled = "gaplessCache.isEnabled"
         static let sizeLimit = "gaplessCache.sizeLimit"
         static let retention = "gaplessCache.retention"
+        static let convertLosslessToALAC = "gaplessCache.convertLosslessToALAC"
+        static let convertOpusToCAF = "gaplessCache.convertOpusToCAF"
+    }
+
+    /// Same conversions as `DownloadConversionSettings`, but for tracks the gapless cache
+    /// downloads — independent switches, applied to each track right after it's cached and before
+    /// it's ever played. Only affects tracks cached after being turned on.
+    static var convertLosslessToALAC: Bool {
+        UserDefaults.standard.bool(forKey: Keys.convertLosslessToALAC)
+    }
+
+    static var convertOpusToCAF: Bool {
+        UserDefaults.standard.bool(forKey: Keys.convertOpusToCAF)
     }
 
     static var isEnabled: Bool {
