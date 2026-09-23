@@ -28,6 +28,9 @@ struct PlaybackSettingsView: View {
     @State private var cachedRecords: [GaplessCacheRecord] = []
     @State private var isCachedListExpanded = false
     @State private var showingClearCacheConfirmation = false
+    @AppStorage(ScrobbleSettings.Keys.isEnabled) private var isScrobblingEnabled = true
+    @AppStorage(ScrobbleSettings.Keys.fromPlaylists) private var scrobbleFromPlaylists = true
+    @AppStorage(ScrobbleSettings.Keys.threshold) private var scrobbleThreshold = ScrobbleSettings.defaultThreshold
     @AppStorage(GaplessCacheSettings.Keys.convertLosslessToALAC) private var convertLosslessToALAC = false
     @AppStorage(GaplessCacheSettings.Keys.convertOpusToCAF) private var convertOpusToCAF = false
     @State private var showingNeverConfirmation = false
@@ -245,6 +248,33 @@ struct PlaybackSettingsView: View {
                         } else {
                             Text("Downloads every track to this device before playing it, instead of streaming, so transitions have no gap even over a transcoded or slow connection. A track not played again within the limit above is automatically removed.")
                         }
+                    }
+
+                    Section {
+                        Toggle("Track listening history", isOn: $isScrobblingEnabled)
+                            .onChange(of: isScrobblingEnabled) { oldValue, newValue in
+                                if oldValue, !newValue {
+                                    Task { await ScrobbleService.shared.clearAll() }
+                                }
+                            }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text("Scrobble after")
+                                Spacer()
+                                Text("\(Int((scrobbleThreshold * 100).rounded()))%")
+                                    .foregroundStyle(.secondary)
+                            }
+                            Slider(value: $scrobbleThreshold, in: 0...1, step: 0.05)
+                        }
+                        .disabled(!isScrobblingEnabled)
+
+                        Toggle("Scrobble from playlists", isOn: $scrobbleFromPlaylists)
+                            .disabled(!isScrobblingEnabled)
+                    } header: {
+                        Text("Listening history")
+                    } footer: {
+                        Text("Reports what you listen to to your server. A song is scrobbled once this much of it has played — 0% as soon as it starts, 100% only if it plays all the way through. When Scrobble from Playlists is off, songs played from a playlist aren't scrobbled. Scrobbles made while offline or while the server is unreachable are sent, in order, as soon as it's available again.")
                     }
                 }
                 .navigationTitle("Playback")

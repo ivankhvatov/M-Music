@@ -126,6 +126,22 @@ final class PlayerManager: ObservableObject {
     /// mean a disk write twice a second for as long as something is playing.
     private var ticksSincePersist = 0
 
+    /// What's needed to decide when the current track counts as "listened to" for scrobbling —
+    /// see `handleTimeUpdate` and `finishScrobbleTracking()`. `scrobbleListened` only accumulates
+    /// real forward playback (small tick-to-tick deltas), so seeking ahead doesn't count as
+    /// having listened to what was skipped.
+    private var scrobbleSongId: String?
+    /// The tracked song's own length, captured up front — `duration` above is overwritten by the
+    /// engine as soon as a gapless handoff advances it, which can happen before the finish
+    /// callback that needs the *finished* track's length runs.
+    private var scrobbleDuration: TimeInterval = 0
+    private var scrobbleListened: TimeInterval = 0
+    private var scrobbleLastTick: TimeInterval?
+    private var scrobbleStartedAt: Date?
+    private var didScrobbleCurrent = false
+    /// Whether the current queue was started from a playlist — see `play(queue:startAt:fromPlaylist:)`.
+    private var isPlaylistQueue = false
+
     private let starStore = StarStore.shared
 
     /// Bounds how many times `recoverFromPlaybackFailure(error:)` will retry the *same* song
@@ -147,6 +163,15 @@ final class PlayerManager: ObservableObject {
         // own cleanup ran — unconditional, regardless of the current "Keep cached for" setting,
         // since the user may have switched away from "Never" since the last launch.
         Task { await EphemeralGaplessCacheService.shared.cleanupOrphanedFiles() }
+        // Sends any scrobbles left pending from an earlier session, and again whenever the device
+        // comes back online (`ScrobbleService` itself retries on a timer for "online but the
+        // server's down").
+        Task { await ScrobbleService.shared.flush() }
+        NetworkMonitor.shared.$isOnline
+            .removeDuplicates()
+            .filter { $0 }
+            .sink { _ in Task { await ScrobbleService.shared.flush() } }
+            .store(in: &subscriptions)
         // Same reasoning, but for real downloads: `DownloadStore.shared` (which is what actually
         // populates `LocalDownloadIndex`) is otherwise only ever referenced from SwiftUI views —
         // referencing it here is what makes it exist at all in a session that never visits one of
@@ -251,9 +276,14 @@ final class PlayerManager: ObservableObject {
     /// Starts streaming the track at `index` in `newQueue`. Tracks before it become playback
     /// history (reachable via `previous()`); tracks after it play next — e.g. pass an album's
     /// full track list and the tapped track's index to queue the rest of the album.
-    func play(queue newQueue: [Child], startAt index: Int) {
+    ///
+    /// `fromPlaylist` records that the queue came from a playlist, so "Scrobble from playlists"
+    /// can exclude its plays. It describes the queue's origin and stays put through
+    /// `playNext`/`addToQueue`; only starting a new queue replaces it.
+    func play(queue newQueue: [Child], startAt index: Int, fromPlaylist: Bool = false) {
         guard newQueue.indices.contains(index) else { return }
         queue = newQueue
+        isPlaylistQueue = fromPlaylist
         currentIndex = index
         clearGaplessPreload()
         loadCurrentItem(autoplay: true)
@@ -399,6 +429,11 @@ final class PlayerManager: ObservableObject {
         guard let track = currentTrack else {
             isPlaying = false
             return
+        }
+        // A reconnect after a playback failure reloads the same track mid-way (`startTime > 0`)
+        // — that's the same listen, so keep accumulating rather than starting over.
+        if startTime == 0 || scrobbleSongId != track.id.raw {
+            beginScrobbleTracking(for: track)
         }
         if usesEphemeralGaplessCache {
             // Ephemeral mode keeps a cached file for as long as its track is anywhere in the queue
@@ -558,6 +593,7 @@ final class PlayerManager: ObservableObject {
     /// bookkeeping. Otherwise (nothing was ready in time), fall back to a fresh load.
     private func handleTrackFinishedNaturally() {
         guard let currentIndex else { return }
+        finishScrobbleTracking()
         let nextIndex = currentIndex + 1
         guard queue.indices.contains(nextIndex) else {
             finishQueue()
@@ -570,6 +606,7 @@ final class PlayerManager: ObservableObject {
             let track = queue[nextIndex]
             duration = TimeInterval(track.duration ?? 0)
             currentTime = 0
+            beginScrobbleTracking(for: track)
             engine.setReplayGainVolume(replayGainVolume(for: track))
             // The gapless-swap path never re-resolves the URL (it was already handed to the
             // engine back when this was preloaded), so `streamURL(for:)`'s own touch doesn't run
@@ -851,8 +888,62 @@ final class PlayerManager: ObservableObject {
         gaplessPreloadedSource = nil
     }
 
+    // MARK: - Scrobbling
+
+    private func beginScrobbleTracking(for track: Child) {
+        scrobbleSongId = track.id.raw
+        scrobbleDuration = TimeInterval(track.duration ?? 0)
+        scrobbleListened = 0
+        scrobbleLastTick = nil
+        scrobbleStartedAt = nil
+        didScrobbleCurrent = false
+    }
+
+    /// Adds the time since the previous tick to what's been listened to (ignoring seeks, which
+    /// show up as big or negative jumps) and scrobbles as soon as the user's threshold is met.
+    /// A threshold of 100% is never met here — it's only checked once the track actually ends,
+    /// in `finishScrobbleTracking()`.
+    private func trackScrobbleProgress(at time: TimeInterval) {
+        defer { scrobbleLastTick = time }
+        guard scrobbleSongId != nil, isPlaying, !isBuffering else { return }
+        if scrobbleStartedAt == nil { scrobbleStartedAt = Date() }
+        if let last = scrobbleLastTick {
+            let delta = time - last
+            if delta > 0, delta < 2 { scrobbleListened += delta }
+        }
+        let threshold = ScrobbleSettings.threshold
+        guard threshold < 1, !didScrobbleCurrent, ScrobbleSettings.isEnabled else { return }
+        if scrobbleListened >= threshold * scrobbleTrackLength { submitScrobble() }
+    }
+
+    /// Called when the current track plays to its natural end, before the queue advances: this
+    /// is where a 100% threshold is decided, and it also catches a lower threshold whose last
+    /// tick was missed. The 2 s of slack covers tick granularity; a real skip or scrub can't
+    /// hide inside it.
+    private func finishScrobbleTracking() {
+        defer { scrobbleSongId = nil }
+        let length = scrobbleTrackLength
+        guard scrobbleSongId != nil, !didScrobbleCurrent, ScrobbleSettings.isEnabled, length > 0 else { return }
+        let threshold = ScrobbleSettings.threshold
+        let required = threshold >= 1 ? length - 2 : threshold * length
+        if scrobbleListened >= required { submitScrobble() }
+    }
+
+    private var scrobbleTrackLength: TimeInterval {
+        scrobbleDuration > 0 ? scrobbleDuration : duration
+    }
+
+    private func submitScrobble() {
+        guard let songId = scrobbleSongId else { return }
+        didScrobbleCurrent = true
+        if isPlaylistQueue, !ScrobbleSettings.scrobbleFromPlaylists { return }
+        let playedAt = scrobbleStartedAt ?? Date()
+        Task { await ScrobbleService.shared.submit(songId: songId, playedAt: playedAt) }
+    }
+
     private func handleTimeUpdate(_ time: TimeInterval) {
         currentTime = time
+        trackScrobbleProgress(at: time)
         ticksSincePersist += 1
         if ticksSincePersist >= 10 {
             ticksSincePersist = 0
@@ -1001,6 +1092,8 @@ final class PlayerManager: ObservableObject {
         let queue: [Child]
         let currentIndex: Int
         let currentTime: TimeInterval
+        /// Optional so state persisted before this existed still decodes.
+        let isPlaylistQueue: Bool?
     }
 
     private static let persistenceKey = "PlayerManager.state"
@@ -1010,7 +1103,7 @@ final class PlayerManager: ObservableObject {
             UserDefaults.standard.removeObject(forKey: Self.persistenceKey)
             return
         }
-        let state = PersistedState(queue: queue, currentIndex: currentIndex, currentTime: currentTime)
+        let state = PersistedState(queue: queue, currentIndex: currentIndex, currentTime: currentTime, isPlaylistQueue: isPlaylistQueue)
         guard let data = try? JSONEncoder().encode(state) else { return }
         UserDefaults.standard.set(data, forKey: Self.persistenceKey)
     }
@@ -1025,6 +1118,7 @@ final class PlayerManager: ObservableObject {
               state.queue.indices.contains(state.currentIndex)
         else { return }
         queue = state.queue
+        isPlaylistQueue = state.isPlaylistQueue ?? false
         currentIndex = state.currentIndex
         currentTime = state.currentTime
         duration = TimeInterval(state.queue[state.currentIndex].duration ?? 0)

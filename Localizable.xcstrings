@@ -199,6 +199,9 @@
         }
       }
     },
+    "%lld%%" : {
+
+    },
     "1 day" : {
       "localizations" : {
         "de" : {
@@ -1277,6 +1280,22 @@
         }
       }
     },
+    "Listening history" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hörverlauf"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "История прослушиваний"
+          }
+        }
+      }
+    },
     "Live albums" : {
       "localizations" : {
         "ru" : {
@@ -1825,6 +1844,54 @@
         }
       }
     },
+    "Reports what you listen to to your server. A song is scrobbled once this much of it has played — 0% as soon as it starts, 100% only if it plays all the way through. When Scrobble from Playlists is off, songs played from a playlist aren't scrobbled. Scrobbles made while offline or while the server is unreachable are sent, in order, as soon as it's available again." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Meldet deinem Server, was du hörst. Ein Titel wird gescrobbelt, sobald der eingestellte Anteil davon gespielt wurde – 0 % sofort beim Start, 100 % nur, wenn er komplett durchgespielt wird. Ist „Aus Playlists scrobbeln“ ausgeschaltet, werden Titel aus Playlists nicht gescrobbelt. Scrobbles, die offline oder bei nicht erreichbarem Server entstehen, werden der Reihe nach gesendet, sobald der Server wieder verfügbar ist."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сообщает вашему серверу, что вы слушаете. Композиция скробблится, когда проиграна заданная её часть: 0% — сразу при начале воспроизведения, 100% — только если она прослушана целиком. Если выключено «Скробблить из плейлистов», композиции из плейлистов не скробблятся. Скробблы, созданные без сети или при недоступном сервере, отправляются по порядку, как только сервер снова станет доступен."
+          }
+        }
+      }
+    },
+    "Scrobble after" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scrobbeln nach"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Скробблить после"
+          }
+        }
+      }
+    },
+    "Scrobble from playlists" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aus Playlists scrobbeln"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Скробблить из плейлистов"
+          }
+        }
+      }
+    },
     "Search" : {
       "localizations" : {
         "de" : {
@@ -2047,6 +2114,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Трек"
+          }
+        }
+      }
+    },
+    "Track listening history" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hörverlauf aufzeichnen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Записывать историю прослушиваний"
           }
         }
       }
