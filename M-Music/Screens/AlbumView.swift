@@ -226,7 +226,7 @@ struct AlbumView: View {
     }
 
     /// Matches the leading edge of a track row's title: the row's own horizontal padding plus the track number's frame width and its spacing to the title.
-    private let trackTitleLeadingInset: CGFloat = 20 + 12
+    private let trackTitleLeadingInset: CGFloat = 4 + 20 + 12
 
     @ViewBuilder
     func trackListSection() -> some View {
@@ -589,7 +589,7 @@ private struct TrackLeadingGlyph: View {
                 PlayingIndicator(isPlaying: player.isPlaying)
             } else {
                 Text(track.track.map(String.init) ?? "")
-                    .font(.system(size: 16))
+                    .font(.callout)
                     .foregroundColor(.secondary)
             }
         }
@@ -612,12 +612,13 @@ private struct TrackRow: View {
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
     var body: some View {
-        HStack(spacing: 10) {
-            HStack(spacing: 8) {
+        HStack(spacing: 12) {
+            HStack(spacing: 12) {
                 TrackLeadingGlyph(track: track)
 
                 VStack(alignment: .leading) {
                     Text(track.title)
+                        .font(.callout)
 
                     if let trackArtist = track.artist, trackArtist != albumArtist {
                         Text(trackArtist)
