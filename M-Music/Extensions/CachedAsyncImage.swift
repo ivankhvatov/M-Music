@@ -240,17 +240,6 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     /// survives across re-inits of this struct, so checking `uiImage == nil` alone would leave
     /// the previous track's artwork on screen forever once one image had loaded.
     @State private var loadedURL: URL?
-    /// Whether `onLoad` has already fired for `loadedURL`. `init` runs on *every* reconstruction
-    /// of this view value — which happens whenever any ancestor re-renders, not just when a
-    /// genuinely new image loads — so calling `onLoad` unconditionally from `init` whenever a
-    /// cache hit is available (the previous approach) re-fired it repeatedly for the same image
-    /// over a view's lifetime. A caller that does real work in `onLoad` (e.g. `AlbumView`
-    /// re-deriving its background color) ended up repeating that work every time, sometimes with
-    /// enough of these piled up and competing for background threads that one would finish with
-    /// a noticeable, unpredictable delay. This flag — real `@State`, so it survives re-inits
-    /// unlike a plain `init`-local check — lets `body`'s `.task(id: url)` be the single place
-    /// that decides whether `onLoad` is actually owed, exactly once per distinct load.
-    @State private var hasNotifiedLoad = false
 
     init(
         url: URL?,
@@ -265,6 +254,7 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
         let cached = url.flatMap(ImageCache.shared.image(for:))
         _uiImage = State(initialValue: cached)
         _loadedURL = State(initialValue: cached != nil ? url : nil)
+        if let cached { onLoad?(cached) }
     }
 
     var body: some View {
@@ -284,32 +274,22 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
         guard let url else {
             uiImage = nil
             loadedURL = nil
-            hasNotifiedLoad = false
             return
         }
-        guard loadedURL == url else {
-            guard let cached = ImageCache.shared.image(for: url) else {
-                guard let image = await ImageCache.shared.load(url) else { return }
-                await MainActor.run {
-                    guard self.url == url else { return }
-                    uiImage = image
-                    loadedURL = url
-                    hasNotifiedLoad = true
-                    onLoad?(image)
-                }
-                return
-            }
+        guard loadedURL != url else { return }
+        if let cached = ImageCache.shared.image(for: url) {
             uiImage = cached
             loadedURL = url
-            hasNotifiedLoad = true
             onLoad?(cached)
             return
         }
-        // Already loaded — possibly via `init`'s synchronous cache check, which can't call
-        // `onLoad` itself (see `hasNotifiedLoad`'s doc comment). Notify exactly once for it.
-        if !hasNotifiedLoad, let uiImage {
-            hasNotifiedLoad = true
-            onLoad?(uiImage)
+        guard let image = await ImageCache.shared.load(url) else { return }
+        await MainActor.run {
+            if self.url == url {
+                uiImage = image
+                loadedURL = url
+                onLoad?(image)
+            }
         }
     }
 }

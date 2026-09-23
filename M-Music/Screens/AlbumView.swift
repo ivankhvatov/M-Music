@@ -86,26 +86,23 @@ struct AlbumView: View {
     }
 
     var albumList: some View {
-        List {
-            VStack(alignment: .leading) {
+        ScrollView {
+            VStack (spacing: 0) {
                 albumHeader()
+                    .padding(.top, 16)
+                    .padding(.bottom, 26)
+
+                trackListSection()
+
+                albumFooter()
+                    .padding(.top, 16)
+                    .padding(.bottom, 12)
             }
-            .listRowSeparator(.hidden)
-            .listRowBackground(Color.clear)
-
-            trackListSection()
-                .listRowBackground(Color.clear)
-
-            albumFooter()
-                .listRowSeparator(.hidden)
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 16, trailing: 16))
+            .padding(.horizontal, 16)
 
             relatedAlbumsSection()
-                .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(darkenedRelatedSectionBackground)
                 .padding(.bottom, 1000)
+                .background(darkenedRelatedSectionBackground)
         }
         .listStyle(.plain)
         .background(darkenedBackgroundColor)
@@ -230,7 +227,7 @@ struct AlbumView: View {
     }
 
     /// Matches the leading edge of a track row's title: the row's own horizontal padding plus the track number's frame width and its spacing to the title.
-    private let trackTitleLeadingInset: CGFloat = 4 + 20 + 12
+    private let trackTitleLeadingInset: CGFloat = 20 + 12
 
     @ViewBuilder
     func trackListSection() -> some View {
@@ -398,11 +395,7 @@ struct AlbumView: View {
             Text(trackCountAndDuration)
 
             if let recordLabelText {
-                if let yearText = album.year.map(String.init) {
-                    Text("Ⓟ " + yearText + " " + recordLabelText)
-                } else {
-                    Text("Ⓟ " + recordLabelText)
-                }
+                Text("Ⓟ " + recordLabelText)
             }
         }
         .font(.subheadline)
@@ -597,7 +590,7 @@ private struct TrackLeadingGlyph: View {
                 PlayingIndicator(isPlaying: player.isPlaying)
             } else {
                 Text(track.track.map(String.init) ?? "")
-                    .font(.callout)
+                    .font(.system(size: 16))
                     .foregroundColor(.secondary)
             }
         }
@@ -620,13 +613,12 @@ private struct TrackRow: View {
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
     var body: some View {
-        HStack(spacing: 12) {
-            HStack(spacing: 12) {
+        HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 TrackLeadingGlyph(track: track)
 
                 VStack(alignment: .leading) {
                     Text(track.title)
-                        .font(.callout)
 
                     if let trackArtist = track.artist, trackArtist != albumArtist {
                         Text(trackArtist)
