@@ -187,7 +187,7 @@ struct PlaybackSettingsView: View {
                                 }
                             }
                         } message: {
-                            Text("Choosing Never deletes every cached song now. From then on, only the upcoming track is cached, temporarily.")
+                            Text("Choosing Never deletes every cached song now. From then on, the upcoming track is cached only while it's in the queue.")
                         }
 
                         if gaplessCacheRetention != .never {
@@ -234,7 +234,7 @@ struct PlaybackSettingsView: View {
                         Text("Gapless Caching")
                     } footer: {
                         if gaplessCacheRetention == .never {
-                            Text("The upcoming track is cached only long enough to play it gaplessly, and is deleted as soon as it's no longer the current or next track — nothing is kept.")
+                            Text("The upcoming track is cached so it can play gaplessly, and stays cached only while it's in the queue — once it's removed from the queue, it's deleted.")
                         } else {
                             Text("Downloads every track to this device before playing it, instead of streaming, so transitions have no gap even over a transcoded or slow connection. A track not played again within the limit above is automatically removed.")
                         }

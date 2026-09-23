@@ -2,8 +2,8 @@ import Foundation
 
 /// The "Keep cached for: Never" backend for the upcoming-track gapless cache — modeled directly on
 /// `GaplessCacheService` (same single-flight download dedup, same validation), but never persisted:
-/// writes to the OS temp directory instead of `Application Support`, keeps no database, and holds
-/// at most the current and next track's files at any moment, deleting anything else immediately.
+/// writes to the OS temp directory instead of `Application Support`, keeps no database, and deletes
+/// a track's file only once that track is no longer anywhere in the queue.
 ///
 /// Ported from Shelv's `ShelvCore/Services/StreamCacheService.swift`, which uses the same
 /// temp-file-per-song approach for its own upcoming-track pre-cache.
@@ -57,9 +57,17 @@ actor EphemeralGaplessCacheService {
         return task
     }
 
-    /// Cancels an in-flight download (if any) and deletes `songId`'s temp file (if any) — unlike
-    /// `GaplessCacheService.cancel`, which leaves an already-completed download alone, ephemeral
-    /// mode wants a superseded entry gone outright.
+    /// Stops `songId`'s download if it's still in flight; a completed file is left alone, since its
+    /// track may well still be in the queue — mirrors `GaplessCacheService.cancel`.
+    func cancelInFlight(songId: String) {
+        guard let task = activeTasks[songId] else { return }
+        task.cancel()
+        activeTasks.removeValue(forKey: songId)
+        Task { @MainActor in GaplessCacheStatus.shared.remove(songId) }
+    }
+
+    /// Cancels an in-flight download (if any) *and* deletes `songId`'s temp file (if any) — for
+    /// when the track has left the queue or been superseded by a real download.
     func cancel(songId: String) {
         if let task = activeTasks[songId] {
             task.cancel()
@@ -78,8 +86,8 @@ actor EphemeralGaplessCacheService {
         cancel(songId: songId)
     }
 
-    /// Deletes every written file except `keepIds` — called once a new current track is resolved,
-    /// so ephemeral mode never holds more than "current + next" on disk at once.
+    /// Deletes every written file except `keepIds` — called with the ids of everything still in
+    /// the queue, so a file lives exactly as long as its track does.
     func prune(keeping keepIds: Set<String>) {
         for songId in writtenFiles.keys where !keepIds.contains(songId) {
             cancel(songId: songId)
@@ -103,7 +111,7 @@ actor EphemeralGaplessCacheService {
                 fallbackFileExtension: fallbackExtension
             )
             let ext = (validation.fileExtension ?? fallbackExtension).pathSafeFileExtension()
-            let destination = Self.tempURL(songId: songId, ext: ext)
+            var destination = Self.tempURL(songId: songId, ext: ext)
             try? FileManager.default.removeItem(at: destination)
             try FileManager.default.moveItem(at: tmpURL, to: destination)
             writtenFiles[songId] = destination

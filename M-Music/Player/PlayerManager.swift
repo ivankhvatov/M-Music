@@ -116,8 +116,8 @@ final class PlayerManager: ObservableObject {
     private var pendingCacheSongId: String?
 
     /// Whether "Keep cached for" is set to "Never" — routes the upcoming/current-track gapless
-    /// cache through `EphemeralGaplessCacheService` (a temp file, deleted once it's no longer the
-    /// current or next track) instead of `GaplessCacheService`'s persistent, retention-bounded
+    /// cache through `EphemeralGaplessCacheService` (a temp file, deleted once its track has left
+    /// the queue) instead of `GaplessCacheService`'s persistent, retention-bounded
     /// `Application Support` store. Both publish into the same `GaplessCacheStatus`, so only the
     /// call sites that *write* to a backend need this — reads (`entry(for:)`) are unchanged.
     private var usesEphemeralGaplessCache: Bool { GaplessCacheSettings.retention == .never }
@@ -401,10 +401,11 @@ final class PlayerManager: ObservableObject {
             return
         }
         if usesEphemeralGaplessCache {
-            // Ephemeral mode never keeps more than "current + next" on disk — prune anything else
-            // (e.g. the track we just moved past) now that this one's confirmed current.
-            let nextId = currentIndex.flatMap { queue.indices.contains($0 + 1) ? queue[$0 + 1].id.raw : nil }
-            let keepIds = Set([track.id.raw, nextId].compactMap { $0 })
+            // Ephemeral mode keeps a cached file for as long as its track is anywhere in the queue
+            // (before or after the current one, so going back or replaying doesn't re-download) —
+            // only tracks that have left the queue, i.e. after `play(queue:startAt:)` replaced it,
+            // get pruned.
+            let keepIds = Set(queue.map { $0.id.raw })
             Task { await EphemeralGaplessCacheService.shared.prune(keeping: keepIds) }
         }
         if let localURL = downloadURL(for: track) {
@@ -496,7 +497,7 @@ final class PlayerManager: ObservableObject {
         }
         if let stale = pendingCacheSongId, stale != songId {
             if usesEphemeralGaplessCache {
-                Task { await EphemeralGaplessCacheService.shared.cancel(songId: stale) }
+                Task { await EphemeralGaplessCacheService.shared.cancelInFlight(songId: stale) }
             } else {
                 Task { await GaplessCacheService.shared.cancel(songId: stale) }
             }
@@ -818,7 +819,7 @@ final class PlayerManager: ObservableObject {
         let ephemeral = usesEphemeralGaplessCache
         if let stale = gaplessCachingSongId {
             if ephemeral {
-                Task { await EphemeralGaplessCacheService.shared.cancel(songId: stale) }
+                Task { await EphemeralGaplessCacheService.shared.cancelInFlight(songId: stale) }
             } else {
                 Task { await GaplessCacheService.shared.cancel(songId: stale) }
             }
