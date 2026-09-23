@@ -116,7 +116,11 @@ struct AlbumView: View {
         // it in place for layout/background purposes — so scrolling still physically stops right
         // where the last carousel ends, verified directly (built a throwaway harness reproducing
         // this exact padding-vs-margin shape and confirmed further swipes don't move it at all).
-        .contentMargins(.bottom, -10000, for: .scrollContent)
+        .contentMargins(
+            .bottom,
+            (otherVersions.isEmpty && moreByArtist.isEmpty) ? 0 : -10000,
+            for: .scrollContent
+        )
         .toolbar {
             downloadButton
             moreButton
@@ -394,7 +398,11 @@ struct AlbumView: View {
             Text(trackCountAndDuration)
 
             if let recordLabelText {
-                Text("Ⓟ " + recordLabelText)
+                if let yearText = album.year.map(String.init) {
+                    Text("Ⓟ " + yearText + " " + recordLabelText)
+                } else {
+                    Text("Ⓟ " + recordLabelText)
+                }
             }
         }
         .font(.subheadline)
