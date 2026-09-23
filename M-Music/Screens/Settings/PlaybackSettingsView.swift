@@ -28,6 +28,23 @@ struct PlaybackSettingsView: View {
     @State private var cachedRecords: [GaplessCacheRecord] = []
     @State private var isCachedListExpanded = false
     @State private var showingClearCacheConfirmation = false
+    @State private var showingNeverConfirmation = false
+
+    /// Picking "Never" wipes the persistent cache, so when there's something to lose it's held
+    /// back behind a confirmation instead of applying — the picker stays on its current value
+    /// unless the user confirms.
+    private var retentionSelection: Binding<GaplessCacheRetention> {
+        Binding(
+            get: { gaplessCacheRetention },
+            set: { newValue in
+                if newValue == .never, gaplessCacheRetention != .never, !cachedRecords.isEmpty {
+                    showingNeverConfirmation = true
+                } else {
+                    gaplessCacheRetention = newValue
+                }
+            }
+        )
+    }
 
     private let gainRange: ClosedRange<Double> = -15...15
 
@@ -137,64 +154,90 @@ struct PlaybackSettingsView: View {
                     Section {
                         Toggle("Cache upcoming track", isOn: $isGaplessCacheEnabled)
 
-                        Picker("Cache size limit", selection: $gaplessCacheSizeLimit) {
-                            ForEach(GaplessCacheSizeLimit.allCases) { option in
-                                Text(option.displayName).tag(option)
+                        if gaplessCacheRetention != .never {
+                            Picker("Cache size limit", selection: $gaplessCacheSizeLimit) {
+                                ForEach(GaplessCacheSizeLimit.allCases) { option in
+                                    Text(option.displayName).tag(option)
+                                }
                             }
+                            .pickerStyle(.menu)
+                            .disabled(!isGaplessCacheEnabled)
                         }
-                        .pickerStyle(.menu)
-                        .disabled(!isGaplessCacheEnabled)
 
-                        Picker("Keep cached for", selection: $gaplessCacheRetention) {
+                        Picker("Keep cached for", selection: retentionSelection) {
                             ForEach(GaplessCacheRetention.allCases) { option in
                                 Text(option.displayName).tag(option)
                             }
                         }
                         .pickerStyle(.menu)
                         .disabled(!isGaplessCacheEnabled)
-
-                        DisclosureGroup(isExpanded: $isCachedListExpanded) {
-                            if cachedAlbumGroups.isEmpty {
-                                Text("No cached songs.")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            } else {
-                                ForEach(cachedAlbumGroups) { group in
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(group.title)
-                                            .font(.subheadline.weight(.semibold))
-                                        ForEach(group.songs) { song in
-                                            HStack {
-                                                Text(song.title)
-                                                    .font(.subheadline)
-                                                    .foregroundStyle(.secondary)
-                                                Spacer()
-                                                Text(ByteCountFormatter.string(fromByteCount: song.byteSize, countStyle: .file))
-                                                    .font(.caption)
-                                                    .foregroundStyle(.secondary)
-                                            }
-                                        }
-                                    }
-                                    .padding(.vertical, 2)
+                        .onChange(of: gaplessCacheRetention) { oldValue, newValue in
+                            if oldValue == .never, newValue != .never {
+                                Task { await EphemeralGaplessCacheService.shared.clearAll() }
+                            }
+                        }
+                        .confirmationDialog(
+                            "Delete all cached songs?", isPresented: $showingNeverConfirmation, titleVisibility: .visible
+                        ) {
+                            Button("Delete Cache and Stop Keeping Songs", role: .destructive) {
+                                gaplessCacheRetention = .never
+                                Task {
+                                    await GaplessCacheService.shared.clearAll()
+                                    await reloadGaplessCacheInfo()
                                 }
                             }
-                        } label: {
-                            HStack {
-                                Text("Currently cached")
-                                Spacer()
-                                Text(ByteCountFormatter.string(fromByteCount: gaplessCacheUsageBytes, countStyle: .file))
-                                    .foregroundStyle(.secondary)
-                            }
+                        } message: {
+                            Text("Choosing Never deletes every cached song now. From then on, only the upcoming track is cached, temporarily.")
                         }
 
-                        Button("Clear Cache", role: .destructive) {
-                            showingClearCacheConfirmation = true
+                        if gaplessCacheRetention != .never {
+                            DisclosureGroup(isExpanded: $isCachedListExpanded) {
+                                if cachedAlbumGroups.isEmpty {
+                                    Text("No cached songs.")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    ForEach(cachedAlbumGroups) { group in
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(group.title)
+                                                .font(.subheadline.weight(.semibold))
+                                            ForEach(group.songs) { song in
+                                                HStack {
+                                                    Text(song.title)
+                                                        .font(.subheadline)
+                                                        .foregroundStyle(.secondary)
+                                                    Spacer()
+                                                    Text(ByteCountFormatter.string(fromByteCount: song.byteSize, countStyle: .file))
+                                                        .font(.caption)
+                                                        .foregroundStyle(.secondary)
+                                                }
+                                            }
+                                        }
+                                        .padding(.vertical, 2)
+                                    }
+                                }
+                            } label: {
+                                HStack {
+                                    Text("Currently cached")
+                                    Spacer()
+                                    Text(ByteCountFormatter.string(fromByteCount: gaplessCacheUsageBytes, countStyle: .file))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+
+                            Button("Clear Cache", role: .destructive) {
+                                showingClearCacheConfirmation = true
+                            }
+                            .disabled(cachedRecords.isEmpty)
                         }
-                        .disabled(cachedRecords.isEmpty)
                     } header: {
                         Text("Gapless Caching")
                     } footer: {
-                        Text("Downloads every track to this device before playing it, instead of streaming, so transitions have no gap even over a transcoded or slow connection. A track not played again within the limit above is automatically removed.")
+                        if gaplessCacheRetention == .never {
+                            Text("The upcoming track is cached only long enough to play it gaplessly, and is deleted as soon as it's no longer the current or next track — nothing is kept.")
+                        } else {
+                            Text("Downloads every track to this device before playing it, instead of streaming, so transitions have no gap even over a transcoded or slow connection. A track not played again within the limit above is automatically removed.")
+                        }
                     }
                 }
                 .navigationTitle("Playback")

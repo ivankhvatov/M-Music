@@ -25,8 +25,12 @@ enum GaplessCacheSizeLimit: Int, CaseIterable, Identifiable {
 }
 
 /// How long a cached track is kept without being played again before `GaplessCacheService` treats
-/// it as stale and evicts it.
+/// it as stale and evicts it. `.never` opts out of persistent caching entirely — the upcoming
+/// track is still cached (if "Cache upcoming track" is on), but via `EphemeralGaplessCacheService`,
+/// a temp-file-backed store that never outlives being the current/next track, instead of
+/// `GaplessCacheService`'s `Application Support`-backed, retention/size-bounded one.
 enum GaplessCacheRetention: Int, CaseIterable, Identifiable {
+    case never = 0
     case day1 = 1
     case day3 = 3
     case day7 = 7
@@ -36,6 +40,7 @@ enum GaplessCacheRetention: Int, CaseIterable, Identifiable {
 
     var displayName: LocalizedStringKey {
         switch self {
+        case .never: return "Never"
         case .day1: return "1 day"
         case .day3: return "3 days"
         case .day7: return "7 days"

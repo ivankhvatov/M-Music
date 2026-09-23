@@ -115,6 +115,13 @@ final class PlayerManager: ObservableObject {
     /// anymore; cleared once it lands (or is superseded).
     private var pendingCacheSongId: String?
 
+    /// Whether "Keep cached for" is set to "Never" — routes the upcoming/current-track gapless
+    /// cache through `EphemeralGaplessCacheService` (a temp file, deleted once it's no longer the
+    /// current or next track) instead of `GaplessCacheService`'s persistent, retention-bounded
+    /// `Application Support` store. Both publish into the same `GaplessCacheStatus`, so only the
+    /// call sites that *write* to a backend need this — reads (`entry(for:)`) are unchanged.
+    private var usesEphemeralGaplessCache: Bool { GaplessCacheSettings.retention == .never }
+
     /// Throttles how often playback position is written to disk — every time-observer tick would
     /// mean a disk write twice a second for as long as something is playing.
     private var ticksSincePersist = 0
@@ -136,6 +143,10 @@ final class PlayerManager: ObservableObject {
         // very first time it's tapped, rather than only after some other download happens to run
         // first and trigger this as a side effect — see `GaplessCacheService.preload()`.
         Task { await GaplessCacheService.shared.preload() }
+        // Sweeps leftover ephemeral temp files from a previous launch that was killed before its
+        // own cleanup ran — unconditional, regardless of the current "Keep cached for" setting,
+        // since the user may have switched away from "Never" since the last launch.
+        Task { await EphemeralGaplessCacheService.shared.cleanupOrphanedFiles() }
         // Same reasoning, but for real downloads: `DownloadStore.shared` (which is what actually
         // populates `LocalDownloadIndex`) is otherwise only ever referenced from SwiftUI views —
         // referencing it here is what makes it exist at all in a session that never visits one of
@@ -345,6 +356,7 @@ final class PlayerManager: ObservableObject {
             // Both are cheap once already finished elsewhere (idempotent, guarded/re-readable).
             Task {
                 await GaplessCacheService.shared.preload()
+                await EphemeralGaplessCacheService.shared.cleanupOrphanedFiles()
                 await DownloadStore.shared.reload()
                 loadCurrentItem(autoplay: true, startTime: currentTime)
             }
@@ -388,6 +400,13 @@ final class PlayerManager: ObservableObject {
             isPlaying = false
             return
         }
+        if usesEphemeralGaplessCache {
+            // Ephemeral mode never keeps more than "current + next" on disk — prune anything else
+            // (e.g. the track we just moved past) now that this one's confirmed current.
+            let nextId = currentIndex.flatMap { queue.indices.contains($0 + 1) ? queue[$0 + 1].id.raw : nil }
+            let keepIds = Set([track.id.raw, nextId].compactMap { $0 })
+            Task { await EphemeralGaplessCacheService.shared.prune(keeping: keepIds) }
+        }
         if let localURL = downloadURL(for: track) {
             pendingCacheSongId = nil
             isBuffering = false
@@ -398,7 +417,11 @@ final class PlayerManager: ObservableObject {
             if let entry = GaplessCacheStatus.shared.entry(for: track.id.raw), isGaplessCacheEntry(entry, validFor: track) {
                 pendingCacheSongId = nil
                 isBuffering = false
-                Task { await GaplessCacheService.shared.touch(songId: track.id.raw) }
+                if usesEphemeralGaplessCache {
+                    Task { await EphemeralGaplessCacheService.shared.touch(songId: track.id.raw) }
+                } else {
+                    Task { await GaplessCacheService.shared.touch(songId: track.id.raw) }
+                }
                 startPlayback(for: track, url: entry.url, source: .gaplessCache, autoplay: autoplay, startTime: startTime)
                 return
             }
@@ -472,7 +495,11 @@ final class PlayerManager: ObservableObject {
             return
         }
         if let stale = pendingCacheSongId, stale != songId {
-            Task { await GaplessCacheService.shared.cancel(songId: stale) }
+            if usesEphemeralGaplessCache {
+                Task { await EphemeralGaplessCacheService.shared.cancel(songId: stale) }
+            } else {
+                Task { await GaplessCacheService.shared.cancel(songId: stale) }
+            }
         }
         pendingCacheSongId = songId
         isBuffering = true
@@ -489,10 +516,15 @@ final class PlayerManager: ObservableObject {
         let format = isTranscode ? TranscodingSettings.format.rawValue : "raw"
         let bitrate = isTranscode ? TranscodingSettings.bitrate.rawValue : 0
         let fallbackExtension = isTranscode ? TranscodingSettings.format.rawValue : (track.suffix ?? "mp3")
+        let ephemeral = usesEphemeralGaplessCache
         Task {
-            let cachedURL = await GaplessCacheService.shared.cacheAndWait(
-                song: track, url: liveURL, format: format, bitrate: bitrate, fallbackExtension: fallbackExtension
-            )
+            let cachedURL = ephemeral
+                ? await EphemeralGaplessCacheService.shared.cacheAndWait(
+                    song: track, url: liveURL, format: format, bitrate: bitrate, fallbackExtension: fallbackExtension
+                  )
+                : await GaplessCacheService.shared.cacheAndWait(
+                    song: track, url: liveURL, format: format, bitrate: bitrate, fallbackExtension: fallbackExtension
+                  )
             guard pendingCacheSongId == songId else { return }
             pendingCacheSongId = nil
             isBuffering = false
@@ -542,7 +574,11 @@ final class PlayerManager: ObservableObject {
             // engine back when this was preloaded), so `streamURL(for:)`'s own touch doesn't run
             // for this case — do it here instead, for whichever track just became current.
             if let entry = GaplessCacheStatus.shared.entry(for: track.id.raw), isGaplessCacheEntry(entry, validFor: track) {
-                Task { await GaplessCacheService.shared.touch(songId: track.id.raw) }
+                if usesEphemeralGaplessCache {
+                    Task { await EphemeralGaplessCacheService.shared.touch(songId: track.id.raw) }
+                } else {
+                    Task { await GaplessCacheService.shared.touch(songId: track.id.raw) }
+                }
             }
             playbackSource = gaplessPreloadedSource
             gaplessPreloadedSource = nil
@@ -635,7 +671,11 @@ final class PlayerManager: ObservableObject {
         }
         if GaplessCacheSettings.isEnabled,
            let entry = GaplessCacheStatus.shared.entry(for: track.id.raw), isGaplessCacheEntry(entry, validFor: track) {
-            Task { await GaplessCacheService.shared.touch(songId: track.id.raw) }
+            if usesEphemeralGaplessCache {
+                Task { await EphemeralGaplessCacheService.shared.touch(songId: track.id.raw) }
+            } else {
+                Task { await GaplessCacheService.shared.touch(songId: track.id.raw) }
+            }
             return entry.url
         }
         if let cachedURL = StreamCacheStatus.shared.url(for: track.id.raw) {
@@ -757,7 +797,11 @@ final class PlayerManager: ObservableObject {
             // This track may have started (or even finished) gapless-caching before its real
             // download landed — now that it's confirmed downloaded, that copy is redundant.
             if gaplessCachingSongId == nextTrack.id.raw { gaplessCachingSongId = nil }
-            Task { await GaplessCacheService.shared.removeIfPresent(songId: nextTrack.id.raw) }
+            if usesEphemeralGaplessCache {
+                Task { await EphemeralGaplessCacheService.shared.removeIfPresent(songId: nextTrack.id.raw) }
+            } else {
+                Task { await GaplessCacheService.shared.removeIfPresent(songId: nextTrack.id.raw) }
+            }
             guard engine.preloadForGapless(url: downloadFileURL) else { return }
             gaplessPreloadedIndex = currentIndex.map { $0 + 1 }
             gaplessPreloadedSource = .downloaded
@@ -771,8 +815,13 @@ final class PlayerManager: ObservableObject {
         }
 
         guard gaplessCachingSongId != nextTrack.id.raw else { return }
+        let ephemeral = usesEphemeralGaplessCache
         if let stale = gaplessCachingSongId {
-            Task { await GaplessCacheService.shared.cancel(songId: stale) }
+            if ephemeral {
+                Task { await EphemeralGaplessCacheService.shared.cancel(songId: stale) }
+            } else {
+                Task { await GaplessCacheService.shared.cancel(songId: stale) }
+            }
         }
         guard let url = try? liveStreamURL(for: nextTrack) else {
             gaplessCachingSongId = nil
@@ -784,9 +833,15 @@ final class PlayerManager: ObservableObject {
         let fallbackExtension = isTranscode ? TranscodingSettings.format.rawValue : (nextTrack.suffix ?? "mp3")
         gaplessCachingSongId = nextTrack.id.raw
         Task {
-            await GaplessCacheService.shared.enqueue(
-                song: nextTrack, url: url, format: format, bitrate: bitrate, fallbackExtension: fallbackExtension
-            )
+            if ephemeral {
+                await EphemeralGaplessCacheService.shared.enqueue(
+                    song: nextTrack, url: url, format: format, bitrate: bitrate, fallbackExtension: fallbackExtension
+                )
+            } else {
+                await GaplessCacheService.shared.enqueue(
+                    song: nextTrack, url: url, format: format, bitrate: bitrate, fallbackExtension: fallbackExtension
+                )
+            }
         }
     }
 

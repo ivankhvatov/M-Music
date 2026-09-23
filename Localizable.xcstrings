@@ -370,7 +370,7 @@
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "200 МБ"
+            "value" : "500 МБ"
           }
         }
       }
@@ -640,6 +640,9 @@
         }
       }
     },
+    "Choosing Never deletes every cached song now. From then on, only the upcoming track is cached, temporarily." : {
+
+    },
     "Clear Cache" : {
       "localizations" : {
         "ru" : {
@@ -760,6 +763,9 @@
           }
         }
       }
+    },
+    "Delete Cache and Stop Keeping Songs" : {
+
     },
     "Delete the album from this device?" : {
       "localizations" : {
@@ -1281,6 +1287,9 @@
           }
         }
       }
+    },
+    "Never" : {
+
     },
     "No albums found." : {
       "localizations" : {
@@ -1825,6 +1834,9 @@
           }
         }
       }
+    },
+    "The upcoming track is cached only long enough to play it gaplessly, and is deleted as soon as it's no longer the current or next track — nothing is kept." : {
+
     },
     "Title" : {
       "localizations" : {
