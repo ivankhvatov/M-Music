@@ -226,8 +226,12 @@ final class PlayerManager: ObservableObject {
             guard wasPlayingBeforeInterruption,
                   AVAudioSession.InterruptionOptions(rawValue: optionsValue).contains(.shouldResume)
             else { return }
-            try? AVAudioSession.sharedInstance().setActive(true)
-            resume()
+            // Same reasoning as `configureAudioSessionIfNeeded`: move the blocking reactivation
+            // off the main thread, and only resume once it's actually done.
+            Task.detached(priority: .userInitiated) { [weak self] in
+                try? AVAudioSession.sharedInstance().setActive(true)
+                await self?.resume()
+            }
         @unknown default:
             break
         }
@@ -817,11 +821,20 @@ final class PlayerManager: ObservableObject {
         artworkURL = try? client.coverArtURL(forId: artId)
     }
 
+    /// Activating an audio session is a synchronous, "relatively time consuming" call by Apple's
+    /// own documentation, which warns against making it from a thread where blocking is a
+    /// problem — the main thread. `PlayerManager` is `@MainActor`, so doing this inline here
+    /// would do exactly that; `Task.detached` moves the actual system call off the main thread.
+    /// Fire-and-forget is safe: this only ever runs once per app launch (guarded below), well
+    /// before the engine actually needs to render anything from `loadCurrentItem`'s remaining,
+    /// non-trivial (URL resolution, engine setup) work.
     private func configureAudioSessionIfNeeded() {
         guard !didConfigureAudioSession else { return }
         didConfigureAudioSession = true
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
-        try? AVAudioSession.sharedInstance().setActive(true)
+        Task.detached(priority: .userInitiated) {
+            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+            try? AVAudioSession.sharedInstance().setActive(true)
+        }
     }
 
     // MARK: - Now Playing / remote control (lock screen, Control Center)
