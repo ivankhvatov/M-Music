@@ -243,7 +243,7 @@ private struct ArtistRow: View {
 
     @State private var artworkURL: URL?
 
-    private let rowArtworkSize: CGFloat = 54
+    private let rowArtworkSize: CGFloat = 48
 
     @ObservedObject private var downloads = DownloadStore.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
@@ -266,7 +266,7 @@ private struct ArtistRow: View {
             .clipShape(Circle())
 
             Text(artist.name)
-                .font(.title3)
+                .font(.body)
         }
         .dimmedIfUnavailable(networkMonitor.isOnline || downloads.hasDownloadedSong(byArtist: artist.name))
         .task(id: artist.id) {
