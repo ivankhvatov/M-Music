@@ -29,7 +29,6 @@ struct AlbumView: View {
 
     @State private var otherVersions: [AlbumID3] = []
     @State private var moreByArtist: [AlbumID3] = []
-    @State private var hasRelatedAlbums: Bool = false
 
     @AppStorage("library.groupReleaseVersions") private var groupReleaseVersionsEnabled = false
     @AppStorage(OfflineModeSettings.Keys.showUnavailableInAlbums) private var showUnavailableInAlbums = true
@@ -56,18 +55,6 @@ struct AlbumView: View {
     /// placeholder for a frame while an async task first goes and computes the URL.
     @State private var artworkURL: URL?
 
-    /// How far the list is scrolled from its top edge — drives a smooth blend between the artwork
-    /// color and the related-albums section's darker shade as the top of the list nears the
-    /// translucent nav bar. A plain `let`-held reference type rather than `@State` on this view:
-    /// `.onScrollGeometryChange` fires on every scroll frame, and a `@State` write re-evaluates
-    /// this whole view's `body` (rebuilding the entire tracklist) on every one of them. Scoping it
-    /// to `ScrollAwareListBackdrop` instead — the only thing that actually needs to react to it —
-    /// means scrolling now re-renders just that one small view. Not a singleton like
-    /// `PlayerManager`/`StarStore`: a fresh instance per `AlbumView` init. If SwiftUI ever re-runs
-    /// `init` while preserving this view's identity, `fromTop` would reset to 0 for one frame;
-    /// harmless, since `.onScrollGeometryChange` immediately reports the live offset again before
-    /// that's visible.
-    private let scrollOffsetTracker = ScrollOffsetTracker()
     @State private var showingRemoveDownloadConfirmation = false
 
     init(album: AlbumID3, zoomNamespace: Namespace.ID? = nil) {
@@ -104,45 +91,36 @@ struct AlbumView: View {
                 albumHeader()
             }
             .listRowSeparator(.hidden)
-            .listRowBackground(darkenedBackgroundColor)
+            .listRowBackground(Color.clear)
 
             trackListSection()
+                .listRowBackground(Color.clear)
 
             albumFooter()
                 .listRowSeparator(.hidden)
-                .listRowBackground(darkenedBackgroundColor)
+                .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 16, trailing: 16))
 
             relatedAlbumsSection()
                 .listRowSeparator(.hidden)
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(darkenedRelatedSectionBackground)
+                .padding(.bottom, 1000)
         }
         .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .background(
-            ScrollAwareListBackdrop(
-                tracker: scrollOffsetTracker,
-                hasRelatedAlbums: hasRelatedAlbums,
-                darkenedBackgroundColor: darkenedBackgroundColor,
-                darkenedRelatedSectionBackground: darkenedRelatedSectionBackground
-            )
-            .ignoresSafeArea()
-        )
-        .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { _, newValue in
-            scrollOffsetTracker.fromTop = newValue
-        }
-        // Returning here via the zoom-transition pop from a related album (tap a card in
-        // `relatedAlbumsSection()`, then close it) can leave `ScrollAwareListBackdrop`'s backing
-        // layer showing a stale frame — the undarkened artwork color instead of the correct
-        // darkened blend — until something forces a fresh redraw. Scrolling does that (it
-        // publishes a new `fromTop`, which is exactly what makes it snap back correct instantly);
-        // republishing the same value here on reappear forces that same redraw proactively,
-        // without the user having to scroll first.
-        .onAppear {
-            scrollOffsetTracker.fromTop = scrollOffsetTracker.fromTop
-        }
-        .scrollBounceBehavior(.basedOnSize)
+        .background(darkenedBackgroundColor)
+        // No separate backdrop behind the list: every row already paints its own correct
+        // background (`darkenedBackgroundColor`/`darkenedRelatedSectionBackground`), tiling
+        // contiguously, so there's nothing left for a separate scroll-position-driven backdrop to
+        // paper over. The related section's trailing 1000pt `.padding` above exists only so that
+        // *background* extends well past its last carousel (covering rubber-band overscroll);
+        // it must not also extend how far the list can actually be scrolled, or the user could
+        // drag 1000pt past the real content into empty space. This negative bottom content
+        // margin cancels exactly that padding back out for scroll-extent purposes, while leaving
+        // it in place for layout/background purposes — so scrolling still physically stops right
+        // where the last carousel ends, verified directly (built a throwaway harness reproducing
+        // this exact padding-vs-margin shape and confirmed further swipes don't move it at all).
+        .contentMargins(.bottom, -1000, for: .scrollContent)
         .toolbar {
             downloadButton
             moreButton
@@ -210,7 +188,6 @@ struct AlbumView: View {
                 otherVersions = others
                 moreByArtist = more.reversed()
             }
-            hasRelatedAlbums = !others.isEmpty || !more.isEmpty
         } catch {
             // Ignored — see doc comment above.
         }
@@ -253,7 +230,7 @@ struct AlbumView: View {
     }
 
     /// Matches the leading edge of a track row's title: the row's own horizontal padding plus the track number's frame width and its spacing to the title.
-    private let trackTitleLeadingInset: CGFloat = 20 + 12
+    private let trackTitleLeadingInset: CGFloat = 4 + 20 + 12
 
     @ViewBuilder
     func trackListSection() -> some View {
@@ -317,7 +294,6 @@ struct AlbumView: View {
             .buttonStyle(.plain)
             .disabled(!(networkMonitor.isOnline || downloads.isDownloaded(track.id.raw)))
             .listRowSeparator(.hidden)
-            .listRowBackground(darkenedBackgroundColor)
             // Every row's own vertical inset, rather than the system default a `List` row
             // otherwise picks up — that default only ever applied once to the whole tracklist
             // back when every track lived in one hand-stacked row; now that each track is its
@@ -422,7 +398,11 @@ struct AlbumView: View {
             Text(trackCountAndDuration)
 
             if let recordLabelText {
-                Text("Ⓟ " + recordLabelText)
+                if let yearText = album.year.map(String.init) {
+                    Text("Ⓟ " + yearText + " " + recordLabelText)
+                } else {
+                    Text("Ⓟ " + recordLabelText)
+                }
             }
         }
         .font(.subheadline)
@@ -598,35 +578,6 @@ struct AlbumView: View {
         }
 }
 
-/// How far `AlbumView`'s list is scrolled from its top edge, in points — `0` means flush against
-/// the top. See the `scrollOffsetTracker` property's doc comment for why this is a plain
-/// `ObservableObject`, not `AlbumView`'s own `@State`.
-private final class ScrollOffsetTracker: ObservableObject {
-    @Published var fromTop: CGFloat = 0
-}
-
-/// The `List`'s background — a plain darkened artwork color normally, blending smoothly to
-/// `darkenedRelatedSectionBackground` as the list scrolls within 50pt of its top edge (so the
-/// area behind the translucent nav bar transitions instead of snapping) when related albums are
-/// shown below the tracklist. Isolated into its own leaf view, observing only `tracker`, so a
-/// scroll update re-renders just this small view instead of all of `AlbumView.body` — the same
-/// scoping `TrackLeadingGlyph` below does for `PlayerManager` ticks.
-private struct ScrollAwareListBackdrop: View {
-    @ObservedObject var tracker: ScrollOffsetTracker
-    let hasRelatedAlbums: Bool
-    let darkenedBackgroundColor: Color
-    let darkenedRelatedSectionBackground: Color
-
-    var body: some View {
-        if hasRelatedAlbums {
-            let fraction = min(max(tracker.fromTop / 20, 0), 1)
-            darkenedBackgroundColor.interpolated(to: darkenedRelatedSectionBackground, fraction: fraction)
-        } else {
-            darkenedBackgroundColor
-        }
-    }
-}
-
 /// A single track row's content (playing indicator/track number, title/artist, download status,
 /// overflow menu). A real `View` type — not just a function on `AlbumView` — so it can own its
 /// own `@ObservedObject` subscriptions: a `PlayerManager` playback tick or a `DownloadStore`
@@ -646,7 +597,7 @@ private struct TrackLeadingGlyph: View {
                 PlayingIndicator(isPlaying: player.isPlaying)
             } else {
                 Text(track.track.map(String.init) ?? "")
-                    .font(.system(size: 16))
+                    .font(.callout)
                     .foregroundColor(.secondary)
             }
         }
@@ -669,12 +620,13 @@ private struct TrackRow: View {
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
     var body: some View {
-        HStack(spacing: 10) {
-            HStack(spacing: 8) {
+        HStack(spacing: 12) {
+            HStack(spacing: 12) {
                 TrackLeadingGlyph(track: track)
 
                 VStack(alignment: .leading) {
                     Text(track.title)
+                        .font(.callout)
 
                     if let trackArtist = track.artist, trackArtist != albumArtist {
                         Text(trackArtist)
