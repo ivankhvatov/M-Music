@@ -57,13 +57,19 @@ struct AlbumView: View {
 
     @State private var showingRemoveDownloadConfirmation = false
 
+    /// `init` runs for every `AlbumView(...)` a parent constructs — including one per card in the
+    /// related-album carousels, on every parent re-render — and these two go through `UIColor`'s
+    /// HSB bridge, so they're computed once here instead of per init.
+    private static let placeholderDarkenedBackground = Color(.systemBackground).darkened()
+    private static let placeholderDarkenedRelatedSectionBackground = Color(.systemBackground).darkened().darkened(by: 0.8)
+
     init(album: AlbumID3, zoomNamespace: Namespace.ID? = nil) {
         self.album = album
         self.zoomNamespace = zoomNamespace
         _isStarred = State(initialValue: album.isStarred)
         _backgroundColor = State(initialValue: Color(.systemBackground))
-        _darkenedBackgroundColor = State(initialValue: Color(.systemBackground).darkened())
-        _darkenedRelatedSectionBackground = State(initialValue: Color(.systemBackground).darkened().darkened(by: 0.8))
+        _darkenedBackgroundColor = State(initialValue: Self.placeholderDarkenedBackground)
+        _darkenedRelatedSectionBackground = State(initialValue: Self.placeholderDarkenedRelatedSectionBackground)
         _artworkURL = State(initialValue: try? SubsonicClient.shared.coverArtURL(forId: album.coverArt ?? album.id.raw))
     }
 
@@ -215,7 +221,9 @@ struct AlbumView: View {
                 .padding(.horizontal, 16)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 16) {
+                // Lazy so only the cards actually scrolled into view build (and start loading
+                // their artwork) — an eager `HStack` started every card's image load at once.
+                LazyHStack(alignment: .top, spacing: 16) {
                     ForEach(albums) { relatedAlbum in
                         NavigationLink(destination: AlbumView(album: relatedAlbum, zoomNamespace: relatedAlbumZoomNamespace)) {
                             AlbumCardView(album: relatedAlbum, zoomNamespace: relatedAlbumZoomNamespace, subtitle: .year)

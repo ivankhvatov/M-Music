@@ -9,7 +9,11 @@ struct TrackArtworkView: View {
     var cornerRadius: CGFloat = 8
 
     var body: some View {
-        CachedAsyncImage(url: url) { image in
+        // Full-resolution bitmap (not the standard capped one) — the expanded Now Playing artwork
+        // is the one place a cover is shown large enough (~1050px at 3x) for the cap to be visible.
+        // Only ever one of these decoded at a time (the current track's), so the cost that cap
+        // exists to avoid on list screens doesn't apply here.
+        CachedAsyncImage(url: url, maxPixelSize: nil) { image in
             image
                 .resizable()
                 .aspectRatio(contentMode: .fit)

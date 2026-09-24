@@ -1,4 +1,5 @@
 import SwiftUI
+import ImageIO
 
 /// Cache for downloaded images, backed by both an in-memory `NSCache` and disk
 /// (`Caches/SubsonicImageCache/`), so artwork already fetched once — this session or a
@@ -10,8 +11,20 @@ import SwiftUI
 /// everything here is keyed by a stable form of the URL with the volatile auth query items
 /// (`u`, `t`, `s`, `v`, `c`, `f`) stripped out, leaving just what actually identifies the
 /// image (host, path, and whatever's left in the query — `id`, `size`, ...).
+///
+/// The bytes on disk are always whatever the server sent (original size when no `size` param
+/// was requested). What's capped is the *decoded in-memory bitmap*: by default an image is
+/// decoded down to `standardMaxPixelSize` on its longest side, since nothing in a list, card,
+/// carousel or detail header is displayed anywhere near original resolution, and decoding (and
+/// holding) a 3000² cover for a 160pt card is what made opening a screen full of artwork spike
+/// every core. Pass `maxPixelSize: nil` to get the full-resolution bitmap (Now Playing).
 final class ImageCache: @unchecked Sendable {
     static let shared = ImageCache()
+
+    /// The longest side, in pixels, images are decoded to by default. The largest thing that
+    /// shows a cover apart from Now Playing is the album header at 270pt (≈810px at 3x), so this
+    /// leaves headroom without any visible softness.
+    static let standardMaxPixelSize = 900
 
     private let memory = NSCache<NSString, UIImage>()
     private let fileManager = FileManager.default
@@ -23,12 +36,27 @@ final class ImageCache: @unchecked Sendable {
     private let durableDirectory: URL?
 
     private let lock = NSLock()
-    /// Requests in flight, keyed the same stable way, so a prefetch and a view's own load (or
-    /// several views wanting the same image at once) share one fetch instead of racing
-    /// duplicate ones.
+    /// Requests in flight, keyed by the same stable key plus size tier as the memory cache, so a
+    /// view's own load (or several views wanting the same image at once) share one fetch instead
+    /// of racing duplicate ones.
     private var inFlightTasks: [String: Task<UIImage?, Never>] = [:]
 
+    /// Decodes run one at a time, each followed by `decodeCooldown` of idle time before the next
+    /// may start. Decoding is the CPU-heavy part of loading an image; without a bound, opening a
+    /// screen with a dozen covers starts a dozen decodes at the same instant, one per core, which
+    /// is the multi-hundred-percent spike this exists to prevent. Serializing caps the burst at
+    /// one core, and the cooldown (a decode is ~10-100ms) keeps that one core from being pinned
+    /// solid while a queue drains. Only cold decodes pay this: anything already in memory is
+    /// returned before reaching the gate. Raise `limit` / lower the cooldown to trade CPU for
+    /// artwork appearing sooner.
+    private let decodeGate = AsyncLimiter(limit: 1)
+    private static let decodeCooldown: Duration = .milliseconds(20)
+    /// Same idea for `prefetchOriginalData`'s downloads — not CPU-heavy, but a screen full of
+    /// rows shouldn't open dozens of simultaneous connections either.
+    private let prefetchGate = AsyncLimiter(limit: 4)
+
     init() {
+        memory.totalCostLimit = 120 * 1024 * 1024
         if let caches = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first {
             let dir = caches.appendingPathComponent("SubsonicImageCache", isDirectory: true)
             try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -51,39 +79,42 @@ final class ImageCache: @unchecked Sendable {
     /// In-memory-only lookup, synchronous — used by `CachedAsyncImage` at init so a warm
     /// in-memory hit can render on the very first frame. Doesn't consult disk; use `load(_:)`
     /// for the full memory → disk → network lookup.
-    func image(for url: URL) -> UIImage? {
-        memory.object(forKey: stableKey(for: url) as NSString)
+    func image(for url: URL, maxPixelSize: Int? = ImageCache.standardMaxPixelSize) -> UIImage? {
+        memory.object(forKey: memoryKey(stableKey(for: url), maxPixelSize: maxPixelSize))
     }
 
     /// Returns the cached image for `url` if present (memory, then disk), otherwise downloads
     /// it and caches the result both ways.
     @discardableResult
-    func load(_ url: URL) async -> UIImage? {
+    func load(_ url: URL, maxPixelSize: Int? = ImageCache.standardMaxPixelSize) async -> UIImage? {
         let key = stableKey(for: url)
-        if let cached = memory.object(forKey: key as NSString) { return cached }
+        let memKey = memoryKey(key, maxPixelSize: maxPixelSize)
+        if let cached = memory.object(forKey: memKey) { return cached }
 
-        let (task, isNew) = inFlightTaskOrRegister(forKey: key, url: url)
+        let (task, isNew) = inFlightTaskOrRegister(memKey: memKey, key: key, url: url, maxPixelSize: maxPixelSize)
         let result = await task.value
         if isNew {
-            clearInFlightTask(forKey: key)
+            clearInFlightTask(forKey: memKey as String)
         }
         return result
     }
 
-    /// Returns the in-flight task for `key` if one's already running, otherwise creates,
+    /// Returns the in-flight task for `memKey` if one's already running, otherwise creates,
     /// registers, and returns a new one — atomically, so two concurrent callers for the same
     /// key can't both decide to start their own fetch. Synchronous (unlike `load` itself) so
     /// the locking stays a plain, provably-safe critical section instead of straddling
     /// `async` suspension points.
-    private func inFlightTaskOrRegister(forKey key: String, url: URL) -> (task: Task<UIImage?, Never>, isNew: Bool) {
+    private func inFlightTaskOrRegister(
+        memKey: NSString, key: String, url: URL, maxPixelSize: Int?
+    ) -> (task: Task<UIImage?, Never>, isNew: Bool) {
         lock.withLock {
-            if let existing = inFlightTasks[key] {
+            if let existing = inFlightTasks[memKey as String] {
                 return (existing, false)
             }
             let task = Task<UIImage?, Never> { [weak self] in
-                await self?.fetch(url, key: key)
+                await self?.fetch(url, key: key, memKey: memKey, maxPixelSize: maxPixelSize)
             }
-            inFlightTasks[key] = task
+            inFlightTasks[memKey as String] = task
             return (task, true)
         }
     }
@@ -92,34 +123,64 @@ final class ImageCache: @unchecked Sendable {
         lock.withLock { inFlightTasks[key] = nil }
     }
 
-    private func fetch(_ url: URL, key: String) async -> UIImage? {
-        if let onDisk = diskImage(forKey: key) {
-            memory.setObject(onDisk, forKey: key as NSString)
-            return onDisk
+    private func fetch(_ url: URL, key: String, memKey: NSString, maxPixelSize: Int?) async -> UIImage? {
+        // Network and disk reads happen outside the decode gate: they aren't CPU-bound, and
+        // gating them would just let a slow download hold up unrelated decodes.
+        guard let data = await originalData(for: url, key: key) else { return nil }
+
+        await decodeGate.acquire()
+        let image = decodedImage(from: data, maxPixelSize: maxPixelSize)
+        if let image { store(image, forKey: memKey) }
+        // The cooldown runs in its own task, holding the slot, so this image is handed back to
+        // its caller right now — only the *next* decode waits out the pause.
+        let gate = decodeGate
+        Task {
+            try? await Task.sleep(for: Self.decodeCooldown)
+            await gate.release()
         }
-        if let durable = durableImage(forKey: key) {
-            memory.setObject(durable, forKey: key as NSString)
-            return durable
-        }
-        guard let data = try? await URLSession.shared.data(from: url).0, let image = decodedImage(from: data) else { return nil }
-        memory.setObject(image, forKey: key as NSString)
-        writeToDisk(data, forKey: key)
+
         return image
     }
 
-    /// Starts downloading `url` in the background if it isn't already cached (or already in
-    /// flight), without waiting for the result. Fire-and-forget.
-    func prefetch(_ url: URL?) {
+    /// The original bytes for `url` from the first tier that has them (Caches disk, then the
+    /// durable directory), otherwise the network — which also writes them to the Caches disk tier.
+    private func originalData(for url: URL, key: String) async -> Data? {
+        if let fileURL = diskURL(forKey: key), let data = try? Data(contentsOf: fileURL) {
+            return data
+        }
+        if let fileURL = durableURL(forKey: key), let data = try? Data(contentsOf: fileURL) {
+            return data
+        }
+        guard let data = try? await URLSession.shared.data(from: url).0 else { return nil }
+        writeToDisk(data, forKey: key)
+        return data
+    }
+
+    /// Downloads `url`'s original bytes to the disk cache if they aren't there already, without
+    /// decoding anything — for warming the cache ahead of a screen that will want the full image
+    /// (e.g. so opening an album from a list doesn't wait on the network), without paying for a
+    /// decode of an image that may never be shown at that size. Cancellable: call it from a
+    /// `.task`, which cancels it when the row scrolls away.
+    func prefetchOriginalData(_ url: URL?) async {
         guard let url else { return }
-        Task { await load(url) }
+        let key = stableKey(for: url)
+        if let fileURL = diskURL(forKey: key), fileManager.fileExists(atPath: fileURL.path) { return }
+        if let fileURL = durableURL(forKey: key), fileManager.fileExists(atPath: fileURL.path) { return }
+
+        await prefetchGate.acquire()
+        defer { Task { await prefetchGate.release() } }
+        guard !Task.isCancelled else { return }
+        guard let data = try? await URLSession.shared.data(from: url).0 else { return }
+        writeToDisk(data, forKey: key)
     }
 
     /// Fetches `url`'s image if not already cached anywhere, and stores it durably under
-    /// Application Support (survives `Caches/` eviction) in addition to the normal memory/
-    /// Caches-disk tiers. For downloaded songs' artwork, so it's still available offline even
-    /// under storage pressure. Returns whether the image ended up durably cached — already was,
-    /// or was just fetched and stored — `false` only on a genuine failure (offline, deleted on
-    /// server, ...).
+    /// Application Support (survives `Caches/` eviction) in addition to the normal Caches-disk
+    /// tier. For downloaded songs' artwork, so it's still available offline even under storage
+    /// pressure. Returns whether the image ended up durably cached — already was, or was just
+    /// fetched and stored — `false` only on a genuine failure (offline, deleted on server, ...).
+    /// Only stores bytes; it doesn't decode anything into the in-memory cache, since nothing
+    /// needs it warm right when a download finishes.
     @discardableResult
     func precacheDurably(_ url: URL) async -> Bool {
         let key = stableKey(for: url)
@@ -128,13 +189,11 @@ final class ImageCache: @unchecked Sendable {
         }
         if let cachesURL = diskURL(forKey: key), let data = try? Data(contentsOf: cachesURL) {
             writeDurably(data, forKey: key)
-            if let image = decodedImage(from: data) { memory.setObject(image, forKey: key as NSString) }
             return true
         }
         guard let data = try? await URLSession.shared.data(from: url).0 else { return false }
         writeToDisk(data, forKey: key)
         writeDurably(data, forKey: key)
-        if let image = decodedImage(from: data) { memory.setObject(image, forKey: key as NSString) }
         return true
     }
 
@@ -144,6 +203,19 @@ final class ImageCache: @unchecked Sendable {
         guard let directory else { return }
         try? fileManager.removeItem(at: directory)
         try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+    }
+
+    // MARK: - Memory layer
+
+    /// Stable key plus the size tier — an image decoded down to 900px and the same image at
+    /// original size are different bitmaps, and must not be handed out for each other.
+    private func memoryKey(_ key: String, maxPixelSize: Int?) -> NSString {
+        (maxPixelSize.map { "\(key)@\($0)" } ?? key) as NSString
+    }
+
+    private func store(_ image: UIImage, forKey key: NSString) {
+        let cost = image.cgImage.map { $0.bytesPerRow * $0.height } ?? 0
+        memory.setObject(image, forKey: key, cost: cost)
     }
 
     // MARK: - Stable cache key
@@ -166,11 +238,6 @@ final class ImageCache: @unchecked Sendable {
         return directory.appendingPathComponent(SubsonicClient.md5Hex(key)).appendingPathExtension("img")
     }
 
-    private func diskImage(forKey key: String) -> UIImage? {
-        guard let fileURL = diskURL(forKey: key), let data = try? Data(contentsOf: fileURL) else { return nil }
-        return decodedImage(from: data)
-    }
-
     private func writeToDisk(_ data: Data, forKey key: String) {
         guard let fileURL = diskURL(forKey: key) else { return }
         try? data.write(to: fileURL, options: .atomic)
@@ -183,27 +250,57 @@ final class ImageCache: @unchecked Sendable {
         return durableDirectory.appendingPathComponent(SubsonicClient.md5Hex(key)).appendingPathExtension("img")
     }
 
-    private func durableImage(forKey key: String) -> UIImage? {
-        guard let fileURL = durableURL(forKey: key), let data = try? Data(contentsOf: fileURL) else { return nil }
-        return decodedImage(from: data)
-    }
-
     private func writeDurably(_ data: Data, forKey key: String) {
         guard let fileURL = durableURL(forKey: key) else { return }
         try? data.write(to: fileURL, options: .atomic)
     }
 
-    /// Fully decodes `data` into a plain device-RGB bitmap, off the main thread, right away —
-    /// rather than handing back a `UIImage` that lazily decodes (via ImageIO's newer block-based
-    /// decoder) whenever UIKit/SwiftUI first draws it. That lazy path has a real, filed Apple bug
-    /// (rdar://143602439, logged as "kCGImageBlockFormatBGRx8 is called for 24-bpp (8-bpc)
-    /// image") that can hang the *main* thread mid-decode for certain JPEGs — which read as a
-    /// random app freeze, since it only fires whenever some particular image happens to first
-    /// scroll/switch into view. Forcing the real decode here, on a background task, means the
-    /// image handed to SwiftUI is already a plain bitmap with nothing left to lazily (and
-    /// buggily) decode on the main thread.
-    private func decodedImage(from data: Data) -> UIImage? {
+    // MARK: - Decoding
+
+    /// Decodes `data` into a plain, fully-decoded device-RGB bitmap, right away, off the main
+    /// thread — rather than handing back a `UIImage` that lazily decodes (via ImageIO's newer
+    /// block-based decoder) whenever UIKit/SwiftUI first draws it. That lazy path has a real,
+    /// filed Apple bug (rdar://143602439, logged as "kCGImageBlockFormatBGRx8 is called for
+    /// 24-bpp (8-bpc) image") that can hang the *main* thread mid-decode for certain JPEGs —
+    /// which read as a random app freeze, since it only fires whenever some particular image
+    /// happens to first scroll/switch into view. Forcing the real decode here means the image
+    /// handed to SwiftUI is already a plain bitmap with nothing left to lazily (and buggily)
+    /// decode on the main thread.
+    ///
+    /// With a `maxPixelSize`, an image far bigger than that is decoded *directly at the reduced
+    /// size* via ImageIO's thumbnail path, which skips most of the work of a full-size decode —
+    /// measured ~2x faster at 2000-3000px and ~11x smaller in memory at 3000px. An image only
+    /// modestly over the cap (up to `downsampleThreshold`x) takes the plain full-size path
+    /// instead: below roughly 1400px the thumbnail path's resampling costs *more* than just
+    /// decoding the image, and holding a bitmap that size is still cheap. `maxPixelSize == nil`
+    /// always takes the full-size path.
+    private func decodedImage(from data: Data, maxPixelSize: Int?) -> UIImage? {
+        if let maxPixelSize, let source = CGImageSourceCreateWithData(data as CFData, nil),
+           let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+           let width = properties[kCGImagePropertyPixelWidth] as? Int,
+           let height = properties[kCGImagePropertyPixelHeight] as? Int,
+           Double(max(width, height)) > Double(maxPixelSize) * Self.downsampleThreshold {
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: true,
+                kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+            ]
+            if let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
+                return normalizedBitmap(from: thumbnail, scale: 1, orientation: .up)
+            }
+        }
         guard let source = UIImage(data: data), let cgImage = source.cgImage else { return nil }
+        return normalizedBitmap(from: cgImage, scale: source.scale, orientation: .up) ?? source
+    }
+
+    /// How many times over the cap an image has to be before it's worth downsampling — see
+    /// `decodedImage(from:maxPixelSize:)`.
+    private static let downsampleThreshold = 1.5
+
+    /// Redraws `cgImage` into a plain device-RGB, premultiplied-alpha bitmap — the workaround
+    /// described on `decodedImage(from:maxPixelSize:)`.
+    private func normalizedBitmap(from cgImage: CGImage, scale: CGFloat, orientation: UIImage.Orientation) -> UIImage? {
         let width = cgImage.width
         let height = cgImage.height
         guard width > 0, height > 0, let context = CGContext(
@@ -214,10 +311,38 @@ final class ImageCache: @unchecked Sendable {
             bytesPerRow: 0,
             space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return source }
+        ) else { return nil }
         context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-        guard let normalized = context.makeImage() else { return source }
-        return UIImage(cgImage: normalized, scale: source.scale, orientation: .up)
+        guard let normalized = context.makeImage() else { return nil }
+        return UIImage(cgImage: normalized, scale: scale, orientation: orientation)
+    }
+}
+
+/// A minimal async counting semaphore: at most `limit` callers between `acquire()` and
+/// `release()` at once; the rest suspend in FIFO order until a slot frees up.
+private actor AsyncLimiter {
+    private let limit: Int
+    private var running = 0
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(limit: Int) {
+        self.limit = limit
+    }
+
+    func acquire() async {
+        if running < limit {
+            running += 1
+            return
+        }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func release() {
+        if waiters.isEmpty {
+            running -= 1
+        } else {
+            waiters.removeFirst().resume()
+        }
     }
 }
 
@@ -226,10 +351,13 @@ final class ImageCache: @unchecked Sendable {
 /// flashing the placeholder while a redundant fetch happens.
 struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     private let url: URL?
-    /// Fires whenever a `UIImage` is obtained for `url` (a cache hit or a fresh load) — lets a
-    /// caller that needs the raw bitmap itself (e.g. to sample its average color) get it directly,
-    /// instead of re-deriving one from the wrapped `Image` via `ImageRenderer`, which would mean
-    /// redundantly re-rendering an image that's already been decoded.
+    /// See `ImageCache.load(_:maxPixelSize:)` — the standard cap unless a caller (Now Playing)
+    /// needs the full-resolution bitmap.
+    private let maxPixelSize: Int?
+    /// Fires once per `url` when a `UIImage` is obtained for it (a cache hit or a fresh load) —
+    /// lets a caller that needs the raw bitmap itself (e.g. to sample its average color) get it
+    /// directly, instead of re-deriving one from the wrapped `Image` via `ImageRenderer`, which
+    /// would mean redundantly re-rendering an image that's already been decoded.
     private let onLoad: ((UIImage) -> Void)?
     private let content: (Image) -> Content
     private let placeholder: () -> Placeholder
@@ -240,21 +368,27 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     /// survives across re-inits of this struct, so checking `uiImage == nil` alone would leave
     /// the previous track's artwork on screen forever once one image had loaded.
     @State private var loadedURL: URL?
+    /// The url `onLoad` has already fired for. This struct is re-initialized on every parent
+    /// re-render, and `onLoad` used to fire from `init` on a cache hit — so a parent that
+    /// re-rendered a few times right after opening (downloads publishing, its own `@State`
+    /// loading in) re-ran whatever expensive thing `onLoad` does (color extraction) every time.
+    @State private var notifiedURL: URL?
 
     init(
         url: URL?,
+        maxPixelSize: Int? = ImageCache.standardMaxPixelSize,
         onLoad: ((UIImage) -> Void)? = nil,
         @ViewBuilder content: @escaping (Image) -> Content,
         @ViewBuilder placeholder: @escaping () -> Placeholder
     ) {
         self.url = url
+        self.maxPixelSize = maxPixelSize
         self.onLoad = onLoad
         self.content = content
         self.placeholder = placeholder
-        let cached = url.flatMap(ImageCache.shared.image(for:))
+        let cached = url.flatMap { ImageCache.shared.image(for: $0, maxPixelSize: maxPixelSize) }
         _uiImage = State(initialValue: cached)
         _loadedURL = State(initialValue: cached != nil ? url : nil)
-        if let cached { onLoad?(cached) }
     }
 
     var body: some View {
@@ -276,20 +410,31 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
             loadedURL = nil
             return
         }
-        guard loadedURL != url else { return }
-        if let cached = ImageCache.shared.image(for: url) {
-            uiImage = cached
-            loadedURL = url
-            onLoad?(cached)
+        if loadedURL == url {
+            // Already showing this url's image (a cache hit at init) — nothing to load, but
+            // `onLoad` hasn't fired for it yet.
+            notifyLoaded()
             return
         }
-        guard let image = await ImageCache.shared.load(url) else { return }
+        if let cached = ImageCache.shared.image(for: url, maxPixelSize: maxPixelSize) {
+            uiImage = cached
+            loadedURL = url
+            notifyLoaded()
+            return
+        }
+        guard let image = await ImageCache.shared.load(url, maxPixelSize: maxPixelSize) else { return }
         await MainActor.run {
             if self.url == url {
                 uiImage = image
                 loadedURL = url
-                onLoad?(image)
+                notifyLoaded()
             }
         }
+    }
+
+    private func notifyLoaded() {
+        guard let uiImage, notifiedURL != url else { return }
+        notifiedURL = url
+        onLoad?(uiImage)
     }
 }

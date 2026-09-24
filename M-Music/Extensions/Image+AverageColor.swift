@@ -1,27 +1,41 @@
 import SwiftUI
-import CoreImage
 
 extension UIImage {
+    /// The mean color of the whole image, sampled from a 32×32 downscale of it (drawn with high
+    /// interpolation quality, which averages neighboring source pixels together as it shrinks)
+    /// rather than by running a Core Image area-average over every pixel — the latter needs a
+    /// fresh `CIContext` per call and touches the full-resolution bitmap, which is real CPU for
+    /// something only used to tint a background.
     func averageColor() -> Color? {
-        guard let inputImage = CIImage(image: self) else { return nil }
+        guard let cgImage else { return nil }
 
-        let extent = inputImage.extent
-        let extentVector = CIVector(x: extent.origin.x, y: extent.origin.y, z: extent.size.width, w: extent.size.height)
+        let side = 32
+        let bytesPerPixel = 4
+        var pixelData = [UInt8](repeating: 0, count: side * side * bytesPerPixel)
 
-        guard let filter = CIFilter(name: "CIAreaAverage", parameters: [
-            kCIInputImageKey: inputImage,
-            kCIInputExtentKey: extentVector
-        ]), let outputImage = filter.outputImage else { return nil }
+        guard let context = CGContext(
+            data: &pixelData,
+            width: side,
+            height: side,
+            bitsPerComponent: 8,
+            bytesPerRow: side * bytesPerPixel,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
 
-        var bitmap = [UInt8](repeating: 0, count: 4)
-        let context = CIContext(options: [.workingColorSpace: kCFNull as Any])
-        context.render(outputImage, toBitmap: &bitmap, rowBytes: 4, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBA8, colorSpace: nil)
+        context.interpolationQuality = .high
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: side, height: side))
 
-        return Color(
-            red: Double(bitmap[0]) / 255,
-            green: Double(bitmap[1]) / 255,
-            blue: Double(bitmap[2]) / 255
-        )
+        var red = 0, green = 0, blue = 0
+        for pixelIndex in 0..<(side * side) {
+            let offset = pixelIndex * bytesPerPixel
+            red += Int(pixelData[offset])
+            green += Int(pixelData[offset + 1])
+            blue += Int(pixelData[offset + 2])
+        }
+        let total = Double(side * side) * 255
+
+        return Color(red: Double(red) / total, green: Double(green) / total, blue: Double(blue) / total)
     }
 }
 

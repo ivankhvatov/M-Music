@@ -16,6 +16,9 @@ struct PlaylistsListView: View {
     @State private var searchText = ""
 
     @State private var playlists: [PlaylistSummary] = []
+    /// Cached result of filtering `playlists`, recomputed only by `updateDisplayedPlaylists()`
+    /// rather than on every `body` evaluation — see `AlbumsListView.displayedAlbums`.
+    @State private var displayedPlaylists: [PlaylistSummary] = []
     @State private var isLoading = false
     @State private var loadError: String?
     @State private var hasLoadedOnce = false
@@ -73,6 +76,11 @@ struct PlaylistsListView: View {
                 // playlist is opened this session — guarded internally, cheap to call again.
                 Task { await LibraryCacheStatus.shared.preload() }
             }
+            .onChange(of: searchText) { updateDisplayedPlaylists() }
+            .onChange(of: showUnavailableInLists) { updateDisplayedPlaylists() }
+            .onChange(of: networkMonitor.isOnline) { updateDisplayedPlaylists() }
+            .onChange(of: downloads.downloadedSongIds) { updateDisplayedPlaylists() }
+            .onChange(of: libraryCacheStatus.songIdsByPlaylistId) { updateDisplayedPlaylists() }
         }
     }
 
@@ -119,7 +127,7 @@ struct PlaylistsListView: View {
         return !songIds.isEmpty && songIds.allSatisfy { downloads.isDownloaded($0) }
     }
 
-    private var displayedPlaylists: [PlaylistSummary] {
+    private func updateDisplayedPlaylists() {
         var result = playlists
         if !searchText.isEmpty {
             result = result.filter {
@@ -130,7 +138,7 @@ struct PlaylistsListView: View {
         if !networkMonitor.isOnline, !showUnavailableInLists {
             result = result.filter { isFullyDownloaded($0) }
         }
-        return result
+        displayedPlaylists = result
     }
 
     /// Stale-while-revalidate: shows cached playlists immediately (no spinner) if any are
@@ -139,6 +147,7 @@ struct PlaylistsListView: View {
     private func refresh() {
         guard client.isConfigured else {
             playlists = []
+            displayedPlaylists = []
             hasLoadedOnce = false
             return
         }
@@ -155,6 +164,7 @@ struct PlaylistsListView: View {
             if playlists.isEmpty, let cached = await LibraryCacheDatabase.shared.cachedAllPlaylists() {
                 await MainActor.run {
                     playlists = cached
+                    updateDisplayedPlaylists()
                     hasLoadedOnce = true
                     isLoading = false
                 }
@@ -167,7 +177,10 @@ struct PlaylistsListView: View {
                     loadError = nil
                     isLoading = false
                     hasLoadedOnce = true
-                    if changed { playlists = fetched }
+                    if changed {
+                        playlists = fetched
+                        updateDisplayedPlaylists()
+                    }
                 }
                 if changed {
                     await LibraryCacheDatabase.shared.cacheAllPlaylists(fetched)
@@ -237,11 +250,12 @@ private struct PlaylistRow: View {
             }
         }
         .dimmedIfUnavailable(isAvailable)
-        // Full-size cover, prefetched in the background — see `artworkURL`'s doc comment. Keyed
-        // to `playlist.id` so scrolling this row's cell to a different playlist (cell reuse)
+        // Full-size cover's bytes, prefetched to disk in the background (no decode — the row
+        // itself only shows the small thumbnail) — see `artworkURL`'s doc comment. Keyed to
+        // `playlist.id` so scrolling this row's cell to a different playlist (cell reuse)
         // cancels the stale prefetch and starts the right one.
         .task(id: playlist.id) {
-            ImageCache.shared.prefetch(try? SubsonicClient.shared.coverArtURL(forId: playlist.coverArt ?? playlist.id.raw))
+            await ImageCache.shared.prefetchOriginalData(try? SubsonicClient.shared.coverArtURL(forId: playlist.coverArt ?? playlist.id.raw))
         }
     }
 

@@ -158,9 +158,16 @@ struct LibraryView: View {
         }
     }
 
+    /// Downloads each album's original cover to disk (no decoding) so opening it from here
+    /// doesn't wait on the network — `ImageCache` itself bounds how many run at once.
     private func prefetchArtwork(for albums: [AlbumID3]) {
-        for album in albums {
-            ImageCache.shared.prefetch(try? client.coverArtURL(forId: album.coverArt ?? album.id.raw))
+        let urls = albums.compactMap { try? client.coverArtURL(forId: $0.coverArt ?? $0.id.raw) }
+        Task {
+            await withTaskGroup(of: Void.self) { group in
+                for url in urls {
+                    group.addTask { await ImageCache.shared.prefetchOriginalData(url) }
+                }
+            }
         }
     }
 

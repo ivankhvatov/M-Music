@@ -96,6 +96,12 @@ struct AlbumsListView: View {
     }
 
     @State private var albums: [AlbumID3] = []
+    /// Cached result of filtering/sorting `albums`, recomputed only by `updateDisplayedAlbums()`
+    /// (see its call sites) rather than on every `body` evaluation — `body` reads it 2-3 times a
+    /// pass, and re-filtering/re-sorting a whole library each time (plus again on every
+    /// `DownloadStore`/`LibraryCacheStatus` publish) was a big part of the CPU cost of opening
+    /// this screen. Same approach `SongsListView` already uses.
+    @State private var displayedAlbums: [AlbumID3] = []
     @State private var isLoading = false
     @State private var loadError: String?
     @State private var hasLoadedOnce = false
@@ -151,6 +157,15 @@ struct AlbumsListView: View {
                 // live fetch has happened this session — guarded internally, cheap to call again.
                 Task { await LibraryCacheStatus.shared.preload() }
             }
+            .onChange(of: searchText) { updateDisplayedAlbums() }
+            .onChange(of: filterOptionStorage) { updateDisplayedAlbums() }
+            .onChange(of: sortFieldStorage) { updateDisplayedAlbums() }
+            .onChange(of: sortOrderStorage) { updateDisplayedAlbums() }
+            .onChange(of: groupReleaseVersionsEnabled) { updateDisplayedAlbums() }
+            .onChange(of: showUnavailableInLists) { updateDisplayedAlbums() }
+            .onChange(of: networkMonitor.isOnline) { updateDisplayedAlbums() }
+            .onChange(of: downloads.downloadedSongIds) { updateDisplayedAlbums() }
+            .onChange(of: libraryCacheStatus.albumSongCounts) { updateDisplayedAlbums() }
         }
     }
 
@@ -188,7 +203,7 @@ struct AlbumsListView: View {
         networkMonitor.isOnline || downloads.hasDownloadedSong(inAlbum: album.id.raw)
     }
 
-    private var displayedAlbums: [AlbumID3] {
+    private func updateDisplayedAlbums() {
         var result = albums
 
         let isFavoritesOnly = filterOption.wrappedValue == .favoritesOnly
@@ -213,22 +228,21 @@ struct AlbumsListView: View {
             }
         }
 
-        result.sort { lhs, rhs in
-            let comparison: ComparisonResult
-            switch sortField.wrappedValue {
-            case .title:
-                comparison = lhs.name.sortKey.localizedStandardCompare(rhs.name.sortKey)
-            case .artist:
-                comparison = (lhs.artist ?? "").sortKey.localizedStandardCompare((rhs.artist ?? "").sortKey)
-            case .year:
+        let ascending = sortOrder.wrappedValue == .ascending
+        switch sortField.wrappedValue {
+        case .title:
+            result = result.sortedByLocalizedKey(ascending: ascending) { $0.name.sortKey }
+        case .artist:
+            result = result.sortedByLocalizedKey(ascending: ascending) { ($0.artist ?? "").sortKey }
+        case .year:
+            result.sort { lhs, rhs in
                 let lhsYear = lhs.year ?? 0
                 let rhsYear = rhs.year ?? 0
-                comparison = lhsYear == rhsYear ? .orderedSame : (lhsYear < rhsYear ? .orderedAscending : .orderedDescending)
+                return ascending ? lhsYear < rhsYear : lhsYear > rhsYear
             }
-            return sortOrder.wrappedValue == .ascending ? comparison == .orderedAscending : comparison == .orderedDescending
         }
 
-        return result
+        displayedAlbums = result
     }
 
     /// Stale-while-revalidate: shows cached albums immediately (no spinner) if any are cached,
@@ -237,6 +251,7 @@ struct AlbumsListView: View {
     private func refresh() {
         guard client.isConfigured else {
             albums = []
+            displayedAlbums = []
             hasLoadedOnce = false
             return
         }
@@ -253,6 +268,7 @@ struct AlbumsListView: View {
             if albums.isEmpty, let cached = await LibraryCacheDatabase.shared.cachedAllAlbums() {
                 await MainActor.run {
                     albums = cached
+                    updateDisplayedAlbums()
                     hasLoadedOnce = true
                     isLoading = false
                 }
@@ -265,7 +281,10 @@ struct AlbumsListView: View {
                     loadError = nil
                     isLoading = false
                     hasLoadedOnce = true
-                    if changed { albums = fetched }
+                    if changed {
+                        albums = fetched
+                        updateDisplayedAlbums()
+                    }
                 }
                 if changed {
                     await LibraryCacheDatabase.shared.cacheAllAlbums(fetched)
@@ -375,11 +394,12 @@ private struct AlbumRow: View {
             }
         }
         .dimmedIfUnavailable(networkMonitor.isOnline || downloads.hasDownloadedSong(inAlbum: album.id.raw))
-        // Full-size cover, prefetched in the background — see `artworkURL`'s doc comment. Keyed
-        // to `album.id` so scrolling this row's cell to a different album (cell reuse) cancels
-        // the stale prefetch and starts the right one.
+        // Full-size cover's bytes, prefetched to disk in the background (no decode — the row
+        // itself only shows the small thumbnail) — see `artworkURL`'s doc comment. Keyed to
+        // `album.id` so scrolling this row's cell to a different album (cell reuse) cancels the
+        // stale prefetch and starts the right one.
         .task(id: album.id) {
-            ImageCache.shared.prefetch(try? SubsonicClient.shared.coverArtURL(forId: album.coverArt ?? album.id.raw))
+            await ImageCache.shared.prefetchOriginalData(try? SubsonicClient.shared.coverArtURL(forId: album.coverArt ?? album.id.raw))
         }
     }
 

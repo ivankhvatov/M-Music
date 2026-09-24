@@ -46,6 +46,9 @@ struct ArtistsListView: View {
 
     @State private var searchText = ""
     @State private var artists: [ArtistID3] = []
+    /// Cached result of filtering/sorting `artists`, recomputed only by `updateDisplayedArtists()`
+    /// rather than on every `body` evaluation — see `AlbumsListView.displayedAlbums`.
+    @State private var displayedArtists: [ArtistID3] = []
     @State private var isLoading = false
     @State private var loadError: String?
     @State private var hasLoadedOnce = false
@@ -115,10 +118,18 @@ struct ArtistsListView: View {
                 // cheap to call again.
                 Task { await LibraryCacheStatus.shared.preload() }
             }
+            .onChange(of: searchText) { updateDisplayedArtists() }
+            .onChange(of: filterOptionStorage) { updateDisplayedArtists() }
+            .onChange(of: sortOrderStorage) { updateDisplayedArtists() }
+            .onChange(of: showUnavailableInLists) { updateDisplayedArtists() }
+            .onChange(of: networkMonitor.isOnline) { updateDisplayedArtists() }
+            .onChange(of: downloads.downloadedSongIds) { updateDisplayedArtists() }
+            .onChange(of: libraryCacheStatus.albumSongCounts) { updateDisplayedArtists() }
+            .onChange(of: libraryCacheStatus.albumIdsByArtistId) { updateDisplayedArtists() }
         }
     }
 
-    private var displayedArtists: [ArtistID3] {
+    private func updateDisplayedArtists() {
         var result = artists
 
         if filterOption.wrappedValue == .favoritesOnly {
@@ -135,12 +146,9 @@ struct ArtistsListView: View {
             }
         }
 
-        result.sort { lhs, rhs in
-            let comparison = lhs.name.sortKey.localizedStandardCompare(rhs.name.sortKey)
-            return sortOrder.wrappedValue == .ascending ? comparison == .orderedAscending : comparison == .orderedDescending
-        }
+        result = result.sortedByLocalizedKey(ascending: sortOrder.wrappedValue == .ascending) { $0.name.sortKey }
 
-        return result
+        displayedArtists = result
     }
 
     @ToolbarContentBuilder
@@ -183,6 +191,7 @@ struct ArtistsListView: View {
     private func refresh() {
         guard client.isConfigured else {
             artists = []
+            displayedArtists = []
             hasLoadedOnce = false
             return
         }
@@ -199,6 +208,7 @@ struct ArtistsListView: View {
             if artists.isEmpty, let cached = await LibraryCacheDatabase.shared.cachedAllArtists() {
                 await MainActor.run {
                     artists = cached
+                    updateDisplayedArtists()
                     hasLoadedOnce = true
                     isLoading = false
                 }
@@ -212,7 +222,10 @@ struct ArtistsListView: View {
                     loadError = nil
                     isLoading = false
                     hasLoadedOnce = true
-                    if changed { artists = fetched }
+                    if changed {
+                        artists = fetched
+                        updateDisplayedArtists()
+                    }
                 }
                 if changed {
                     await LibraryCacheDatabase.shared.cacheAllArtists(fetched)

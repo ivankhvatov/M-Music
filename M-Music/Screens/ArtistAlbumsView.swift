@@ -289,7 +289,9 @@ struct ArtistAlbumsView: View {
                 .padding(.horizontal, 16)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 16) {
+                // Lazy so only the cards actually scrolled into view build (and start loading
+                // their artwork) — an eager `HStack` started every card's image load at once.
+                LazyHStack(alignment: .top, spacing: 16) {
                     ForEach(albums) { album in
                         NavigationLink(destination: AlbumView(album: album, zoomNamespace: albumZoomNamespace)) {
                             AlbumCardView(album: album, zoomNamespace: albumZoomNamespace, subtitle: .year)

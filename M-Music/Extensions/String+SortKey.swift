@@ -18,3 +18,18 @@ extension String {
         return String(self[index(after: spaceIndex)...])
     }
 }
+
+extension Array {
+    /// Sorts by `key` with `localizedStandardCompare`, computing each element's key exactly once.
+    /// Sorting with the key computed inside the comparator instead (`sortKey` allocates a new
+    /// string) redoes that work on both sides of every one of the O(n log n) comparisons — for a
+    /// whole-library list, that's a lot of throwaway strings on the main thread.
+    func sortedByLocalizedKey(ascending: Bool, key: (Element) -> String) -> [Element] {
+        map { (key: key($0), element: $0) }
+            .sorted { lhs, rhs in
+                let comparison = lhs.key.localizedStandardCompare(rhs.key)
+                return ascending ? comparison == .orderedAscending : comparison == .orderedDescending
+            }
+            .map(\.element)
+    }
+}

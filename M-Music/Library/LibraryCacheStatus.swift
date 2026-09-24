@@ -59,15 +59,29 @@ final class LibraryCacheStatus: ObservableObject {
         guard !didPreload else { return }
         didPreload = true
         let byPlaylistId = await LibraryCacheDatabase.shared.allPlaylistSongIds()
-        songIdsByPlaylistId.merge(byPlaylistId) { _, new in new }
-
-        if let allAlbums = await LibraryCacheDatabase.shared.cachedAllAlbums() {
-            mergeAlbumSongCounts(allAlbums)
-        }
+        let allAlbums = await LibraryCacheDatabase.shared.cachedAllAlbums()
         let byArtistId = await LibraryCacheDatabase.shared.allCachedArtistAlbums()
+
+        // Everything below runs with no suspension point, so nothing else on the main actor can
+        // touch these dictionaries between reading and writing them. Each is built up in a local
+        // and assigned back exactly once: mutating a `@Published` dictionary element by element
+        // (as `mergeAlbumSongCounts`/`setAlbumIds` do for their incremental callers) fires
+        // `objectWillChange` for every single element — thousands of them for a real library,
+        // on the main thread, right while the list screen that triggered this is opening.
+        var songIds = songIdsByPlaylistId
+        songIds.merge(byPlaylistId) { _, new in new }
+
+        var counts = albumSongCounts
+        for album in allAlbums ?? [] { counts[album.id.raw] = album.songCount }
+
+        var albumIds = albumIdsByArtistId
         for (artistId, albums) in byArtistId {
-            mergeAlbumSongCounts(albums)
-            setAlbumIds(albums.map { $0.id.raw }, forArtist: artistId)
+            for album in albums { counts[album.id.raw] = album.songCount }
+            albumIds[artistId] = albums.map { $0.id.raw }
         }
+
+        songIdsByPlaylistId = songIds
+        albumSongCounts = counts
+        albumIdsByArtistId = albumIds
     }
 }
