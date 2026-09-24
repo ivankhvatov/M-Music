@@ -386,16 +386,26 @@ struct AlbumView: View {
         guard let releaseDate = album.releaseDate,
               let year = releaseDate.year, let month = releaseDate.month, let day = releaseDate.day
         else { return nil }
+        guard let date = Self.releaseDateCalendar.date(from: DateComponents(year: year, month: month, day: day)) else { return nil }
+        return Self.releaseDateFormatter.string(from: date)
+    }
+
+    /// Static so the footer doesn't build a `Calendar` and a `DateFormatter` (both costly to
+    /// create) on every body evaluation.
+    private static let releaseDateCalendar: Calendar = {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "UTC")!
-        guard let date = calendar.date(from: DateComponents(year: year, month: month, day: day)) else { return nil }
+        return calendar
+    }()
+
+    private static let releaseDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.calendar = calendar
-        formatter.timeZone = calendar.timeZone
+        formatter.calendar = releaseDateCalendar
+        formatter.timeZone = releaseDateCalendar.timeZone
         formatter.locale = .autoupdatingCurrent
         formatter.dateStyle = .long
-        return formatter.string(from: date)
-    }
+        return formatter
+    }()
 
     func albumFooter() -> some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -422,7 +432,7 @@ struct AlbumView: View {
         // Same URL AlbumCardView requests (original size, no `size` param), so this reuses the
         // image straight from ImageCache instead of re-fetching — the whole point being no lag
         // when this view opens.
-        CachedAsyncImage(url: artworkURL, onLoad: { uiImage in
+        CachedAsyncImage(url: artworkURL, fallbackMaxPixelSize: ImageCache.cardMaxPixelSize, onLoad: { uiImage in
             Task.detached(priority: .userInitiated) {
                 guard let color = uiImage.averageColor() else { return }
                 await MainActor.run {

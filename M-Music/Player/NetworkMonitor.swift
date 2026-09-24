@@ -24,7 +24,12 @@ final class NetworkMonitor: ObservableObject {
             guard let self else { return }
             lock.withLock { self.path = path }
             let isOnline = path.status == .satisfied
-            DispatchQueue.main.async { self.isOnline = isOnline }
+            // `@Published` announces every assignment even when the value is the same, and every
+            // list row observes this — so an unchanged path update (which the system sends on
+            // things like returning to the foreground) would re-render every row for nothing.
+            DispatchQueue.main.async {
+                if self.isOnline != isOnline { self.isOnline = isOnline }
+            }
         }
         monitor.start(queue: queue)
     }

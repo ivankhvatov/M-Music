@@ -102,10 +102,16 @@ final class DownloadStore: ObservableObject {
         LocalDownloadIndex.shared.replaceAll(Dictionary(uniqueKeysWithValues: records.map {
             ($0.songId, LocalDownloadIndex.Entry(path: $0.fileURL.path, format: $0.format, bitRate: $0.bitRate))
         }))
-        downloadedRecords = records
-        downloadedSongIds = Set(records.map(\.songId))
-        totalBytes = stats.totalBytes
-        progressBySongId = progressBySongId.filter { !downloadedSongIds.contains($0.key) }
+        // Assign each published property only if it actually changed: `@Published` announces
+        // every assignment, and everything on screen that shows availability observes this — so
+        // an unchanged reload (this runs at launch, from `PlayerManager` too, and after every
+        // completed download) shouldn't re-render every row.
+        if records != downloadedRecords { downloadedRecords = records }
+        let ids = Set(records.map(\.songId))
+        if ids != downloadedSongIds { downloadedSongIds = ids }
+        if stats.totalBytes != totalBytes { totalBytes = stats.totalBytes }
+        let remainingProgress = progressBySongId.filter { !downloadedSongIds.contains($0.key) }
+        if remainingProgress != progressBySongId { progressBySongId = remainingProgress }
     }
 
     private func apply(_ update: DownloadService.Update) async {

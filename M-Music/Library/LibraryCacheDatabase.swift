@@ -98,6 +98,79 @@ actor LibraryCacheDatabase {
         try? await dbQueue.write { db in
             _ = try CachedEntry.deleteAll(db)
         }
+        // The tokens record "this list is synced as of scan X" — meaningless once the cached
+        // list itself is gone.
+        await LibraryRevalidation.shared.reset()
+    }
+
+    /// What `LibraryCacheStatus` needs out of the cache, and nothing more: which songs each cached
+    /// playlist has, how many songs each cached album has, and which albums each cached artist has.
+    struct Summary: Sendable {
+        var songIdsByPlaylistId: [String: [String]] = [:]
+        var albumSongCounts: [String: Int] = [:]
+        var albumIdsByArtistId: [String: [String]] = [:]
+    }
+
+    /// Builds `Summary` with SQLite's own JSON functions (`json_each`/`json_extract`) rather than
+    /// decoding every cached playlist's full `[Child]`, the whole album catalog and every
+    /// artist's `[AlbumID3]` through `Codable` just to keep a few fields of each — the SQLite
+    /// parser does the same job at C speed with no model objects allocated. IDs are plain
+    /// strings in the stored JSON (`FlexibleID` encodes as one). Returns `nil` if the query
+    /// fails for any reason, so the caller can fall back to `summaryByDecoding()`.
+    func summary() async -> Summary? {
+        try? await dbQueue.read { db in
+            var summary = Summary()
+
+            let playlistRows = try Row.fetchCursor(db, sql: """
+                SELECT c.key AS ownerKey, json_extract(s.value, '$.id') AS itemId
+                FROM cached_entries AS c, json_each(c.json) AS s
+                WHERE c.category = ? AND json_valid(c.json)
+                """, arguments: [LibraryCacheCategory.playlistSongs])
+            while let row = try playlistRows.next() {
+                guard let playlistId: String = row["ownerKey"], let songId: String = row["itemId"] else { continue }
+                summary.songIdsByPlaylistId[playlistId, default: []].append(songId)
+            }
+
+            let catalogRows = try Row.fetchCursor(db, sql: """
+                SELECT json_extract(a.value, '$.id') AS itemId, json_extract(a.value, '$.songCount') AS songCount
+                FROM cached_entries AS c, json_each(c.json) AS a
+                WHERE c.category = ? AND c.key = ? AND json_valid(c.json)
+                """, arguments: [LibraryCacheCategory.allAlbums, LibraryCacheDatabase.wholeCatalogKey])
+            while let row = try catalogRows.next() {
+                guard let albumId: String = row["itemId"], let songCount: Int = row["songCount"] else { continue }
+                summary.albumSongCounts[albumId] = songCount
+            }
+
+            let artistRows = try Row.fetchCursor(db, sql: """
+                SELECT c.key AS ownerKey, json_extract(a.value, '$.id') AS itemId, json_extract(a.value, '$.songCount') AS songCount
+                FROM cached_entries AS c, json_each(c.json) AS a
+                WHERE c.category = ? AND json_valid(c.json)
+                """, arguments: [LibraryCacheCategory.artistAlbums])
+            while let row = try artistRows.next() {
+                guard let artistId: String = row["ownerKey"], let albumId: String = row["itemId"] else { continue }
+                summary.albumIdsByArtistId[artistId, default: []].append(albumId)
+                if let songCount: Int = row["songCount"] {
+                    summary.albumSongCounts[albumId] = songCount
+                }
+            }
+
+            return summary
+        }
+    }
+
+    /// The same `Summary`, built the slow way — full `Codable` decodes of every relevant cached
+    /// entry. Only used if `summary()` fails.
+    func summaryByDecoding() async -> Summary {
+        var summary = Summary()
+        summary.songIdsByPlaylistId = await allPlaylistSongIds()
+        for album in await cachedAllAlbums() ?? [] {
+            summary.albumSongCounts[album.id.raw] = album.songCount
+        }
+        for (artistId, albums) in await allCachedArtistAlbums() {
+            for album in albums { summary.albumSongCounts[album.id.raw] = album.songCount }
+            summary.albumIdsByArtistId[artistId] = albums.map { $0.id.raw }
+        }
+        return summary
     }
 
     /// Every cached playlist's song-id list, keyed by playlist id — used once, at

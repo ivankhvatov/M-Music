@@ -102,6 +102,11 @@ struct AlbumsListView: View {
     /// `DownloadStore`/`LibraryCacheStatus` publish) was a big part of the CPU cost of opening
     /// this screen. Same approach `SongsListView` already uses.
     @State private var displayedAlbums: [AlbumID3] = []
+    /// `albums`, sorted by the current field/order — recomputed only when `albums` or the sort
+    /// changes (`updateSortedAlbums()`). Filtering (`updateDisplayedAlbums()`) then works on this
+    /// already-sorted array and preserves its order, so a search keystroke or a downloads publish
+    /// never pays for re-sorting the whole library (an ICU collation per comparison).
+    @State private var sortedAlbums: [AlbumID3] = []
     @State private var isLoading = false
     @State private var loadError: String?
     @State private var hasLoadedOnce = false
@@ -145,6 +150,7 @@ struct AlbumsListView: View {
                     }
                 }
             }
+            .refreshable { await performRefresh(force: true) }
             .navigationTitle("Albums")
             .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
             .toolbar {
@@ -155,17 +161,17 @@ struct AlbumsListView: View {
                 refresh()
                 // So "is this album fully downloaded" reads correctly offline even before any
                 // live fetch has happened this session — guarded internally, cheap to call again.
-                Task { await LibraryCacheStatus.shared.preload() }
+                Task(priority: .utility) { await LibraryCacheStatus.shared.preload() }
             }
             .onChange(of: searchText) { updateDisplayedAlbums() }
             .onChange(of: filterOptionStorage) { updateDisplayedAlbums() }
-            .onChange(of: sortFieldStorage) { updateDisplayedAlbums() }
-            .onChange(of: sortOrderStorage) { updateDisplayedAlbums() }
+            .onChange(of: sortFieldStorage) { updateSortedAlbums() }
+            .onChange(of: sortOrderStorage) { updateSortedAlbums() }
             .onChange(of: groupReleaseVersionsEnabled) { updateDisplayedAlbums() }
             .onChange(of: showUnavailableInLists) { updateDisplayedAlbums() }
             .onChange(of: networkMonitor.isOnline) { updateDisplayedAlbums() }
-            .onChange(of: downloads.downloadedSongIds) { updateDisplayedAlbums() }
-            .onChange(of: libraryCacheStatus.albumSongCounts) { updateDisplayedAlbums() }
+            .onChange(of: downloads.downloadedSongIds) { if offlineFilterActive { updateDisplayedAlbums() } }
+            .onChange(of: libraryCacheStatus.albumSongCounts) { if offlineFilterActive { updateDisplayedAlbums() } }
         }
     }
 
@@ -203,8 +209,41 @@ struct AlbumsListView: View {
         networkMonitor.isOnline || downloads.hasDownloadedSong(inAlbum: album.id.raw)
     }
 
+    /// Sorts the whole library by the current field/order. `sortedByLocalizedKey` computes each
+    /// title/artist key once rather than on both sides of every comparison.
+    private func sortAlbums(_ list: [AlbumID3]) -> [AlbumID3] {
+        let ascending = sortOrder.wrappedValue == .ascending
+        switch sortField.wrappedValue {
+        case .title:
+            return list.sortedByLocalizedKey(ascending: ascending) { $0.name.sortKey }
+        case .artist:
+            return list.sortedByLocalizedKey(ascending: ascending) { ($0.artist ?? "").sortKey }
+        case .year:
+            return list.sorted { lhs, rhs in
+                let lhsYear = lhs.year ?? 0
+                let rhsYear = rhs.year ?? 0
+                return ascending ? lhsYear < rhsYear : lhsYear > rhsYear
+            }
+        }
+    }
+
+    private func updateSortedAlbums() {
+        sortedAlbums = sortAlbums(albums)
+        updateDisplayedAlbums()
+    }
+
+    /// Whether the offline "hide what isn't downloaded" filter is currently in effect — the only
+    /// case in which downloads/library-cache changes can alter what's displayed.
+    private var offlineFilterActive: Bool {
+        !networkMonitor.isOnline && !showUnavailableInLists
+    }
+
+    /// Filters the already-sorted `sortedAlbums` — every step below preserves its order, except
+    /// grouping release versions, which can put a group's preferred version somewhere other than
+    /// where its first member sat (only matters for non-title sorts, where members can differ in
+    /// year/artist string), so those re-sort the (much smaller) grouped result.
     private func updateDisplayedAlbums() {
-        var result = albums
+        var result = sortedAlbums
 
         let isFavoritesOnly = filterOption.wrappedValue == .favoritesOnly
         if isFavoritesOnly {
@@ -213,6 +252,9 @@ struct AlbumsListView: View {
 
         if groupReleaseVersionsEnabled && !isFavoritesOnly {
             result = result.groupedByPreferredVersion()
+            if sortField.wrappedValue != .title {
+                result = sortAlbums(result)
+            }
         }
 
         if !searchText.isEmpty {
@@ -222,23 +264,9 @@ struct AlbumsListView: View {
             }
         }
 
-        if !networkMonitor.isOnline, !showUnavailableInLists {
+        if offlineFilterActive {
             result = result.filter {
                 libraryCacheStatus.isAlbumFullyDownloaded(albumId: $0.id.raw, downloads: downloads)
-            }
-        }
-
-        let ascending = sortOrder.wrappedValue == .ascending
-        switch sortField.wrappedValue {
-        case .title:
-            result = result.sortedByLocalizedKey(ascending: ascending) { $0.name.sortKey }
-        case .artist:
-            result = result.sortedByLocalizedKey(ascending: ascending) { ($0.artist ?? "").sortKey }
-        case .year:
-            result.sort { lhs, rhs in
-                let lhsYear = lhs.year ?? 0
-                let rhsYear = rhs.year ?? 0
-                return ascending ? lhsYear < rhsYear : lhsYear > rhsYear
             }
         }
 
@@ -251,6 +279,7 @@ struct AlbumsListView: View {
     private func refresh() {
         guard client.isConfigured else {
             albums = []
+            sortedAlbums = []
             displayedAlbums = []
             hasLoadedOnce = false
             return
@@ -264,40 +293,62 @@ struct AlbumsListView: View {
             isLoading = true
         }
 
-        Task {
-            if albums.isEmpty, let cached = await LibraryCacheDatabase.shared.cachedAllAlbums() {
-                await MainActor.run {
-                    albums = cached
-                    updateDisplayedAlbums()
-                    hasLoadedOnce = true
-                    isLoading = false
+        Task { await performRefresh() }
+    }
+
+    /// The actual load — cache first, then (unless nothing changed on the server) a fresh
+    /// download. `force` skips that change check, for pull-to-refresh.
+    private func performRefresh(force: Bool = false) async {
+        guard client.isConfigured else { return }
+        var hadCache = !albums.isEmpty
+        if albums.isEmpty, let cached = await LibraryCacheDatabase.shared.cachedAllAlbums() {
+            await MainActor.run {
+                albums = cached
+                updateSortedAlbums()
+                hasLoadedOnce = true
+                isLoading = false
+            }
+        }
+
+        hadCache = hadCache || !albums.isEmpty
+
+        // Nothing changed on the server since this list was last synced (see
+        // `LibraryRevalidation`) — the cache we just showed is current, so skip the full
+        // re-download. A forced refresh (pull-to-refresh) and a first load with no cache
+        // always download.
+        let check = await LibraryRevalidation.shared.check(.albums)
+        if !force, hadCache, !check.needsRefetch {
+            await MainActor.run {
+                isLoading = false
+                hasLoadedOnce = true
+            }
+            return
+        }
+
+        do {
+            let fetched = try await client.allAlbums()
+            let changed = fetched != albums
+            await MainActor.run {
+                loadError = nil
+                isLoading = false
+                hasLoadedOnce = true
+                if changed {
+                    albums = fetched
+                    updateSortedAlbums()
                 }
             }
-
-            do {
-                let fetched = try await client.allAlbums()
-                let changed = fetched != albums
-                await MainActor.run {
-                    loadError = nil
-                    isLoading = false
-                    hasLoadedOnce = true
-                    if changed {
-                        albums = fetched
-                        updateDisplayedAlbums()
-                    }
-                }
-                if changed {
-                    await LibraryCacheDatabase.shared.cacheAllAlbums(fetched)
-                }
-            } catch {
-                // Offline, or the request otherwise failed — keep showing whatever's already on
-                // screen (cache, or an earlier successful fetch); only surface an error if
-                // there's truly nothing to show.
-                await MainActor.run {
-                    isLoading = false
-                    if albums.isEmpty {
-                        loadError = error.localizedDescription
-                    }
+            if changed {
+                await LibraryCacheDatabase.shared.cacheAllAlbums(fetched)
+            }
+            await LibraryRevalidation.shared.markSynced(.albums, token: check.token)
+        } catch {
+            // Offline, or the request otherwise failed — keep showing whatever's already on
+            // screen (cache, or an earlier successful fetch); only surface an error if
+            // there's truly nothing to show.
+            await MainActor.run {
+                isLoading = false
+                if albums.isEmpty {
+                    loadError = error.localizedDescription
                 }
             }
         }

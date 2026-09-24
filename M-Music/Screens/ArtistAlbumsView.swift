@@ -136,13 +136,13 @@ struct ArtistAlbumsView: View {
             refresh()
             // So "is this album fully downloaded" reads correctly offline even before any live
             // fetch has happened this session — guarded internally, cheap to call again.
-            Task { await LibraryCacheStatus.shared.preload() }
+            Task(priority: .utility) { await LibraryCacheStatus.shared.preload() }
         }
     }
 
     private var artistHeader: some View {
         VStack(spacing: 12) {
-            CachedAsyncImage(url: artworkURL) { image in
+            CachedAsyncImage(url: artworkURL, maxPixelSize: ImageCache.cardMaxPixelSize) { image in
                 image
                     .resizable()
                     .aspectRatio(contentMode: .fill)
@@ -243,17 +243,18 @@ struct ArtistAlbumsView: View {
     }
 
     private var sortedAlbums: [AlbumID3] {
-        displayAlbums.sorted { lhs, rhs in
-            let comparison: ComparisonResult
-            switch sortField.wrappedValue {
-            case .title:
-                comparison = lhs.name.sortKey.localizedStandardCompare(rhs.name.sortKey)
-            case .year:
+        // Settings read once, outside the sort: each read builds a `Binding` and scans `allCases`,
+        // which the old comparator did on every single comparison.
+        let ascending = sortOrder.wrappedValue == .ascending
+        switch sortField.wrappedValue {
+        case .title:
+            return displayAlbums.sortedByLocalizedKey(ascending: ascending) { $0.name.sortKey }
+        case .year:
+            return displayAlbums.sorted { lhs, rhs in
                 let lhsYear = lhs.year ?? 0
                 let rhsYear = rhs.year ?? 0
-                comparison = lhsYear == rhsYear ? .orderedSame : (lhsYear < rhsYear ? .orderedAscending : .orderedDescending)
+                return ascending ? lhsYear < rhsYear : lhsYear > rhsYear
             }
-            return sortOrder.wrappedValue == .ascending ? comparison == .orderedAscending : comparison == .orderedDescending
         }
     }
 

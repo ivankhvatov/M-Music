@@ -107,6 +107,10 @@ struct SongsListView: View {
     /// an entire library's worth of tracks, and re-filtering/re-sorting all of them on every
     /// access (there were 2-3 per `body` pass) was the dominant cause of this screen lagging.
     @State private var displayedSongs: [Child] = []
+    /// `songs` sorted by the current field/order, recomputed only when `songs` or the sort
+    /// changes — see `AlbumsListView.sortedAlbums`. For a library of thousands of tracks the sort
+    /// is the expensive part; filtering (search, favorites, offline) preserves this order.
+    @State private var sortedSongs: [Child] = []
 
     /// Point size artwork renders at in a row — the server is asked to downscale to this times
     /// `displayScale` rather than sending full-size cover art for a 44x44 thumbnail.
@@ -147,6 +151,7 @@ struct SongsListView: View {
                     .listStyle(.plain)
                 }
             }
+            .refreshable { await performRefresh(force: true) }
             .navigationTitle("Songs")
             .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
             .toolbar {
@@ -156,15 +161,15 @@ struct SongsListView: View {
             .onAppear {
                 refresh()
             }
-            .onChange(of: songs) { updateDisplayedSongs() }
+            .onChange(of: songs) { updateSortedSongs() }
             .onChange(of: searchText) { updateDisplayedSongs() }
             .onChange(of: filterOptionStorage) { updateDisplayedSongs() }
-            .onChange(of: sortFieldStorage) { updateDisplayedSongs() }
-            .onChange(of: sortOrderStorage) { updateDisplayedSongs() }
-            .onChange(of: starStore.overrides) { updateDisplayedSongs() }
+            .onChange(of: sortFieldStorage) { updateSortedSongs() }
+            .onChange(of: sortOrderStorage) { updateSortedSongs() }
+            .onChange(of: starStore.overrides) { if filterOption.wrappedValue == .favoritesOnly { updateDisplayedSongs() } }
             .onChange(of: showUnavailableInLists) { updateDisplayedSongs() }
             .onChange(of: networkMonitor.isOnline) { updateDisplayedSongs() }
-            .onChange(of: downloads.downloadedSongIds) { updateDisplayedSongs() }
+            .onChange(of: downloads.downloadedSongIds) { if offlineFilterActive { updateDisplayedSongs() } }
         }
     }
 
@@ -181,8 +186,32 @@ struct SongsListView: View {
         player.play(queue: queue, startAt: index)
     }
 
+    private func updateSortedSongs() {
+        // Read once, outside the sort: each read builds a `Binding` and scans `allCases`.
+        let ascending = sortOrder.wrappedValue == .ascending
+        switch sortField.wrappedValue {
+        case .title:
+            sortedSongs = songs.sortedByLocalizedKey(ascending: ascending) { $0.title.sortKey }
+        case .artist:
+            sortedSongs = songs.sortedByLocalizedKey(ascending: ascending) { ($0.artist ?? "").sortKey }
+        case .year:
+            sortedSongs = songs.sorted { lhs, rhs in
+                let lhsYear = lhs.year ?? 0
+                let rhsYear = rhs.year ?? 0
+                return ascending ? lhsYear < rhsYear : lhsYear > rhsYear
+            }
+        }
+        updateDisplayedSongs()
+    }
+
+    /// See `AlbumsListView.offlineFilterActive`.
+    private var offlineFilterActive: Bool {
+        !networkMonitor.isOnline && !showUnavailableInLists
+    }
+
+    /// Filters the already-sorted `sortedSongs`, preserving its order.
     private func updateDisplayedSongs() {
-        var result = songs
+        var result = sortedSongs
 
         if filterOption.wrappedValue == .favoritesOnly {
             result = result.filter { starStore.isStarred($0) }
@@ -195,23 +224,8 @@ struct SongsListView: View {
             }
         }
 
-        if !networkMonitor.isOnline, !showUnavailableInLists {
+        if offlineFilterActive {
             result = result.filter { downloads.isDownloaded($0.id.raw) }
-        }
-
-        result.sort { lhs, rhs in
-            let comparison: ComparisonResult
-            switch sortField.wrappedValue {
-            case .title:
-                comparison = lhs.title.sortKey.localizedStandardCompare(rhs.title.sortKey)
-            case .artist:
-                comparison = (lhs.artist ?? "").sortKey.localizedStandardCompare((rhs.artist ?? "").sortKey)
-            case .year:
-                let lhsYear = lhs.year ?? 0
-                let rhsYear = rhs.year ?? 0
-                comparison = lhsYear == rhsYear ? .orderedSame : (lhsYear < rhsYear ? .orderedAscending : .orderedDescending)
-            }
-            return sortOrder.wrappedValue == .ascending ? comparison == .orderedAscending : comparison == .orderedDescending
         }
 
         displayedSongs = result
@@ -234,36 +248,58 @@ struct SongsListView: View {
             isLoading = true
         }
 
-        Task {
-            if songs.isEmpty, let cached = await LibraryCacheDatabase.shared.cachedAllSongs() {
-                await MainActor.run {
-                    songs = cached
-                    hasLoadedOnce = true
-                    isLoading = false
-                }
-            }
+        Task { await performRefresh() }
+    }
 
-            do {
-                let fetched = try await client.allSongs()
-                let changed = fetched != songs
-                await MainActor.run {
-                    loadError = nil
-                    isLoading = false
-                    hasLoadedOnce = true
-                    if changed { songs = fetched }
-                }
-                if changed {
-                    await LibraryCacheDatabase.shared.cacheAllSongs(fetched)
-                }
-            } catch {
-                // Offline, or the request otherwise failed — keep showing whatever's already on
-                // screen (cache, or an earlier successful fetch); only surface an error if
-                // there's truly nothing to show.
-                await MainActor.run {
-                    isLoading = false
-                    if songs.isEmpty {
-                        loadError = error.localizedDescription
-                    }
+    /// The actual load — cache first, then (unless nothing changed on the server) a fresh
+    /// download. `force` skips that change check, for pull-to-refresh.
+    private func performRefresh(force: Bool = false) async {
+        guard client.isConfigured else { return }
+        var hadCache = !songs.isEmpty
+        if songs.isEmpty, let cached = await LibraryCacheDatabase.shared.cachedAllSongs() {
+            await MainActor.run {
+                songs = cached
+                hasLoadedOnce = true
+                isLoading = false
+            }
+        }
+
+        hadCache = hadCache || !songs.isEmpty
+
+        // Nothing changed on the server since this list was last synced (see
+        // `LibraryRevalidation`) — the cache we just showed is current, so skip the full
+        // re-download. A forced refresh (pull-to-refresh) and a first load with no cache
+        // always download.
+        let check = await LibraryRevalidation.shared.check(.songs)
+        if !force, hadCache, !check.needsRefetch {
+            await MainActor.run {
+                isLoading = false
+                hasLoadedOnce = true
+            }
+            return
+        }
+
+        do {
+            let fetched = try await client.allSongs()
+            let changed = fetched != songs
+            await MainActor.run {
+                loadError = nil
+                isLoading = false
+                hasLoadedOnce = true
+                if changed { songs = fetched }
+            }
+            if changed {
+                await LibraryCacheDatabase.shared.cacheAllSongs(fetched)
+            }
+            await LibraryRevalidation.shared.markSynced(.songs, token: check.token)
+        } catch {
+            // Offline, or the request otherwise failed — keep showing whatever's already on
+            // screen (cache, or an earlier successful fetch); only surface an error if
+            // there's truly nothing to show.
+            await MainActor.run {
+                isLoading = false
+                if songs.isEmpty {
+                    loadError = error.localizedDescription
                 }
             }
         }

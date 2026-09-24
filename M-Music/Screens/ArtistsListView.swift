@@ -49,6 +49,9 @@ struct ArtistsListView: View {
     /// Cached result of filtering/sorting `artists`, recomputed only by `updateDisplayedArtists()`
     /// rather than on every `body` evaluation — see `AlbumsListView.displayedAlbums`.
     @State private var displayedArtists: [ArtistID3] = []
+    /// `artists` sorted by the current order, recomputed only when `artists` or the order
+    /// changes — see `AlbumsListView.sortedAlbums`.
+    @State private var sortedArtists: [ArtistID3] = []
     @State private var isLoading = false
     @State private var loadError: String?
     @State private var hasLoadedOnce = false
@@ -105,6 +108,7 @@ struct ArtistsListView: View {
                     .listStyle(.plain)
                 }
             }
+            .refreshable { await performRefresh(force: true) }
             .navigationTitle("Artists")
             .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
             .toolbar {
@@ -116,21 +120,32 @@ struct ArtistsListView: View {
                 // So "does this artist have a fully-downloaded album" reads correctly offline
                 // even before any live fetch has happened this session — guarded internally,
                 // cheap to call again.
-                Task { await LibraryCacheStatus.shared.preload() }
+                Task(priority: .utility) { await LibraryCacheStatus.shared.preload() }
             }
             .onChange(of: searchText) { updateDisplayedArtists() }
             .onChange(of: filterOptionStorage) { updateDisplayedArtists() }
-            .onChange(of: sortOrderStorage) { updateDisplayedArtists() }
+            .onChange(of: sortOrderStorage) { updateSortedArtists() }
             .onChange(of: showUnavailableInLists) { updateDisplayedArtists() }
             .onChange(of: networkMonitor.isOnline) { updateDisplayedArtists() }
-            .onChange(of: downloads.downloadedSongIds) { updateDisplayedArtists() }
-            .onChange(of: libraryCacheStatus.albumSongCounts) { updateDisplayedArtists() }
-            .onChange(of: libraryCacheStatus.albumIdsByArtistId) { updateDisplayedArtists() }
+            .onChange(of: downloads.downloadedSongIds) { if offlineFilterActive { updateDisplayedArtists() } }
+            .onChange(of: libraryCacheStatus.albumSongCounts) { if offlineFilterActive { updateDisplayedArtists() } }
+            .onChange(of: libraryCacheStatus.albumIdsByArtistId) { if offlineFilterActive { updateDisplayedArtists() } }
         }
     }
 
+    private func updateSortedArtists() {
+        sortedArtists = artists.sortedByLocalizedKey(ascending: sortOrder.wrappedValue == .ascending) { $0.name.sortKey }
+        updateDisplayedArtists()
+    }
+
+    /// See `AlbumsListView.offlineFilterActive`.
+    private var offlineFilterActive: Bool {
+        !networkMonitor.isOnline && !showUnavailableInLists
+    }
+
+    /// Filters the already-sorted `sortedArtists`, preserving its order.
     private func updateDisplayedArtists() {
-        var result = artists
+        var result = sortedArtists
 
         if filterOption.wrappedValue == .favoritesOnly {
             result = result.filter { $0.isStarred }
@@ -140,13 +155,11 @@ struct ArtistsListView: View {
             result = result.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
         }
 
-        if !networkMonitor.isOnline, !showUnavailableInLists {
+        if offlineFilterActive {
             result = result.filter {
                 libraryCacheStatus.hasFullyDownloadedAlbum(artistId: $0.id.raw, downloads: downloads)
             }
         }
-
-        result = result.sortedByLocalizedKey(ascending: sortOrder.wrappedValue == .ascending) { $0.name.sortKey }
 
         displayedArtists = result
     }
@@ -191,6 +204,7 @@ struct ArtistsListView: View {
     private func refresh() {
         guard client.isConfigured else {
             artists = []
+            sortedArtists = []
             displayedArtists = []
             hasLoadedOnce = false
             return
@@ -204,41 +218,63 @@ struct ArtistsListView: View {
             isLoading = true
         }
 
-        Task {
-            if artists.isEmpty, let cached = await LibraryCacheDatabase.shared.cachedAllArtists() {
-                await MainActor.run {
-                    artists = cached
-                    updateDisplayedArtists()
-                    hasLoadedOnce = true
-                    isLoading = false
+        Task { await performRefresh() }
+    }
+
+    /// The actual load — cache first, then (unless nothing changed on the server) a fresh
+    /// download. `force` skips that change check, for pull-to-refresh.
+    private func performRefresh(force: Bool = false) async {
+        guard client.isConfigured else { return }
+        var hadCache = !artists.isEmpty
+        if artists.isEmpty, let cached = await LibraryCacheDatabase.shared.cachedAllArtists() {
+            await MainActor.run {
+                artists = cached
+                updateSortedArtists()
+                hasLoadedOnce = true
+                isLoading = false
+            }
+        }
+
+        hadCache = hadCache || !artists.isEmpty
+
+        // Nothing changed on the server since this list was last synced (see
+        // `LibraryRevalidation`) — the cache we just showed is current, so skip the full
+        // re-download. A forced refresh (pull-to-refresh) and a first load with no cache
+        // always download.
+        let check = await LibraryRevalidation.shared.check(.artists)
+        if !force, hadCache, !check.needsRefetch {
+            await MainActor.run {
+                isLoading = false
+                hasLoadedOnce = true
+            }
+            return
+        }
+
+        do {
+            let result = try await client.getArtists()
+            let fetched = result.index.flatMap(\.artist)
+            let changed = fetched != artists
+            await MainActor.run {
+                loadError = nil
+                isLoading = false
+                hasLoadedOnce = true
+                if changed {
+                    artists = fetched
+                    updateSortedArtists()
                 }
             }
-
-            do {
-                let result = try await client.getArtists()
-                let fetched = result.index.flatMap(\.artist)
-                let changed = fetched != artists
-                await MainActor.run {
-                    loadError = nil
-                    isLoading = false
-                    hasLoadedOnce = true
-                    if changed {
-                        artists = fetched
-                        updateDisplayedArtists()
-                    }
-                }
-                if changed {
-                    await LibraryCacheDatabase.shared.cacheAllArtists(fetched)
-                }
-            } catch {
-                // Offline, or the request otherwise failed — keep showing whatever's already on
-                // screen (cache, or an earlier successful fetch); only surface an error if
-                // there's truly nothing to show.
-                await MainActor.run {
-                    isLoading = false
-                    if artists.isEmpty {
-                        loadError = error.localizedDescription
-                    }
+            if changed {
+                await LibraryCacheDatabase.shared.cacheAllArtists(fetched)
+            }
+            await LibraryRevalidation.shared.markSynced(.artists, token: check.token)
+        } catch {
+            // Offline, or the request otherwise failed — keep showing whatever's already on
+            // screen (cache, or an earlier successful fetch); only surface an error if
+            // there's truly nothing to show.
+            await MainActor.run {
+                isLoading = false
+                if artists.isEmpty {
+                    loadError = error.localizedDescription
                 }
             }
         }
@@ -263,7 +299,7 @@ private struct ArtistRow: View {
 
     var body: some View {
         HStack(spacing: 16) {
-            CachedAsyncImage(url: artworkURL) { image in
+            CachedAsyncImage(url: artworkURL, maxPixelSize: ImageCache.avatarMaxPixelSize, loadDelay: .milliseconds(150)) { image in
                 image
                     .resizable()
                     .aspectRatio(contentMode: .fill)

@@ -22,7 +22,7 @@ enum DownloadState: Equatable, Sendable {
 /// A song downloaded to disk, persisted in `DownloadDatabase`. Unlike Shelv's `DownloadedSong`
 /// (which is keyed by `serverId::songId` for its multi-server support) this is keyed by `songId`
 /// alone — M-Music only ever talks to one `SubsonicClient.shared` server.
-struct DownloadRecord: Codable, Identifiable, FetchableRecord, PersistableRecord, Sendable {
+struct DownloadRecord: Codable, Identifiable, Equatable, FetchableRecord, PersistableRecord, Sendable {
     var songId: String
     var title: String
     var artist: String?

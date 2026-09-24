@@ -41,11 +41,16 @@ struct PlaylistView: View {
     /// Point size artwork renders at in a song row — mirrors `SongsListView.rowArtworkSize`.
     private let rowArtworkSize: CGFloat = 44
 
+    /// `init` runs for every `PlaylistView(...)` a list constructs — one per realized row/card,
+    /// on every parent re-render — and `darkened()` goes through `UIColor`'s HSB bridge, so the
+    /// placeholder is computed once here instead of per init.
+    private static let placeholderDarkenedBackground = Color(.systemBackground).darkened()
+
     init(playlist: PlaylistSummary, zoomNamespace: Namespace.ID? = nil) {
         self.playlist = playlist
         self.zoomNamespace = zoomNamespace
         _backgroundColor = State(initialValue: Color(.systemBackground))
-        _darkenedBackgroundColor = State(initialValue: Color(.systemBackground).darkened())
+        _darkenedBackgroundColor = State(initialValue: Self.placeholderDarkenedBackground)
         _artworkURL = State(initialValue: try? SubsonicClient.shared.coverArtURL(forId: playlist.coverArt ?? playlist.id.raw))
     }
 
@@ -261,7 +266,7 @@ struct PlaylistView: View {
     func playlistArtwork() -> some View {
         // Same URL PlaylistCardView requests (original size, no `size` param), so this reuses the
         // image straight from ImageCache instead of triggering a second fetch.
-        CachedAsyncImage(url: artworkURL, onLoad: { uiImage in
+        CachedAsyncImage(url: artworkURL, fallbackMaxPixelSize: ImageCache.cardMaxPixelSize, onLoad: { uiImage in
             Task.detached(priority: .userInitiated) {
                 guard let color = uiImage.averageColor() else { return }
                 await MainActor.run {

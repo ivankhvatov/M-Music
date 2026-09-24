@@ -27,8 +27,17 @@ final class LibraryCacheStatus: ObservableObject {
         songIdsByPlaylistId[playlistId] = songIds
     }
 
+    /// Assigns the published dictionary at most once, and only if a count actually changed —
+    /// per-element assignment fired `objectWillChange` (and re-rendered every list observing this)
+    /// once per album, on every refetch that reported a change.
     func mergeAlbumSongCounts(_ albums: [AlbumID3]) {
-        for album in albums { albumSongCounts[album.id.raw] = album.songCount }
+        var counts = albumSongCounts
+        var didChange = false
+        for album in albums where counts[album.id.raw] != album.songCount {
+            counts[album.id.raw] = album.songCount
+            didChange = true
+        }
+        if didChange { albumSongCounts = counts }
     }
 
     func setAlbumIds(_ albumIds: [String], forArtist artistId: String) {
@@ -58,30 +67,31 @@ final class LibraryCacheStatus: ObservableObject {
     func preload() async {
         guard !didPreload else { return }
         didPreload = true
-        let byPlaylistId = await LibraryCacheDatabase.shared.allPlaylistSongIds()
-        let allAlbums = await LibraryCacheDatabase.shared.cachedAllAlbums()
-        let byArtistId = await LibraryCacheDatabase.shared.allCachedArtistAlbums()
+        // Read straight out of SQLite's JSON columns rather than decoding every cached playlist,
+        // album and artist model — see `LibraryCacheDatabase.summary()`.
+        let summary: LibraryCacheDatabase.Summary
+        if let fast = await LibraryCacheDatabase.shared.summary() {
+            summary = fast
+        } else {
+            summary = await LibraryCacheDatabase.shared.summaryByDecoding()
+        }
 
         // Everything below runs with no suspension point, so nothing else on the main actor can
         // touch these dictionaries between reading and writing them. Each is built up in a local
-        // and assigned back exactly once: mutating a `@Published` dictionary element by element
-        // (as `mergeAlbumSongCounts`/`setAlbumIds` do for their incremental callers) fires
-        // `objectWillChange` for every single element — thousands of them for a real library,
-        // on the main thread, right while the list screen that triggered this is opening.
+        // and assigned back at most once, and only if it actually changed: mutating a `@Published`
+        // dictionary element by element (as `mergeAlbumSongCounts`/`setAlbumIds` did) fires
+        // `objectWillChange` for every single element — thousands of them for a real library, on
+        // the main thread, right while the list screen that triggered this is opening.
         var songIds = songIdsByPlaylistId
-        songIds.merge(byPlaylistId) { _, new in new }
+        songIds.merge(summary.songIdsByPlaylistId) { _, new in new }
+        if songIds != songIdsByPlaylistId { songIdsByPlaylistId = songIds }
 
         var counts = albumSongCounts
-        for album in allAlbums ?? [] { counts[album.id.raw] = album.songCount }
+        counts.merge(summary.albumSongCounts) { _, new in new }
+        if counts != albumSongCounts { albumSongCounts = counts }
 
         var albumIds = albumIdsByArtistId
-        for (artistId, albums) in byArtistId {
-            for album in albums { counts[album.id.raw] = album.songCount }
-            albumIds[artistId] = albums.map { $0.id.raw }
-        }
-
-        songIdsByPlaylistId = songIds
-        albumSongCounts = counts
-        albumIdsByArtistId = albumIds
+        albumIds.merge(summary.albumIdsByArtistId) { _, new in new }
+        if albumIds != albumIdsByArtistId { albumIdsByArtistId = albumIds }
     }
 }

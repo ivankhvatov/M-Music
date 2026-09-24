@@ -1,5 +1,6 @@
 import SwiftUI
 import ImageIO
+import UniformTypeIdentifiers
 
 /// Cache for downloaded images, backed by both an in-memory `NSCache` and disk
 /// (`Caches/SubsonicImageCache/`), so artwork already fetched once — this session or a
@@ -21,10 +22,15 @@ import ImageIO
 final class ImageCache: @unchecked Sendable {
     static let shared = ImageCache()
 
-    /// The longest side, in pixels, images are decoded to by default. The largest thing that
-    /// shows a cover apart from Now Playing is the album header at 270pt (≈810px at 3x), so this
-    /// leaves headroom without any visible softness.
+    /// The size, in pixels, images are decoded to by default — the album/playlist headers'
+    /// tier. The largest thing that shows a cover apart from Now Playing is the album header at
+    /// 270pt (≈810px at 3x), so this leaves headroom without any visible softness.
     static let standardMaxPixelSize = 900
+    /// Cards and grid cells (~170pt wide, ≈510px at 3x). Decoding these at the header tier would
+    /// mean up to 3x the pixels for nothing, dozens of times over on a screen full of covers.
+    static let cardMaxPixelSize = 512
+    /// Small round avatars (a 48pt artist row is 144px at 3x).
+    static let avatarMaxPixelSize = 256
 
     private let memory = NSCache<NSString, UIImage>()
     private let fileManager = FileManager.default
@@ -267,27 +273,45 @@ final class ImageCache: @unchecked Sendable {
     /// handed to SwiftUI is already a plain bitmap with nothing left to lazily (and buggily)
     /// decode on the main thread.
     ///
-    /// With a `maxPixelSize`, an image far bigger than that is decoded *directly at the reduced
-    /// size* via ImageIO's thumbnail path, which skips most of the work of a full-size decode —
-    /// measured ~2x faster at 2000-3000px and ~11x smaller in memory at 3000px. An image only
-    /// modestly over the cap (up to `downsampleThreshold`x) takes the plain full-size path
-    /// instead: below roughly 1400px the thumbnail path's resampling costs *more* than just
-    /// decoding the image, and holding a bitmap that size is still cheap. `maxPixelSize == nil`
-    /// always takes the full-size path.
+    /// With a `maxPixelSize`, an oversized image is decoded at reduced size instead of decoded
+    /// whole and shrunk afterwards — measured, cold-opening a screen of ~12 covers, the full
+    /// decode plus the resample-and-convert passes after it were the largest app-controlled CPU
+    /// cost. For a JPEG (nearly every cover) that's ImageIO's DCT sub-sampling: it decodes at
+    /// 1/2, 1/4 or 1/8 scale directly, skipping most of the IDCT work and needing no resample at
+    /// all. The factor is the largest power of two that still leaves the result at least
+    /// `maxPixelSize` on its longest side (so it lands between 1x and 2x the target — SwiftUI
+    /// scales that down on the GPU). Other formats far over the cap take ImageIO's thumbnail
+    /// path (which does resample); anything at or near the cap, and `maxPixelSize == nil`, takes
+    /// the plain full-size path.
     private func decodedImage(from data: Data, maxPixelSize: Int?) -> UIImage? {
         if let maxPixelSize, let source = CGImageSourceCreateWithData(data as CFData, nil),
            let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
            let width = properties[kCGImagePropertyPixelWidth] as? Int,
-           let height = properties[kCGImagePropertyPixelHeight] as? Int,
-           Double(max(width, height)) > Double(maxPixelSize) * Self.downsampleThreshold {
-            let options: [CFString: Any] = [
-                kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceShouldCacheImmediately: true,
-                kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
-            ]
-            if let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
-                return normalizedBitmap(from: thumbnail, scale: 1, orientation: .up)
+           let height = properties[kCGImagePropertyPixelHeight] as? Int {
+            let longest = max(width, height)
+
+            if longest > maxPixelSize, let type = CGImageSourceGetType(source), UTType(type as String)?.conforms(to: .jpeg) == true {
+                var factor = 1
+                while factor < 8, longest / (factor * 2) >= maxPixelSize { factor *= 2 }
+                if factor > 1 {
+                    let options: [CFString: Any] = [
+                        kCGImageSourceShouldCacheImmediately: true,
+                        kCGImageSourceSubsampleFactor: factor,
+                    ]
+                    if let reduced = CGImageSourceCreateImageAtIndex(source, 0, options as CFDictionary) {
+                        return normalizedBitmap(from: reduced, scale: 1, orientation: .up)
+                    }
+                }
+            } else if Double(longest) > Double(maxPixelSize) * Self.downsampleThreshold {
+                let options: [CFString: Any] = [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceShouldCacheImmediately: true,
+                    kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+                ]
+                if let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
+                    return normalizedBitmap(from: thumbnail, scale: 1, orientation: .up)
+                }
             }
         }
         guard let source = UIImage(data: data), let cgImage = source.cgImage else { return nil }
@@ -354,6 +378,16 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     /// See `ImageCache.load(_:maxPixelSize:)` — the standard cap unless a caller (Now Playing)
     /// needs the full-resolution bitmap.
     private let maxPixelSize: Int?
+    /// A smaller tier to show *immediately* if `maxPixelSize`'s isn't decoded yet but this one is
+    /// — e.g. an album header opened from a card, whose (smaller) card image is already in
+    /// memory: it stands in during the zoom transition instead of a placeholder, then the
+    /// full-tier image replaces it once decoded.
+    private let fallbackMaxPixelSize: Int?
+    /// How long to wait before starting to load an image that isn't already in memory. The load
+    /// runs in this view's `.task`, so a cell that scrolls away (or a screen that's popped) during
+    /// the wait cancels it and never pays for the decode — and covers a screen opens with don't
+    /// all start decoding on top of the navigation push's own main-thread burst.
+    private let loadDelay: Duration
     /// Fires once per `url` when a `UIImage` is obtained for it (a cache hit or a fresh load) —
     /// lets a caller that needs the raw bitmap itself (e.g. to sample its average color) get it
     /// directly, instead of re-deriving one from the wrapped `Image` via `ImageRenderer`, which
@@ -377,17 +411,24 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     init(
         url: URL?,
         maxPixelSize: Int? = ImageCache.standardMaxPixelSize,
+        fallbackMaxPixelSize: Int? = nil,
+        loadDelay: Duration = .zero,
         onLoad: ((UIImage) -> Void)? = nil,
         @ViewBuilder content: @escaping (Image) -> Content,
         @ViewBuilder placeholder: @escaping () -> Placeholder
     ) {
         self.url = url
         self.maxPixelSize = maxPixelSize
+        self.fallbackMaxPixelSize = fallbackMaxPixelSize
+        self.loadDelay = loadDelay
         self.onLoad = onLoad
         self.content = content
         self.placeholder = placeholder
         let cached = url.flatMap { ImageCache.shared.image(for: $0, maxPixelSize: maxPixelSize) }
-        _uiImage = State(initialValue: cached)
+        let standIn = cached ?? fallbackMaxPixelSize.flatMap { tier in
+            url.flatMap { ImageCache.shared.image(for: $0, maxPixelSize: tier) }
+        }
+        _uiImage = State(initialValue: standIn)
         _loadedURL = State(initialValue: cached != nil ? url : nil)
     }
 
@@ -421,6 +462,13 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
             loadedURL = url
             notifyLoaded()
             return
+        }
+        // Showing a smaller stand-in already (see `fallbackMaxPixelSize`): it's good enough for
+        // `onLoad`'s purposes (e.g. an average color), so don't make that wait for the full decode.
+        notifyLoaded()
+        if loadDelay > .zero {
+            try? await Task.sleep(for: loadDelay)
+            if Task.isCancelled { return }
         }
         guard let image = await ImageCache.shared.load(url, maxPixelSize: maxPixelSize) else { return }
         await MainActor.run {
