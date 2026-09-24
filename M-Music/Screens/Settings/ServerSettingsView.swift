@@ -99,28 +99,26 @@ struct ServerSettingsView: View {
         Task {
             do {
                 let license = try await client.connect(baseURL: url, username: username, password: password)
-                await MainActor.run {
-                    isConnecting = false
-                    isConnected = true
-                    statusMessage = license.valid
-                        ? "Connected to \(url.host ?? url.absoluteString)."
-                        : "Connected, but the server's license is not valid."
-                }
+                isConnecting = false
+                isConnected = true
+                statusMessage = license.valid
+                    ? "Connected to \(url.host ?? url.absoluteString)."
+                    : "Connected, but the server's license is not valid."
             } catch {
-                await MainActor.run {
-                    isConnecting = false
-                    isConnected = client.isConfigured
-                    errorMessage = error.localizedDescription
-                }
+                isConnecting = false
+                isConnected = client.isConfigured
+                errorMessage = error.localizedDescription
             }
         }
     }
 
     private func disconnect() {
-        client.disconnect()
+        // The UI state flips immediately; the Keychain/cache file I/O inside `client.disconnect()`
+        // runs off the main thread (it's `nonisolated async`), so tapping Disconnect can't hitch.
         isConnected = false
         statusMessage = nil
         errorMessage = nil
+        Task { await client.disconnect() }
     }
 }
 

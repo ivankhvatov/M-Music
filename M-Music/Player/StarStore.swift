@@ -35,7 +35,7 @@ final class StarStore: ObservableObject {
                     try await client.unstar(ids: [track.id.raw])
                 }
             } catch {
-                await MainActor.run { self.overrides[track.id.raw] = !newValue }
+                self.overrides[track.id.raw] = !newValue
             }
         }
     }

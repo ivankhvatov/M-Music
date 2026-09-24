@@ -65,12 +65,15 @@ final class SubsonicClient: @unchecked Sendable {
         }
     }
 
-    /// Clears in-memory and persisted credentials.
-    func disconnect() {
+    /// Clears in-memory and persisted credentials. The in-memory credentials are cleared first
+    /// thing, before any of the slower work; the Keychain, image-cache directory, and
+    /// library-cache work that follows is file I/O, and — being `nonisolated async` — runs off
+    /// the calling actor (a view's main actor, in practice) rather than blocking it.
+    nonisolated func disconnect() async {
         credentials = nil
         SubsonicCredentialsStore.clear()
-        Task { await LibraryCacheDatabase.shared.clearAll() }
         ImageCache.shared.invalidateAll()
+        await LibraryCacheDatabase.shared.clearAll()
     }
 
     // MARK: - URL building
@@ -115,6 +118,10 @@ final class SubsonicClient: @unchecked Sendable {
 
     // MARK: - Networking primitives
 
+    // NOTE: `fetch`/`send` (and every endpoint built on them) deliberately stay plain nonisolated
+    // `async` functions — that's what keeps the network round trip *and* the JSON decoding off the
+    // main thread when a SwiftUI view awaits them. Turning on default MainActor isolation or
+    // `NonisolatedNonsendingByDefault` would make them inherit the caller's (main) actor.
     private func fetch(_ url: URL, method: String) async throws -> Data {
         var request = URLRequest(url: url)
         request.httpMethod = method
