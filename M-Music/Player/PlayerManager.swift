@@ -76,6 +76,23 @@ final class PlayerManager: ObservableObject {
         return queue[currentIndex]
     }
 
+    /// The internet radio station being streamed, if any. Radio bypasses the queue entirely —
+    /// while this is set, `queue`/`currentIndex` are empty and `currentTrack` is `nil`.
+    @Published private(set) var currentRadioStation: InternetRadioStation?
+
+    var isRadio: Bool { currentRadioStation != nil }
+
+    /// What the mini/full player and lock screen show as the title/subtitle, whether that's a
+    /// track or a radio station.
+    var nowPlayingTitle: String {
+        currentRadioStation?.name ?? currentTrack?.title ?? String(localized: "Not Playing")
+    }
+
+    var nowPlayingSubtitle: String {
+        if currentRadioStation != nil { return String(localized: "Live Radio") }
+        return currentTrack?.artist ?? ""
+    }
+
     private let client: SubsonicClient
     private let engine = PlayerEngine()
     private var subscriptions: Set<AnyCancellable> = []
@@ -282,6 +299,7 @@ final class PlayerManager: ObservableObject {
     /// `playNext`/`addToQueue`; only starting a new queue replaces it.
     func play(queue newQueue: [Child], startAt index: Int, fromPlaylist: Bool = false) {
         guard newQueue.indices.contains(index) else { return }
+        currentRadioStation = nil
         queue = newQueue
         isPlaylistQueue = fromPlaylist
         currentIndex = index
@@ -354,7 +372,38 @@ final class PlayerManager: ObservableObject {
         persistState()
     }
 
+    /// Starts streaming `station` live, replacing whatever was playing. Radio has no queue,
+    /// duration or seeking, and is never scrobbled or cached — see `isRadio`.
+    func playRadio(_ station: InternetRadioStation) {
+        guard URL(string: station.streamUrl) != nil else { return }
+        configureAudioSessionIfNeeded()
+        scrobbleSongId = nil
+        queue = []
+        currentIndex = nil
+        isPlaylistQueue = false
+        clearGaplessPreload()
+        currentRadioStation = station
+        duration = 0
+        currentTime = 0
+        playbackSource = nil
+        audioFormatInfo = nil
+        isBuffering = false
+        startRadioStream(station)
+        updateArtworkURL()
+        updateNowPlayingInfo()
+    }
+
+    /// (Re)connects to `station`'s live stream — also how a paused station resumes, since
+    /// unpausing would replay the stale buffered audio instead of jumping back to live.
+    private func startRadioStream(_ station: InternetRadioStation) {
+        guard let url = URL(string: station.streamUrl) else { return }
+        hasLoadedItem = true
+        engine.play(url: url)
+        engine.setReplayGainVolume(Float(min(ReplayGainSettings.untaggedLinearGain, 1)))
+    }
+
     func seek(to time: TimeInterval) {
+        guard !isRadio else { return }
         let clamped = min(max(time, 0), duration)
         currentTime = clamped
         engine.seek(to: clamped)
@@ -375,6 +424,11 @@ final class PlayerManager: ObservableObject {
     // MARK: - Playback control
 
     private func resume() {
+        if let station = currentRadioStation {
+            startRadioStream(station)
+            updateNowPlayingPlaybackState()
+            return
+        }
         guard currentTrack != nil else { return }
         guard hasLoadedItem else {
             // Lazily restored from a previous session: nothing's been streamed yet, so build the
@@ -592,6 +646,12 @@ final class PlayerManager: ObservableObject {
     /// runs (that's what makes the transition gapless) and there's nothing left to load — just
     /// bookkeeping. Otherwise (nothing was ready in time), fall back to a fresh load.
     private func handleTrackFinishedNaturally() {
+        if isRadio {
+            // A live stream shouldn't end; if the server closes it cleanly, just stop.
+            engine.pause()
+            updateNowPlayingPlaybackState()
+            return
+        }
         guard let currentIndex else { return }
         finishScrobbleTracking()
         let nextIndex = currentIndex + 1
@@ -653,6 +713,20 @@ final class PlayerManager: ObservableObject {
     /// `currentTime` correctly, since a real file (or a plain static stream) genuinely supports
     /// resuming via Range.
     private func recoverFromPlaybackFailure(error: Error?) {
+        if let station = currentRadioStation {
+            let retryKey = "radio:\(station.id.raw)"
+            if retryKey != retryingTrackId {
+                streamFailureRetryPolicy.reset()
+                retryingTrackId = retryKey
+            }
+            if streamFailureRetryPolicy.shouldRetry(for: error) {
+                startRadioStream(station)
+            } else {
+                engine.pause()
+                updateNowPlayingPlaybackState()
+            }
+            return
+        }
         guard let track = currentTrack else { return }
         if track.id.raw != retryingTrackId {
             streamFailureRetryPolicy.reset()
@@ -960,6 +1034,10 @@ final class PlayerManager: ObservableObject {
     }
 
     private func updateArtworkURL() {
+        if let station = currentRadioStation {
+            artworkURL = station.coverArt.flatMap { try? client.coverArtURL(forId: $0) }
+            return
+        }
         guard let track = currentTrack else {
             artworkURL = nil
             return
@@ -1000,6 +1078,19 @@ final class PlayerManager: ObservableObject {
     }
 
     private func updateNowPlayingInfo() {
+        updateRemoteCommandAvailability()
+        if let station = currentRadioStation {
+            isCurrentTrackStarred = false
+            updateNowPlayingFeedback()
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = [
+                MPMediaItemPropertyTitle: station.name,
+                MPMediaItemPropertyArtist: String(localized: "Live Radio"),
+                MPNowPlayingInfoPropertyIsLiveStream: true,
+                MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? 1.0 : 0.0,
+            ]
+            loadNowPlayingArtwork()
+            return
+        }
         guard let track = currentTrack else {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
             syncCurrentTrackStarredState()
@@ -1028,7 +1119,9 @@ final class PlayerManager: ObservableObject {
     /// set together.
     private func updateNowPlayingPlaybackState() {
         guard var info = MPNowPlayingInfoCenter.default().nowPlayingInfo else { return }
-        info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
+        if !isRadio {
+            info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
+        }
         info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
@@ -1049,6 +1142,17 @@ final class PlayerManager: ObservableObject {
                 MPNowPlayingInfoCenter.default().nowPlayingInfo = info
             }
         }
+    }
+
+    /// Radio has no next/previous track, scrubbing or favorite — grey those out on the lock
+    /// screen / Control Center while it's playing, and restore them for normal tracks.
+    private func updateRemoteCommandAvailability() {
+        let center = MPRemoteCommandCenter.shared()
+        let enabled = !isRadio
+        center.nextTrackCommand.isEnabled = enabled
+        center.previousTrackCommand.isEnabled = enabled
+        center.changePlaybackPositionCommand.isEnabled = enabled
+        center.likeCommand.isEnabled = enabled
     }
 
     private func configureRemoteCommandCenter() {
@@ -1099,6 +1203,8 @@ final class PlayerManager: ObservableObject {
     private static let persistenceKey = "PlayerManager.state"
 
     private func persistState() {
+        // Radio leaves the last real queue on disk untouched, so it's restored next launch.
+        guard !isRadio else { return }
         guard let currentIndex, queue.indices.contains(currentIndex) else {
             UserDefaults.standard.removeObject(forKey: Self.persistenceKey)
             return

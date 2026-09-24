@@ -102,6 +102,8 @@ struct InternetRadioStation: Decodable, Identifiable, Hashable, Sendable {
     let name: String
     let streamUrl: String
     let homepageUrl: String?
+    /// Navidrome 0.61+ only, and only for stations with uploaded art — pass to `coverArtURL(forId:)`.
+    let coverArt: String?
 }
 
 struct InternetRadioStations: Decodable, Sendable {

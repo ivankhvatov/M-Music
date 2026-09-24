@@ -1296,6 +1296,9 @@
         }
       }
     },
+    "LIVE" : {
+
+    },
     "Live albums" : {
       "localizations" : {
         "ru" : {
@@ -1305,6 +1308,9 @@
           }
         }
       }
+    },
+    "Live Radio" : {
+
     },
     "Lossless only" : {
       "localizations" : {
@@ -1507,6 +1513,9 @@
           }
         }
       }
+    },
+    "No radio stations found." : {
+
     },
     "No recently played albums yet." : {
       "localizations" : {
@@ -1761,6 +1770,7 @@
       }
     },
     "Radio Stations" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {

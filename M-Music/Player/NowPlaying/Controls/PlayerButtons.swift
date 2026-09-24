@@ -21,6 +21,8 @@ struct PlayerButtons: View {
                     player.previous()
                 }
             )
+            .disabled(player.isRadio)
+            .opacity(player.isRadio ? 0.3 : 1)
 
             PlayerButton(
                 label: { playPauseLabel },
@@ -38,6 +40,8 @@ struct PlayerButtons: View {
                     player.next()
                 }
             )
+            .disabled(player.isRadio)
+            .opacity(player.isRadio ? 0.3 : 1)
         }
         .playerButtonStyle(.expandedPlayer)
     }

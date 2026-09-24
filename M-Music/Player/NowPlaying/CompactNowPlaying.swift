@@ -17,10 +17,10 @@ struct CompactChrome: View {
             Color.clear
                 .frame(width: 30, height: 30)
             VStack(spacing: 0) {
-                MarqueeText(text: player.currentTrack?.title ?? String(localized: "Not Playing"))
+                MarqueeText(text: player.nowPlayingTitle)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .font(.system(size: 13, weight: .semibold))
-                MarqueeText(text: player.currentTrack?.artist ?? "")
+                MarqueeText(text: player.nowPlayingSubtitle)
                     .font(.system(size: 12, weight: .regular))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .foregroundStyle(.secondary)
@@ -36,7 +36,7 @@ struct CompactChrome: View {
                     label: { playPauseLabel },
                     onEnded: { player.togglePlayPause() }
                 )
-                if !inlinedBottomAccessory {
+                if !inlinedBottomAccessory, !player.isRadio {
                     PlayerButton(
                         label: {
                             PlayerButtonLabel(type: .forward, size: 26, animationTrigger: forwardAnimationTrigger)

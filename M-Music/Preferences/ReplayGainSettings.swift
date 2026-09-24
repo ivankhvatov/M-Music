@@ -84,4 +84,11 @@ enum ReplayGainSettings {
         }
         return max(0, linear)
     }
+
+    /// The linear volume multiplier for a source that never carries ReplayGain metadata
+    /// (internet radio): `defaultGain` + `preAmp`, exactly what an untagged track gets.
+    static var untaggedLinearGain: Double {
+        guard isEnabled else { return 1 }
+        return max(0, pow(10, (defaultGain + preAmp) / 20))
+    }
 }

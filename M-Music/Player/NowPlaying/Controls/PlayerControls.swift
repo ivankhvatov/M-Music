@@ -13,7 +13,13 @@ struct PlayerControls: View {
             VStack(spacing: 0) {
                 VStack(spacing: spacing) {
                     trackInfo
-                    TimingIndicator(spacing: spacing)
+                    Group {
+                        if player.isRadio {
+                            liveIndicator
+                        } else {
+                            TimingIndicator(spacing: spacing)
+                        }
+                    }
                         .padding(.top, spacing)
                         // The slider itself adds `growth` more inset at rest (it shrinks off the
                         // edges when idle, then grows to fill the row while being dragged) — back
@@ -38,11 +44,11 @@ private extension CGSize {
 private extension PlayerControls {
     var trackInfo: some View {
         VStack(alignment: .leading, spacing: 4) {
-            MarqueeText(text: player.currentTrack?.title ?? String(localized: "Not Playing"))
+            MarqueeText(text: player.nowPlayingTitle)
                 .font(.title3)
                 .fontWeight(.semibold)
                 .foregroundStyle(.white)
-            MarqueeText(text: player.currentTrack?.artist ?? "")
+            MarqueeText(text: player.nowPlayingSubtitle)
                 .foregroundStyle(Color.transparentWhite)
             if let audioInfoLine {
                 Text(audioInfoLine)
@@ -93,6 +99,20 @@ private extension PlayerControls {
         }
     }
 
+    /// Stands in for `TimingIndicator` while radio plays — same 60pt height so the layout below
+    /// it doesn't shift, and inset like the slider's resting position so it lines up with `trackInfo`.
+    var liveIndicator: some View {
+        Text("LIVE")
+            .font(.caption.weight(.bold))
+            .foregroundStyle(Color.transparentWhite)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: 60, alignment: .top)
+            .padding(.top, 11)
+            // The container already insets by `cardPaddings - growth`; add `growth` back so the
+            // label lines up with `trackInfo`'s text.
+            .padding(.horizontal, ElasticSliderConfig.playbackProgress.growth)
+    }
+
     var starButton: some View {
         Button {
             player.toggleStarred()
@@ -106,6 +126,8 @@ private extension PlayerControls {
                 .frame(width: 44, height: 44, alignment: .leading)
                 .contentShape(.rect)
         }
+        .disabled(player.isRadio)
+        .opacity(player.isRadio ? 0.3 : 1)
     }
 
     var airPlayButton: some View {
