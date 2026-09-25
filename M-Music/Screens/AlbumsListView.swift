@@ -157,8 +157,8 @@ struct AlbumsListView: View {
                 filterButton
                 sortButton
             }
+            .task { await refresh() }
             .onAppear {
-                refresh()
                 // So "is this album fully downloaded" reads correctly offline even before any
                 // live fetch has happened this session — guarded internally, cheap to call again.
                 Task(priority: .utility) { await LibraryCacheStatus.shared.preload() }
@@ -274,9 +274,11 @@ struct AlbumsListView: View {
     }
 
     /// Stale-while-revalidate: shows cached albums immediately (no spinner) if any are cached,
-    /// then revalidates against the server in the background and only touches the displayed list
-    /// (and re-caches) if the fresh result actually differs from what's already shown.
-    private func refresh() {
+    /// then revalidates against the server and only touches the displayed list if the fresh
+    /// result actually differs from what's already shown. Loading, the "did anything change?"
+    /// check and the cache write all happen in `LibraryLoader`, off the main actor; this only
+    /// applies what it reports. Runs from `.task`, so leaving the screen cancels it.
+    private func refresh() async {
         guard client.isConfigured else {
             albums = []
             sortedAlbums = []
@@ -284,68 +286,41 @@ struct AlbumsListView: View {
             hasLoadedOnce = false
             return
         }
-        guard !isLoading else { return }
-        // Only the very first load shows the spinner (and thus swaps out the grid) — a quiet
+        // Only the very first load shows the spinner (and thus swaps out the list) — a quiet
         // reappearance (e.g. popping back from a pushed `AlbumView`) must never briefly tear
         // down the grid's identity, or it resets scroll position and breaks an in-flight
         // zoom-dismiss transition (the grid row IS the transition's source view).
         if !hasLoadedOnce {
             isLoading = true
         }
-
-        Task { await performRefresh() }
+        await performRefresh()
     }
 
-    /// The actual load — cache first, then (unless nothing changed on the server) a fresh
-    /// download. `force` skips that change check, for pull-to-refresh.
+    /// `force` skips the "has the server library changed?" check, for pull-to-refresh.
     private func performRefresh(force: Bool = false) async {
         guard client.isConfigured else { return }
-        var hadCache = !albums.isEmpty
-        if albums.isEmpty, let cached = await LibraryCacheDatabase.shared.cachedAllAlbums() {
-            await MainActor.run {
+        defer { isLoading = false }
+        for await event in LibraryLoader.load(.allAlbums(), shown: albums, force: force) {
+            switch event {
+            case .cached(let cached):
                 albums = cached
                 updateSortedAlbums()
                 hasLoadedOnce = true
                 isLoading = false
-            }
-        }
-
-        hadCache = hadCache || !albums.isEmpty
-
-        // Nothing changed on the server since this list was last synced (see
-        // `LibraryRevalidation`) — the cache we just showed is current, so skip the full
-        // re-download. A forced refresh (pull-to-refresh) and a first load with no cache
-        // always download.
-        let check = await LibraryRevalidation.shared.check(.albums)
-        if !force, hadCache, !check.needsRefetch {
-            await MainActor.run {
-                isLoading = false
-                hasLoadedOnce = true
-            }
-            return
-        }
-
-        do {
-            let fetched = try await client.allAlbums()
-            let changed = fetched != albums
-            await MainActor.run {
+            case .fresh(let fetched):
                 loadError = nil
                 isLoading = false
                 hasLoadedOnce = true
-                if changed {
-                    albums = fetched
-                    updateSortedAlbums()
-                }
-            }
-            if changed {
-                await LibraryCacheDatabase.shared.cacheAllAlbums(fetched)
-            }
-            await LibraryRevalidation.shared.markSynced(.albums, token: check.token)
-        } catch {
-            // Offline, or the request otherwise failed — keep showing whatever's already on
-            // screen (cache, or an earlier successful fetch); only surface an error if
-            // there's truly nothing to show.
-            await MainActor.run {
+                albums = fetched
+                updateSortedAlbums()
+            case .upToDate:
+                loadError = nil
+                isLoading = false
+                hasLoadedOnce = true
+            case .failed(let error):
+                // Offline, or the request otherwise failed — keep showing whatever's already on
+                // screen (cache, or an earlier successful fetch); only surface an error if
+                // there's truly nothing to show.
                 isLoading = false
                 if albums.isEmpty {
                     loadError = error.localizedDescription

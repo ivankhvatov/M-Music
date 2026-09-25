@@ -96,33 +96,26 @@ struct PlaylistView: View {
     }
 
     /// Stale-while-revalidate: shows this playlist's cached songs immediately (no spinner) if
-    /// any are cached, then revalidates against the server in the background and only touches
-    /// the displayed list (and re-caches) if the fresh result actually differs from what's shown.
+    /// any are cached, then revalidates against the server and only touches the displayed list if
+    /// the fresh result actually differs from what's shown. Fetching, comparing and caching happen
+    /// in `LibraryLoader`, off the main actor.
     private func loadSongs() async {
-        if songs.isEmpty, let cached = await LibraryCacheDatabase.shared.cachedPlaylistSongs(playlistId: playlist.id.raw) {
-            await MainActor.run {
+        for await event in LibraryLoader.load(.playlistSongs(playlistId: playlist.id.raw), shown: songs) {
+            switch event {
+            case .cached(let cached):
                 songs = cached
                 isLoadingSongs = false
-            }
-        }
-
-        do {
-            let full = try await client.getPlaylist(id: playlist.id.raw)
-            let entries = full.entry ?? []
-            let changed = entries != songs
-            await MainActor.run {
+            case .fresh(let entries):
                 isLoadingSongs = false
                 loadError = nil
-                if changed { songs = entries }
-            }
-            if changed {
-                await LibraryCacheDatabase.shared.cachePlaylistSongs(entries, playlistId: playlist.id.raw)
-            }
-        } catch {
-            // Offline, or the request otherwise failed — keep showing whatever's already on
-            // screen (cache, or an earlier successful fetch); only surface an error if there's
-            // truly nothing to show.
-            await MainActor.run {
+                songs = entries
+            case .upToDate:
+                isLoadingSongs = false
+                loadError = nil
+            case .failed(let error):
+                // Offline, or the request otherwise failed — keep showing whatever's already on
+                // screen (cache, or an earlier successful fetch); only surface an error if there's
+                // truly nothing to show.
                 isLoadingSongs = false
                 if songs.isEmpty {
                     loadError = error.localizedDescription

@@ -51,7 +51,7 @@ struct RadioView: View {
                 settingsButton
             }
         }
-        .onAppear(perform: refresh)
+        .task { await refresh() }
         .onReceive(PlayerManager.shared.$currentRadioStation.map { $0?.id }.removeDuplicates()) { id in
             playingStationId = id
         }
@@ -101,35 +101,37 @@ struct RadioView: View {
     }
 
     /// Only the very first load shows the spinner; later appearances revalidate quietly and only
-    /// touch the displayed list if the server's answer actually differs.
-    private func refresh() {
+    /// touch the displayed list if the server's answer actually differs (compared in
+    /// `LibraryLoader`, off the main actor).
+    private func refresh() async {
         guard client.isConfigured else {
             stations = []
             hasLoadedOnce = false
             return
         }
-        guard !isLoading else { return }
         if !hasLoadedOnce {
             isLoading = true
         }
-
-        Task {
-            do {
-                let fetched = try await client.getInternetRadioStations()
-                await MainActor.run {
-                    loadError = nil
-                    isLoading = false
-                    hasLoadedOnce = true
-                    if fetched != stations { stations = fetched }
-                }
-            } catch {
+        defer { isLoading = false }
+        for await event in LibraryLoader.load(.radioStations(), shown: stations) {
+            switch event {
+            case .cached:
+                break
+            case .fresh(let fetched):
+                loadError = nil
+                isLoading = false
+                hasLoadedOnce = true
+                stations = fetched
+            case .upToDate:
+                loadError = nil
+                isLoading = false
+                hasLoadedOnce = true
+            case .failed(let error):
                 // Keep showing whatever's already on screen; only surface an error if there's
                 // truly nothing to show.
-                await MainActor.run {
-                    isLoading = false
-                    if stations.isEmpty {
-                        loadError = error.localizedDescription
-                    }
+                isLoading = false
+                if stations.isEmpty {
+                    loadError = error.localizedDescription
                 }
             }
         }

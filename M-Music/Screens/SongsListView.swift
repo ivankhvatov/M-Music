@@ -158,9 +158,7 @@ struct SongsListView: View {
                 filterButton
                 sortButton
             }
-            .onAppear {
-                refresh()
-            }
+            .task { await refresh() }
             .onChange(of: songs) { updateSortedSongs() }
             .onChange(of: searchText) { updateDisplayedSongs() }
             .onChange(of: filterOptionStorage) { updateDisplayedSongs() }
@@ -232,71 +230,48 @@ struct SongsListView: View {
     }
 
     /// Stale-while-revalidate: shows cached songs immediately (no spinner) if any are cached,
-    /// then revalidates against the server in the background and only touches the displayed list
-    /// (and re-caches) if the fresh result actually differs from what's already shown.
-    private func refresh() {
+    /// then revalidates against the server and only touches the displayed list if the fresh
+    /// result actually differs from what's already shown. Loading, the "did anything change?"
+    /// check and the cache write all happen in `LibraryLoader`, off the main actor; this only
+    /// applies what it reports. Runs from `.task`, so leaving the screen cancels it.
+    private func refresh() async {
         guard client.isConfigured else {
             songs = []
             hasLoadedOnce = false
             return
         }
-        guard !isLoading else { return }
         // Only the very first load shows the spinner (and thus swaps out the list) — a quiet
         // reappearance must never briefly tear down the list's identity, or it resets scroll
         // position.
         if !hasLoadedOnce {
             isLoading = true
         }
-
-        Task { await performRefresh() }
+        await performRefresh()
     }
 
-    /// The actual load — cache first, then (unless nothing changed on the server) a fresh
-    /// download. `force` skips that change check, for pull-to-refresh.
+    /// `force` skips the "has the server library changed?" check, for pull-to-refresh.
     private func performRefresh(force: Bool = false) async {
         guard client.isConfigured else { return }
-        var hadCache = !songs.isEmpty
-        if songs.isEmpty, let cached = await LibraryCacheDatabase.shared.cachedAllSongs() {
-            await MainActor.run {
+        defer { isLoading = false }
+        for await event in LibraryLoader.load(.allSongs(), shown: songs, force: force) {
+            switch event {
+            case .cached(let cached):
                 songs = cached
                 hasLoadedOnce = true
                 isLoading = false
-            }
-        }
-
-        hadCache = hadCache || !songs.isEmpty
-
-        // Nothing changed on the server since this list was last synced (see
-        // `LibraryRevalidation`) — the cache we just showed is current, so skip the full
-        // re-download. A forced refresh (pull-to-refresh) and a first load with no cache
-        // always download.
-        let check = await LibraryRevalidation.shared.check(.songs)
-        if !force, hadCache, !check.needsRefetch {
-            await MainActor.run {
-                isLoading = false
-                hasLoadedOnce = true
-            }
-            return
-        }
-
-        do {
-            let fetched = try await client.allSongs()
-            let changed = fetched != songs
-            await MainActor.run {
+            case .fresh(let fetched):
                 loadError = nil
                 isLoading = false
                 hasLoadedOnce = true
-                if changed { songs = fetched }
-            }
-            if changed {
-                await LibraryCacheDatabase.shared.cacheAllSongs(fetched)
-            }
-            await LibraryRevalidation.shared.markSynced(.songs, token: check.token)
-        } catch {
-            // Offline, or the request otherwise failed — keep showing whatever's already on
-            // screen (cache, or an earlier successful fetch); only surface an error if
-            // there's truly nothing to show.
-            await MainActor.run {
+                songs = fetched
+            case .upToDate:
+                loadError = nil
+                isLoading = false
+                hasLoadedOnce = true
+            case .failed(let error):
+                // Offline, or the request otherwise failed — keep showing whatever's already on
+                // screen (cache, or an earlier successful fetch); only surface an error if
+                // there's truly nothing to show.
                 isLoading = false
                 if songs.isEmpty {
                     loadError = error.localizedDescription

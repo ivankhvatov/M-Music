@@ -132,8 +132,8 @@ struct ArtistAlbumsView: View {
             starButton
             sortButton
         }
+        .task { await refresh() }
         .onAppear {
-            refresh()
             // So "is this album fully downloaded" reads correctly offline even before any live
             // fetch has happened this session — guarded internally, cheap to call again.
             Task(priority: .utility) { await LibraryCacheStatus.shared.preload() }
@@ -365,60 +365,49 @@ struct ArtistAlbumsView: View {
         }
     }
 
-    /// Called from `.onAppear`, which fires every time this screen becomes visible again —
-    /// including when popping back from a pushed album. Only the very first load shows the
-    /// spinner and replaces the grid; later calls refetch quietly in the background and just
-    /// update `albums` in place once done, so the grid's view identity (and the ScrollView's
-    /// scroll position) stays stable instead of being torn down and rebuilt, which was also
-    /// breaking the album's zoom-dismiss transition mid-animation. Mirrors `LibraryView.refresh()`.
-    /// Stale-while-revalidate: shows this artist's cached albums immediately (no spinner) if
-    /// any are cached, then revalidates against the server in the background and only touches
-    /// the displayed list (and re-caches) if the fresh result actually differs from what's shown.
-    private func refresh() {
+    /// Runs from `.task`, which starts every time this screen becomes visible again — including
+    /// when popping back from a pushed album. Only the very first load shows the spinner and
+    /// replaces the grid; later runs refetch quietly and just update `albums` in place once done,
+    /// so the grid's view identity (and the ScrollView's scroll position) stays stable instead of
+    /// being torn down and rebuilt, which was also breaking the album's zoom-dismiss transition
+    /// mid-animation. Mirrors `LibraryView.refresh()`.
+    ///
+    /// Stale-while-revalidate: shows this artist's cached albums immediately (no spinner) if any
+    /// are cached, then revalidates against the server and only touches the displayed list if
+    /// the fresh result actually differs from what's shown. Fetching, comparing and caching
+    /// happen in `LibraryLoader`, off the main actor.
+    private func refresh() async {
         guard client.isConfigured else {
             albums = []
             hasLoadedOnce = false
             return
         }
-        guard !isLoading else { return }
-        // Only the very first load shows the spinner (and thus swaps out the grid) — a quiet
-        // reappearance (e.g. popping back from a pushed `AlbumView`) must never briefly tear
-        // down the grid's identity, or it resets scroll position and breaks an in-flight
-        // zoom-dismiss transition (the grid/carousel row IS the transition's source view).
         if !hasLoadedOnce {
             isLoading = true
         }
-
-        Task {
-            if albums.isEmpty, let cached = await LibraryCacheDatabase.shared.cachedArtistAlbums(artistId: artist.id.raw) {
-                await MainActor.run {
-                    albums = cached
-                    hasLoadedOnce = true
-                    isLoading = false
-                }
-            }
-
-            do {
-                let fetched = try await client.getArtist(id: artist.id.raw)
-                let changed = fetched.album != albums
-                await MainActor.run {
-                    loadError = nil
-                    isLoading = false
-                    hasLoadedOnce = true
-                    if changed { albums = fetched.album }
-                }
-                if changed {
-                    await LibraryCacheDatabase.shared.cacheArtistAlbums(fetched.album, artistId: artist.id.raw)
-                }
-            } catch {
+        defer { isLoading = false }
+        for await event in LibraryLoader.load(.artistAlbums(artistId: artist.id.raw), shown: albums) {
+            switch event {
+            case .cached(let cached):
+                albums = cached
+                hasLoadedOnce = true
+                isLoading = false
+            case .fresh(let fetched):
+                loadError = nil
+                isLoading = false
+                hasLoadedOnce = true
+                albums = fetched
+            case .upToDate:
+                loadError = nil
+                isLoading = false
+                hasLoadedOnce = true
+            case .failed(let error):
                 // Offline, or the request otherwise failed — keep showing whatever's already on
                 // screen (cache, or an earlier successful fetch); only surface an error if
                 // there's truly nothing to show.
-                await MainActor.run {
-                    isLoading = false
-                    if albums.isEmpty {
-                        loadError = error.localizedDescription
-                    }
+                isLoading = false
+                if albums.isEmpty {
+                    loadError = error.localizedDescription
                 }
             }
         }

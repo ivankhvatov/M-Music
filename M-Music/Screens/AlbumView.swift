@@ -135,40 +135,27 @@ struct AlbumView: View {
     }
 
     /// Stale-while-revalidate: shows this album's cached songs immediately (no spinner) if
-    /// cached, then revalidates against the server in the background and only touches the
-    /// displayed songs/codec (and re-caches) if the fresh result actually differs from what's
-    /// shown — compared via the full `AlbumWithSongsID3`, not just its `.song` array, so a
-    /// change to any cached field (not only the track list) still triggers an update.
+    /// cached, then revalidates against the server and only touches the displayed songs/codec if
+    /// the fresh result actually differs from what's shown — compared via the full
+    /// `AlbumWithSongsID3`, not just its `.song` array, so a change to any cached field (not only
+    /// the track list) still counts. Fetching, comparing and caching happen in `LibraryLoader`,
+    /// off the main actor.
     private func loadSongs() async {
-        if currentAlbumDetail == nil, let cached = await LibraryCacheDatabase.shared.cachedAlbumSongs(albumId: album.id.raw) {
-            await MainActor.run {
-                currentAlbumDetail = cached
-                songs = cached.song ?? []
-                albumCodec = cached.codec
-                isLoadingSongs = false
-            }
-        }
-
-        do {
-            let full = try await client.getAlbum(id: album.id.raw)
-            let changed = full != currentAlbumDetail
-            await MainActor.run {
+        for await event in LibraryLoader.load(.albumDetail(albumId: album.id.raw), shown: currentAlbumDetail) {
+            switch event {
+            case .cached(let detail), .fresh(let detail):
+                currentAlbumDetail = detail
+                songs = detail.song ?? []
+                albumCodec = detail.codec
                 isLoadingSongs = false
                 loadError = nil
-                if changed {
-                    currentAlbumDetail = full
-                    songs = full.song ?? []
-                    albumCodec = full.codec
-                }
-            }
-            if changed {
-                await LibraryCacheDatabase.shared.cacheAlbumSongs(full, albumId: album.id.raw)
-            }
-        } catch {
-            // Offline, or the request otherwise failed — keep showing whatever's already on
-            // screen (cache, or an earlier successful fetch); only surface an error if there's
-            // truly nothing to show.
-            await MainActor.run {
+            case .upToDate:
+                isLoadingSongs = false
+                loadError = nil
+            case .failed(let error):
+                // Offline, or the request otherwise failed — keep showing whatever's already on
+                // screen (cache, or an earlier successful fetch); only surface an error if there's
+                // truly nothing to show.
                 isLoadingSongs = false
                 if songs.isEmpty {
                     loadError = error.localizedDescription
@@ -182,21 +169,26 @@ struct AlbumView: View {
     /// Supplementary content — fails silently rather than surfacing an error for it.
     private func loadRelatedAlbums() async {
         guard let artistId = album.artistId?.raw else { return }
-        do {
-            let artist = try await client.getArtist(id: artistId)
-            let albumName = album.name.lowercased()
-            let others = artist.album.filter { $0.id != album.id && $0.name.lowercased() == albumName }
-            var more = artist.album.filter { $0.name.lowercased() != albumName }
-            if groupReleaseVersionsEnabled {
-                more = more.groupedByPreferredVersion()
-            }
-            await MainActor.run {
-                otherVersions = others
-                moreByArtist = more.reversed()
-            }
-        } catch {
-            // Ignored — see doc comment above.
+        // Fetched, filtered and grouped off the main actor (`nonisolated async`); only the two
+        // finished arrays come back here.
+        guard let related = try? await Self.relatedAlbums(
+            of: album, artistId: artistId, groupVersions: groupReleaseVersionsEnabled, client: client
+        ) else { return }
+        otherVersions = related.otherVersions
+        moreByArtist = related.moreByArtist
+    }
+
+    private nonisolated static func relatedAlbums(
+        of album: AlbumID3, artistId: String, groupVersions: Bool, client: SubsonicClient
+    ) async throws -> (otherVersions: [AlbumID3], moreByArtist: [AlbumID3]) {
+        let artist = try await client.getArtist(id: artistId)
+        let albumName = album.name.lowercased()
+        let others = artist.album.filter { $0.id != album.id && $0.name.lowercased() == albumName }
+        var more = artist.album.filter { $0.name.lowercased() != albumName }
+        if groupVersions {
+            more = more.groupedByPreferredVersion()
         }
+        return (others, more.reversed())
     }
 
     @ViewBuilder

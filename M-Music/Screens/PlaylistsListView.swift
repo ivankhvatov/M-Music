@@ -71,8 +71,8 @@ struct PlaylistsListView: View {
             .refreshable { await performRefresh() }
             .navigationTitle("Playlists")
             .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
+            .task { await refresh() }
             .onAppear {
-                refresh()
                 // So playlists cached in an earlier session gray out correctly before any
                 // playlist is opened this session — guarded internally, cheap to call again.
                 Task(priority: .utility) { await LibraryCacheStatus.shared.preload() }
@@ -142,17 +142,18 @@ struct PlaylistsListView: View {
         displayedPlaylists = result
     }
 
-    /// Stale-while-revalidate: shows cached playlists immediately (no spinner) if any are
-    /// cached, then revalidates against the server in the background and only touches the
-    /// displayed list (and re-caches) if the fresh result actually differs from what's shown.
-    private func refresh() {
+    /// Stale-while-revalidate: shows cached playlists immediately (no spinner) if any are cached,
+    /// then revalidates against the server and only touches the displayed list if the fresh
+    /// result actually differs from what's already shown. Loading, the "did anything change?"
+    /// check and the cache write all happen in `LibraryLoader`, off the main actor; this only
+    /// applies what it reports. Runs from `.task`, so leaving the screen cancels it.
+    private func refresh() async {
         guard client.isConfigured else {
             playlists = []
             displayedPlaylists = []
             hasLoadedOnce = false
             return
         }
-        guard !isLoading else { return }
         // Only the very first load shows the spinner (and thus swaps out the list) — a quiet
         // reappearance (e.g. popping back from a pushed `PlaylistView`) must never briefly tear
         // down the list's identity, or it resets scroll position and breaks an in-flight
@@ -160,44 +161,34 @@ struct PlaylistsListView: View {
         if !hasLoadedOnce {
             isLoading = true
         }
-
-        Task { await performRefresh() }
+        await performRefresh()
     }
 
-    /// The actual load — cache first, then a fresh download. Playlists always revalidate
-    /// (unlike albums/artists/songs — see `LibraryRevalidation`): they're edited without any
-    /// library scan, and the list is a single cheap request.
-    private func performRefresh() async {
+    /// `force` skips the "has the server library changed?" check, for pull-to-refresh.
+    private func performRefresh(force: Bool = false) async {
         guard client.isConfigured else { return }
-        if playlists.isEmpty, let cached = await LibraryCacheDatabase.shared.cachedAllPlaylists() {
-            await MainActor.run {
+        defer { isLoading = false }
+        for await event in LibraryLoader.load(.allPlaylists(), shown: playlists, force: force) {
+            switch event {
+            case .cached(let cached):
                 playlists = cached
                 updateDisplayedPlaylists()
                 hasLoadedOnce = true
                 isLoading = false
-            }
-        }
-
-        do {
-            let fetched = try await client.getPlaylists()
-            let changed = fetched != playlists
-            await MainActor.run {
+            case .fresh(let fetched):
                 loadError = nil
                 isLoading = false
                 hasLoadedOnce = true
-                if changed {
-                    playlists = fetched
-                    updateDisplayedPlaylists()
-                }
-            }
-            if changed {
-                await LibraryCacheDatabase.shared.cacheAllPlaylists(fetched)
-            }
-        } catch {
-            // Offline, or the request otherwise failed — keep showing whatever's already on
-            // screen (cache, or an earlier successful fetch); only surface an error if
-            // there's truly nothing to show.
-            await MainActor.run {
+                playlists = fetched
+                updateDisplayedPlaylists()
+            case .upToDate:
+                loadError = nil
+                isLoading = false
+                hasLoadedOnce = true
+            case .failed(let error):
+                // Offline, or the request otherwise failed — keep showing whatever's already on
+                // screen (cache, or an earlier successful fetch); only surface an error if
+                // there's truly nothing to show.
                 isLoading = false
                 if playlists.isEmpty {
                     loadError = error.localizedDescription
