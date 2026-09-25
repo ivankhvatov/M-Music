@@ -38,7 +38,23 @@ final class SubsonicClient: @unchecked Sendable {
 
     var isConfigured: Bool { credentials != nil }
 
-    init(session: URLSession = .shared) {
+    /// Coalesces identical concurrent GETs — see `InFlightRequests`.
+    private let inFlight = InFlightRequests()
+
+    /// A session just for API calls. Every request URL carries a fresh random salt, so no response
+    /// is ever served from — or usefully stored in — the URL cache; the shared session would still
+    /// write each (potentially large, e.g. 500-album pages) response to disk for nothing.
+    static func makeAPISession() -> URLSession {
+        let config = URLSessionConfiguration.default
+        config.urlCache = nil
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.timeoutIntervalForRequest = 30
+        config.httpMaximumConnectionsPerHost = 6
+        config.httpAdditionalHeaders = ["Accept": "application/json"]
+        return URLSession(configuration: config)
+    }
+
+    init(session: URLSession = SubsonicClient.makeAPISession()) {
         self.session = session
         self._credentials = SubsonicCredentialsStore.load()
     }
@@ -125,12 +141,10 @@ final class SubsonicClient: @unchecked Sendable {
     private func fetch(_ url: URL, method: String) async throws -> Data {
         var request = URLRequest(url: url)
         request.httpMethod = method
-        let (data, response): (Data, URLResponse)
-        do {
-            (data, response) = try await session.data(for: request)
-        } catch {
-            throw SubsonicError.decoding(error.localizedDescription)
-        }
+        // Transport failures (`URLError`, incl. `.cancelled`) and `CancellationError` propagate
+        // untouched: callers tell "offline / retry later" and "the view went away" apart from a
+        // real decoding problem by the error's type (see `ScrobbleService.isTransient`).
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw SubsonicError.invalidResponse }
         guard (200...299).contains(http.statusCode) else { throw SubsonicError.http(status: http.statusCode) }
         return data
@@ -147,7 +161,16 @@ final class SubsonicClient: @unchecked Sendable {
         as type: Payload.Type
     ) async throws -> Payload? {
         let requestURL = try url(for: endpoint, params)
-        let raw = try await fetch(requestURL, method: method)
+        let raw: Data
+        if method == "GET" {
+            // Identical reads in flight at the same moment (e.g. a screen and
+            // `LibrarySyncService` both paging `allAlbums`) share one download.
+            raw = try await inFlight.data(forKey: coalescingKey(endpoint, params)) { [self] in
+                try await fetch(requestURL, method: method)
+            }
+        } else {
+            raw = try await fetch(requestURL, method: method)
+        }
         let envelope: SubsonicResponse<Payload>
         do {
             envelope = try JSONDecoder().decode(SubsonicResponse<Payload>.self, from: raw)
@@ -158,6 +181,14 @@ final class SubsonicClient: @unchecked Sendable {
             throw SubsonicError.server(code: error.code, message: error.message ?? "Unknown error")
         }
         return envelope.payload
+    }
+
+    /// Server + user + endpoint + parameters, without the per-request auth items — so switching
+    /// servers mid-flight can never hand one server's response to a caller of another.
+    private func coalescingKey(_ endpoint: String, _ params: [URLQueryItem]) -> String {
+        let who = credentials.map { "\($0.baseURL.absoluteString)|\($0.username)" } ?? ""
+        let query = params.map { "\($0.name)=\($0.value ?? "")" }.joined(separator: "&")
+        return "\(who)|\(endpoint)?\(query)"
     }
 
     /// Convenience for endpoints whose only interesting outcome is success/failure.
@@ -171,5 +202,36 @@ final class SubsonicClient: @unchecked Sendable {
     func fetchData(_ endpoint: String, _ params: [URLQueryItem] = []) async throws -> Data {
         let requestURL = try url(for: endpoint, params)
         return try await fetch(requestURL, method: "GET")
+    }
+}
+
+/// Single-flight for idempotent GETs: while a request for a given key is running, further callers
+/// await that same download instead of starting their own. The download runs in its own task, so
+/// one caller being cancelled (a screen popped mid-load) doesn't abort it for the others; its
+/// result is simply dropped if nobody is left waiting.
+private actor InFlightRequests {
+    private var tasks: [String: Task<Data, Error>] = [:]
+
+    func data(forKey key: String, start: @escaping @Sendable () async throws -> Data) async throws -> Data {
+        let task: Task<Data, Error>
+        if let existing = tasks[key] {
+            task = existing
+        } else {
+            task = Task { try await start() }
+            tasks[key] = task
+            Task { [weak self] in
+                _ = await task.result
+                await self?.finish(key: key, task: task)
+            }
+        }
+        // A cancelled caller still waits for the shared download to land (it isn't aborted, see
+        // above) but throws instead of using the result.
+        let data = try await task.value
+        try Task.checkCancellation()
+        return data
+    }
+
+    private func finish(key: String, task: Task<Data, Error>) {
+        if tasks[key] == task { tasks[key] = nil }
     }
 }

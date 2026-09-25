@@ -39,9 +39,14 @@ actor LibrarySyncService {
         }
         guard !Task.isCancelled else { return }
 
+        // Each whole-library list records "synced as of scan X" once it's cached, so the first
+        // screen opened after connecting doesn't immediately re-download what this just fetched.
+        // The token is taken before the download, as `LibraryRevalidation` requires.
+        let artistsCheck = await LibraryRevalidation.shared.check(.artists, client: client)
         if let artistsResult = try? await client.getArtists() {
             let artists = artistsResult.index.flatMap(\.artist)
             await LibraryCacheDatabase.shared.cacheAllArtists(artists)
+            await LibraryRevalidation.shared.markSynced(.artists, token: artistsCheck.token, client: client)
             await withTaskGroup(of: Void.self) { group in
                 for artist in artists {
                     group.addTask {
@@ -55,8 +60,10 @@ actor LibrarySyncService {
         }
         guard !Task.isCancelled else { return }
 
+        let albumsCheck = await LibraryRevalidation.shared.check(.albums, client: client)
         if let albums = try? await client.allAlbums() {
             await LibraryCacheDatabase.shared.cacheAllAlbums(albums)
+            await LibraryRevalidation.shared.markSynced(.albums, token: albumsCheck.token, client: client)
             await withTaskGroup(of: Void.self) { group in
                 for album in albums {
                     group.addTask {
@@ -70,8 +77,10 @@ actor LibrarySyncService {
         }
         guard !Task.isCancelled else { return }
 
+        let songsCheck = await LibraryRevalidation.shared.check(.songs, client: client)
         if let songs = try? await client.allSongs() {
             await LibraryCacheDatabase.shared.cacheAllSongs(songs)
+            await LibraryRevalidation.shared.markSynced(.songs, token: songsCheck.token, client: client)
         }
     }
 }
