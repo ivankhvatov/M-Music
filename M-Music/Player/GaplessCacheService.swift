@@ -30,9 +30,26 @@ final class GaplessCacheStatus: ObservableObject {
         cachedEntries[songId] = entry
     }
 
+    /// Adds many entries with a single `@Published` change — one hop and one `PlayerManager`
+    /// sink run for the whole batch instead of one per entry (`preload()` at launch).
+    func markCachedBatch(_ entries: [String: Entry]) {
+        guard !entries.isEmpty else { return }
+        activeSongIds.subtract(entries.keys)
+        cachedEntries.merge(entries) { _, new in new }
+    }
+
     func remove(_ songId: String) {
         activeSongIds.remove(songId)
         cachedEntries.removeValue(forKey: songId)
+    }
+
+    /// Removes many entries with a single `@Published` change (eviction).
+    func removeBatch(_ songIds: [String]) {
+        guard !songIds.isEmpty else { return }
+        activeSongIds.subtract(songIds)
+        var entries = cachedEntries
+        for songId in songIds { entries.removeValue(forKey: songId) }
+        if entries.count != cachedEntries.count { cachedEntries = entries }
     }
 
     func removeAll() {
@@ -154,11 +171,14 @@ actor GaplessCacheService {
     func preload() async {
         guard !didLoadExisting else { return }
         didLoadExisting = true
+        // The file-existence checks run here, off the main actor; the status is then updated with
+        // one batched assignment rather than one main-actor hop (and publish) per cached track.
         let records = await GaplessCacheDatabase.shared.allRecords()
+        var entries: [String: GaplessCacheStatus.Entry] = [:]
         for record in records where FileManager.default.fileExists(atPath: record.fileURL.path) {
-            let entry = GaplessCacheStatus.Entry(url: record.fileURL, format: record.format, bitrate: record.bitrate)
-            await MainActor.run { GaplessCacheStatus.shared.markCached(record.songId, entry: entry) }
+            entries[record.songId] = GaplessCacheStatus.Entry(url: record.fileURL, format: record.format, bitrate: record.bitrate)
         }
+        await MainActor.run { GaplessCacheStatus.shared.markCachedBatch(entries) }
         await runEviction()
     }
 
@@ -233,9 +253,11 @@ actor GaplessCacheService {
         let overBudget = await GaplessCacheDatabase.shared.evictOverBudget(maxBytes: GaplessCacheSettings.sizeLimit.byteCount)
         let cutoff = Calendar.current.date(byAdding: .day, value: -GaplessCacheSettings.retention.rawValue, to: Date()) ?? .distantPast
         let stale = await GaplessCacheDatabase.shared.evictOlderThan(cutoff)
-        for record in overBudget + stale {
+        let evicted = overBudget + stale
+        for record in evicted {
             try? FileManager.default.removeItem(at: record.fileURL)
-            await MainActor.run { GaplessCacheStatus.shared.remove(record.songId) }
         }
+        let evictedIds = evicted.map(\.songId)
+        await MainActor.run { GaplessCacheStatus.shared.removeBatch(evictedIds) }
     }
 }

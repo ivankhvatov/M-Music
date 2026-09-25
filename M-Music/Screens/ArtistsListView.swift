@@ -127,9 +127,8 @@ struct ArtistsListView: View {
             .onChange(of: sortOrderStorage) { updateSortedArtists() }
             .onChange(of: showUnavailableInLists) { updateDisplayedArtists() }
             .onChange(of: networkMonitor.isOnline) { updateDisplayedArtists() }
-            .onChange(of: downloads.downloadedSongIds) { if offlineFilterActive { updateDisplayedArtists() } }
-            .onChange(of: libraryCacheStatus.albumSongCounts) { if offlineFilterActive { updateDisplayedArtists() } }
-            .onChange(of: libraryCacheStatus.albumIdsByArtistId) { if offlineFilterActive { updateDisplayedArtists() } }
+            .onChange(of: downloads.revision) { if offlineFilterActive { updateDisplayedArtists() } }
+            .onChange(of: libraryCacheStatus.revision) { if offlineFilterActive { updateDisplayedArtists() } }
         }
     }
 

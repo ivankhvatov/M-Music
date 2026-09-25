@@ -167,7 +167,7 @@ struct SongsListView: View {
             .onChange(of: starStore.overrides) { if filterOption.wrappedValue == .favoritesOnly { updateDisplayedSongs() } }
             .onChange(of: showUnavailableInLists) { updateDisplayedSongs() }
             .onChange(of: networkMonitor.isOnline) { updateDisplayedSongs() }
-            .onChange(of: downloads.downloadedSongIds) { if offlineFilterActive { updateDisplayedSongs() } }
+            .onChange(of: downloads.revision) { if offlineFilterActive { updateDisplayedSongs() } }
         }
     }
 

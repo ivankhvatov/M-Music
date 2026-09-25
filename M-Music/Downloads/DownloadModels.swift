@@ -85,3 +85,88 @@ struct DownloadStorageStats {
     let songCount: Int
     let albumCount: Int
 }
+
+/// Everything the UI needs to know about downloaded songs, derived from the full record list in one
+/// pass — built on a background task by `load(previous:)`, so that neither the derivation nor the
+/// "did anything change?" comparison against the previous snapshot ever runs on the main thread.
+/// The derived lookups are what make per-row questions ("does this album/artist have any
+/// download?", "is this album fully downloaded?") O(1) instead of a scan of every record for every
+/// row of every list on every render.
+struct DownloadSnapshot: Sendable, Equatable {
+    struct AlbumGroup: Sendable, Equatable {
+        let albumId: String?
+        let albumTitle: String
+        let records: [DownloadRecord]
+    }
+
+    /// What changed against the previous snapshot — so the main actor assigns only those pieces.
+    struct Changes: Sendable {
+        let records: Bool
+        let songIds: Bool
+        let totalBytes: Bool
+    }
+
+    var records: [DownloadRecord] = []
+    var totalBytes: Int64 = 0
+
+    // Derived from `records`.
+    var songIds: Set<String> = []
+    var songCountByAlbumId: [String: Int] = [:]
+    var artistNames: Set<String> = []
+    var recordsByAlbum: [AlbumGroup] = []
+
+    init() {}
+
+    init(records: [DownloadRecord], totalBytes: Int64) {
+        self.records = records
+        self.totalBytes = totalBytes
+        var ids = Set<String>(minimumCapacity: records.count)
+        var perAlbum: [String: Int] = [:]
+        var artists = Set<String>()
+        var grouped: [String?: [DownloadRecord]] = [:]
+        for record in records {
+            ids.insert(record.songId)
+            if let albumId = record.albumId { perAlbum[albumId, default: 0] += 1 }
+            if let artist = record.artist { artists.insert(artist) }
+            grouped[record.albumId, default: []].append(record)
+        }
+        songIds = ids
+        songCountByAlbumId = perAlbum
+        artistNames = artists
+        recordsByAlbum = grouped
+            .map { albumId, records in
+                AlbumGroup(
+                    albumId: albumId,
+                    albumTitle: records.first?.album ?? String(localized: "Unknown Album"),
+                    records: records.sorted { ($0.track ?? 0) < ($1.track ?? 0) }
+                )
+            }
+            .sorted { $0.albumTitle.sortKey < $1.albumTitle.sortKey }
+    }
+
+    /// Only the inputs are compared; everything else is a pure function of them.
+    static func == (lhs: DownloadSnapshot, rhs: DownloadSnapshot) -> Bool {
+        lhs.totalBytes == rhs.totalBytes && lhs.records == rhs.records
+    }
+
+    /// Reads the database, builds the snapshot, mirrors it into the synchronous
+    /// `LocalDownloadIndex` (thread-safe, and playback needs it current), and compares against
+    /// `previous` — all off the main actor. `nil` means nothing changed.
+    static func load(previous: DownloadSnapshot) async -> (snapshot: DownloadSnapshot, changes: Changes)? {
+        let records = await DownloadDatabase.shared.allRecords()
+        let stats = await DownloadDatabase.shared.storageStats()
+        let snapshot = DownloadSnapshot(records: records, totalBytes: stats.totalBytes)
+
+        LocalDownloadIndex.shared.replaceAll(Dictionary(uniqueKeysWithValues: records.map {
+            ($0.songId, LocalDownloadIndex.Entry(path: $0.fileURL.path, format: $0.format, bitRate: $0.bitRate))
+        }))
+
+        let changes = Changes(
+            records: snapshot.records != previous.records,
+            songIds: snapshot.songIds != previous.songIds,
+            totalBytes: snapshot.totalBytes != previous.totalBytes
+        )
+        guard changes.records || changes.songIds || changes.totalBytes else { return nil }
+        return (snapshot, changes)
+    }
+}

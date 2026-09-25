@@ -80,8 +80,8 @@ struct PlaylistsListView: View {
             .onChange(of: searchText) { updateDisplayedPlaylists() }
             .onChange(of: showUnavailableInLists) { updateDisplayedPlaylists() }
             .onChange(of: networkMonitor.isOnline) { updateDisplayedPlaylists() }
-            .onChange(of: downloads.downloadedSongIds) { updateDisplayedPlaylists() }
-            .onChange(of: libraryCacheStatus.songIdsByPlaylistId) { updateDisplayedPlaylists() }
+            .onChange(of: downloads.revision) { updateDisplayedPlaylists() }
+            .onChange(of: libraryCacheStatus.revision) { updateDisplayedPlaylists() }
         }
     }
 

@@ -27,7 +27,11 @@ private struct CachedEntry: Codable, FetchableRecord, PersistableRecord {
 actor LibraryCacheDatabase {
     static let shared = LibraryCacheDatabase()
 
-    private let dbQueue: DatabaseQueue
+    /// `nonisolated`: `DatabaseQueue` is thread-safe and serialises the SQL itself, so `get`/`set`
+    /// below don't need the actor — which means the (potentially large) JSON encode/decode they do
+    /// runs on the *caller's* background task, in parallel, instead of queuing every cache read
+    /// behind every other read and write on this actor.
+    private nonisolated let dbQueue: DatabaseQueue
 
     private init() {
         let directory = Self.rootDirectory()
@@ -76,7 +80,7 @@ actor LibraryCacheDatabase {
     /// per-id detail (`allAlbums`, `recentAlbums`, `allArtists`, `allPlaylists`, `allSongs`).
     static let wholeCatalogKey = "all"
 
-    func set<T: Encodable>(_ value: T, category: String, key: String) async {
+    nonisolated func set<T: Encodable>(_ value: T, category: String, key: String) async {
         guard let data = try? JSONEncoder().encode(value), let json = String(data: data, encoding: .utf8) else { return }
         let entry = CachedEntry(category: category, key: key, json: json, updatedAt: Date())
         try? await dbQueue.write { db in
@@ -84,7 +88,7 @@ actor LibraryCacheDatabase {
         }
     }
 
-    func get<T: Decodable>(_ type: T.Type, category: String, key: String) async -> T? {
+    nonisolated func get<T: Decodable>(_ type: T.Type, category: String, key: String) async -> T? {
         let json: String? = try? await dbQueue.read { db in
             try CachedEntry.filter(Column("category") == category && Column("key") == key).fetchOne(db)?.json
         }
@@ -228,77 +232,74 @@ private enum LibraryCacheCategory {
 /// Thin typed wrappers around `set`/`get` — one pair per browsing screen's list/detail, so call
 /// sites never touch a raw category string or JSON encoding themselves.
 extension LibraryCacheDatabase {
-    func cacheAllAlbums(_ albums: [AlbumID3]) async {
+    nonisolated func cacheAllAlbums(_ albums: [AlbumID3]) async {
         await set(albums, category: LibraryCacheCategory.allAlbums, key: Self.wholeCatalogKey)
-        await MainActor.run { LibraryCacheStatus.shared.mergeAlbumSongCounts(albums) }
+        await LibraryCacheIndex.shared.mergeAlbumSongCounts(albums)
     }
 
-    func cachedAllAlbums() async -> [AlbumID3]? {
+    nonisolated func cachedAllAlbums() async -> [AlbumID3]? {
         await get([AlbumID3].self, category: LibraryCacheCategory.allAlbums, key: Self.wholeCatalogKey)
     }
 
-    func cacheRecentAlbums(_ albums: [AlbumID3]) async {
+    nonisolated func cacheRecentAlbums(_ albums: [AlbumID3]) async {
         await set(albums, category: LibraryCacheCategory.recentAlbums, key: Self.wholeCatalogKey)
-        await MainActor.run { LibraryCacheStatus.shared.mergeAlbumSongCounts(albums) }
+        await LibraryCacheIndex.shared.mergeAlbumSongCounts(albums)
     }
 
-    func cachedRecentAlbums() async -> [AlbumID3]? {
+    nonisolated func cachedRecentAlbums() async -> [AlbumID3]? {
         await get([AlbumID3].self, category: LibraryCacheCategory.recentAlbums, key: Self.wholeCatalogKey)
     }
 
-    func cacheAllArtists(_ artists: [ArtistID3]) async {
+    nonisolated func cacheAllArtists(_ artists: [ArtistID3]) async {
         await set(artists, category: LibraryCacheCategory.allArtists, key: Self.wholeCatalogKey)
     }
 
-    func cachedAllArtists() async -> [ArtistID3]? {
+    nonisolated func cachedAllArtists() async -> [ArtistID3]? {
         await get([ArtistID3].self, category: LibraryCacheCategory.allArtists, key: Self.wholeCatalogKey)
     }
 
-    func cacheArtistAlbums(_ albums: [AlbumID3], artistId: String) async {
+    nonisolated func cacheArtistAlbums(_ albums: [AlbumID3], artistId: String) async {
         await set(albums, category: LibraryCacheCategory.artistAlbums, key: artistId)
-        await MainActor.run {
-            LibraryCacheStatus.shared.mergeAlbumSongCounts(albums)
-            LibraryCacheStatus.shared.setAlbumIds(albums.map { $0.id.raw }, forArtist: artistId)
-        }
+        await LibraryCacheIndex.shared.mergeAlbumSongCounts(albums)
+        await LibraryCacheIndex.shared.setAlbumIds(albums.map { $0.id.raw }, forArtist: artistId)
     }
 
-    func cachedArtistAlbums(artistId: String) async -> [AlbumID3]? {
+    nonisolated func cachedArtistAlbums(artistId: String) async -> [AlbumID3]? {
         await get([AlbumID3].self, category: LibraryCacheCategory.artistAlbums, key: artistId)
     }
 
-    func cacheAllPlaylists(_ playlists: [PlaylistSummary]) async {
+    nonisolated func cacheAllPlaylists(_ playlists: [PlaylistSummary]) async {
         await set(playlists, category: LibraryCacheCategory.allPlaylists, key: Self.wholeCatalogKey)
     }
 
-    func cachedAllPlaylists() async -> [PlaylistSummary]? {
+    nonisolated func cachedAllPlaylists() async -> [PlaylistSummary]? {
         await get([PlaylistSummary].self, category: LibraryCacheCategory.allPlaylists, key: Self.wholeCatalogKey)
     }
 
     /// Also mirrors the song-id list into `LibraryCacheStatus` so `PlaylistsListView` can gray
     /// out this playlist immediately, without waiting on a fresh actor round-trip.
-    func cachePlaylistSongs(_ songs: [Child], playlistId: String) async {
+    nonisolated func cachePlaylistSongs(_ songs: [Child], playlistId: String) async {
         await set(songs, category: LibraryCacheCategory.playlistSongs, key: playlistId)
-        let songIds = songs.map(\.id.raw)
-        await MainActor.run { LibraryCacheStatus.shared.setSongIds(songIds, forPlaylist: playlistId) }
+        await LibraryCacheIndex.shared.setSongIds(songs.map(\.id.raw), forPlaylist: playlistId)
     }
 
-    func cachedPlaylistSongs(playlistId: String) async -> [Child]? {
+    nonisolated func cachedPlaylistSongs(playlistId: String) async -> [Child]? {
         await get([Child].self, category: LibraryCacheCategory.playlistSongs, key: playlistId)
     }
 
-    func cacheAllSongs(_ songs: [Child]) async {
+    nonisolated func cacheAllSongs(_ songs: [Child]) async {
         await set(songs, category: LibraryCacheCategory.allSongs, key: Self.wholeCatalogKey)
     }
 
-    func cachedAllSongs() async -> [Child]? {
+    nonisolated func cachedAllSongs() async -> [Child]? {
         await get([Child].self, category: LibraryCacheCategory.allSongs, key: Self.wholeCatalogKey)
     }
 
-    func cacheAlbumSongs(_ album: AlbumWithSongsID3, albumId: String) async {
+    nonisolated func cacheAlbumSongs(_ album: AlbumWithSongsID3, albumId: String) async {
         await set(album, category: LibraryCacheCategory.albumSongs, key: albumId)
     }
 
-    func cachedAlbumSongs(albumId: String) async -> AlbumWithSongsID3? {
+    nonisolated func cachedAlbumSongs(albumId: String) async -> AlbumWithSongsID3? {
         await get(AlbumWithSongsID3.self, category: LibraryCacheCategory.albumSongs, key: albumId)
     }
 }

@@ -18,14 +18,9 @@ struct DownloadsSettingsView: View {
     @AppStorage(DownloadConversionSettings.Keys.convertLosslessToALAC) private var convertLosslessToALAC = false
     @AppStorage(DownloadConversionSettings.Keys.convertOpusToCAF) private var convertOpusToCAF = false
 
-    private var recordsByAlbum: [(albumId: String?, albumTitle: String, records: [DownloadRecord])] {
-        let grouped = Dictionary(grouping: downloads.downloadedRecords) { $0.albumId }
-        return grouped
-            .map { albumId, records in
-                (albumId: albumId, albumTitle: records.first?.album ?? String(localized: "Unknown Album"), records: records)
-            }
-            .sorted { $0.albumTitle.sortKey < $1.albumTitle.sortKey }
-    }
+    /// Grouped and sorted in the background by `DownloadStore` (see `DownloadSnapshot`), not on
+    /// every evaluation of `body`.
+    private var recordsByAlbum: [DownloadSnapshot.AlbumGroup] { downloads.recordsByAlbum }
 
     var body: some View {
         NavigationStack {
@@ -89,7 +84,7 @@ struct DownloadsSettingsView: View {
 
                     ForEach(recordsByAlbum, id: \.albumTitle) { group in
                         Section(group.albumTitle) {
-                            ForEach(group.records.sorted { ($0.track ?? 0) < ($1.track ?? 0) }) { record in
+                            ForEach(group.records) { record in
                                 HStack {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(record.title)

@@ -170,8 +170,8 @@ struct AlbumsListView: View {
             .onChange(of: groupReleaseVersionsEnabled) { updateDisplayedAlbums() }
             .onChange(of: showUnavailableInLists) { updateDisplayedAlbums() }
             .onChange(of: networkMonitor.isOnline) { updateDisplayedAlbums() }
-            .onChange(of: downloads.downloadedSongIds) { if offlineFilterActive { updateDisplayedAlbums() } }
-            .onChange(of: libraryCacheStatus.albumSongCounts) { if offlineFilterActive { updateDisplayedAlbums() } }
+            .onChange(of: downloads.revision) { if offlineFilterActive { updateDisplayedAlbums() } }
+            .onChange(of: libraryCacheStatus.revision) { if offlineFilterActive { updateDisplayedAlbums() } }
         }
     }
 
