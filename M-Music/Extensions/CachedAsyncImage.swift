@@ -205,6 +205,19 @@ final class ImageCache: @unchecked Sendable {
         return true
     }
 
+    /// Drops `url`'s image from every tier — each in-memory size tier, the Caches disk tier and
+    /// the durable one — so the next load refetches it from the server. Keyed the same stable way
+    /// as everything else here, so any freshly-signed URL for the same image works.
+    func remove(_ url: URL) {
+        let key = stableKey(for: url)
+        let tiers: [Int?] = [nil, Self.standardMaxPixelSize, Self.cardMaxPixelSize, Self.avatarMaxPixelSize, Self.colorSamplingMaxPixelSize]
+        for tier in tiers {
+            memory.removeObject(forKey: memoryKey(key, maxPixelSize: tier))
+        }
+        if let fileURL = diskURL(forKey: key) { try? fileManager.removeItem(at: fileURL) }
+        if let fileURL = durableURL(forKey: key) { try? fileManager.removeItem(at: fileURL) }
+    }
+
     /// Drops every cached entry (memory and disk), e.g. when switching to a different server.
     func invalidateAll() {
         memory.removeAllObjects()

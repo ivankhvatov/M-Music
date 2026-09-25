@@ -88,6 +88,12 @@ actor LibraryCacheDatabase {
         }
     }
 
+    nonisolated func remove(category: String, key: String) async {
+        try? await dbQueue.write { db in
+            _ = try CachedEntry.filter(Column("category") == category && Column("key") == key).deleteAll(db)
+        }
+    }
+
     nonisolated func get<T: Decodable>(_ type: T.Type, category: String, key: String) async -> T? {
         let json: String? = try? await dbQueue.read { db in
             try CachedEntry.filter(Column("category") == category && Column("key") == key).fetchOne(db)?.json
@@ -297,6 +303,10 @@ extension LibraryCacheDatabase {
 
     nonisolated func cacheAlbumSongs(_ album: AlbumWithSongsID3, albumId: String) async {
         await set(album, category: LibraryCacheCategory.albumSongs, key: albumId)
+    }
+
+    nonisolated func removeCachedAlbumSongs(albumId: String) async {
+        await remove(category: LibraryCacheCategory.albumSongs, key: albumId)
     }
 
     nonisolated func cachedAlbumSongs(albumId: String) async -> AlbumWithSongsID3? {

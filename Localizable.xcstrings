@@ -688,6 +688,17 @@
         }
       }
     },
+    "Cancel" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Отмена"
+          }
+        }
+      }
+    },
     "Cellular" : {
       "localizations" : {
         "de" : {
@@ -1814,6 +1825,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Повторное подключение"
+          }
+        }
+      }
+    },
+    "Refresh" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Обновить"
+          }
+        }
+      }
+    },
+    "Refreshing will delete the album from your device." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Обновление удалит альбом с вашего устройства."
           }
         }
       }

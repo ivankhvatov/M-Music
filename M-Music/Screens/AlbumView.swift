@@ -56,6 +56,8 @@ struct AlbumView: View {
     @State private var artworkURL: URL?
 
     @State private var showingRemoveDownloadConfirmation = false
+    @State private var showingRefreshDownloadedConfirmation = false
+    @State private var isRefreshing = false
 
     /// `init` runs for every `AlbumView(...)` a parent constructs — including one per card in the
     /// related-album carousels, on every parent re-render — and these two go through `UIColor`'s
@@ -83,6 +85,7 @@ struct AlbumView: View {
             }
         }
         .preferredColorScheme(.dark)
+        .tint(.primary)
         .task {
             await loadSongs()
         }
@@ -162,6 +165,54 @@ struct AlbumView: View {
                 }
             }
         }
+    }
+
+    /// Replaces everything this view and the caches hold for this album with a fresh copy from the
+    /// server. Fetches *first* and only touches anything on success: the request is the only step
+    /// that can fail for reasons outside the app (offline, server down), and doing it after the
+    /// deletions would leave the album with no cache — and, if `deletingDownloads`, no downloads
+    /// — and nothing to show in their place. The network request and JSON decoding run off the
+    /// main actor inside `SubsonicClient`; the cache/file work below is `nonisolated` or detached.
+    private func refreshAlbum(deletingDownloads: Bool) async {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
+
+        guard let fresh = try? await client.getAlbum(id: album.id.raw) else { return }
+
+        // Ids from both the old and new copy, in case a song's artwork changed server-side.
+        var artworkIds: Set<String> = [album.coverArt ?? album.id.raw]
+        for detail in [currentAlbumDetail, fresh].compactMap({ $0 }) {
+            artworkIds.insert(detail.coverArt ?? detail.id.raw)
+            for song in detail.song ?? [] {
+                artworkIds.insert(song.coverArt ?? song.id.raw)
+            }
+        }
+        // Full size, plus the row-thumbnail sizes `SongsListView`/`PlaylistView` (44pt) and
+        // `AlbumsListView` (64pt) request — see `DownloadService.precacheArtwork`.
+        let pixelSizes: [Int?] = [nil, Int(44 * displayScale), Int(64 * displayScale)]
+        let artworkURLs = artworkIds.flatMap { id in
+            pixelSizes.compactMap { try? client.coverArtURL(forId: id, size: $0) }
+        }
+
+        if deletingDownloads {
+            await DownloadService.shared.deleteAlbum(albumId: album.id.raw)
+            await downloads.reload()
+        }
+        await LibraryCacheDatabase.shared.removeCachedAlbumSongs(albumId: album.id.raw)
+        await Task.detached(priority: .userInitiated) {
+            for url in artworkURLs { ImageCache.shared.remove(url) }
+        }.value
+        await LibraryCacheDatabase.shared.cacheAlbumSongs(fresh, albumId: album.id.raw)
+
+        currentAlbumDetail = fresh
+        songs = fresh.song ?? []
+        albumCodec = fresh.codec
+        isLoadingSongs = false
+        loadError = nil
+        // A newly signed URL is what makes `CachedAsyncImage` reload; its stable cache key was
+        // just purged, so this refetches the header artwork from the server.
+        artworkURL = try? client.coverArtURL(forId: fresh.coverArt ?? album.coverArt ?? album.id.raw)
     }
 
     /// Fetches the rest of this album's artist catalog and splits it into "other versions" of
@@ -580,9 +631,29 @@ struct AlbumView: View {
     @ToolbarContentBuilder
         private var moreButton: some ToolbarContent {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {} label: {
+                Menu {
+                    Button {
+                        if downloads.hasDownloadedSong(inAlbum: album.id.raw) {
+                            showingRefreshDownloadedConfirmation = true
+                        } else {
+                            Task { await refreshAlbum(deletingDownloads: false) }
+                        }
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(isRefreshing || !networkMonitor.isOnline)
+                } label: {
                     Image(systemName: "ellipsis")
                         .foregroundStyle(.primary)
+                }
+                .confirmationDialog(
+                    "Refreshing will delete the album from your device.",
+                    isPresented: $showingRefreshDownloadedConfirmation,
+                    titleVisibility: .visible
+                ) {
+                    Button("Delete", role: .destructive) {
+                        Task { await refreshAlbum(deletingDownloads: true) }
+                    }
                 }
             }
         }
