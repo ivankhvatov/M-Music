@@ -265,8 +265,8 @@ final class PlayerManager: ObservableObject {
                 self.updateNowPlayingFeedback()
             }
             .store(in: &subscriptions)
-        engine.onTrackFinished = { [weak self] in
-            Task { @MainActor in self?.handleTrackFinishedNaturally() }
+        engine.onTrackFinished = { [weak self] handedOffGapless in
+            Task { @MainActor in self?.handleTrackFinishedNaturally(handedOffGapless: handedOffGapless) }
         }
         engine.onPlaybackFailed = { [weak self] error in
             Task { @MainActor in self?.recoverFromPlaybackFailure(error: error) }
@@ -677,7 +677,7 @@ final class PlayerManager: ObservableObject {
     /// `AVQueuePlayer`, it has already performed the seamless handoff internally by the time this
     /// runs (that's what makes the transition gapless) and there's nothing left to load — just
     /// bookkeeping. Otherwise (nothing was ready in time), fall back to a fresh load.
-    private func handleTrackFinishedNaturally() {
+    private func handleTrackFinishedNaturally(handedOffGapless: Bool) {
         if isRadio {
             // A live stream shouldn't end; if the server closes it cleanly, just stop.
             engine.pause()
@@ -693,7 +693,7 @@ final class PlayerManager: ObservableObject {
         }
         self.currentIndex = nextIndex
 
-        if gaplessPreloadedIndex == nextIndex {
+        if handedOffGapless, gaplessPreloadedIndex == nextIndex {
             gaplessPreloadedIndex = nil
             let track = queue[nextIndex]
             duration = TimeInterval(track.duration ?? 0)

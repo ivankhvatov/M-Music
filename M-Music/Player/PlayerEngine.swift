@@ -21,7 +21,11 @@ final class PlayerEngine: ObservableObject {
     @Published private(set) var isWaiting: Bool = false
     @Published private(set) var isLikelyToKeepUp: Bool = true
 
-    var onTrackFinished: (() -> Void)?
+    /// Called when the current track plays to its end. The argument says whether the engine
+    /// really handed off to the preloaded next item (`true`) or not (`false`: nothing was
+    /// preloaded, or the queue player never actually advanced into it) — in the `false` case the
+    /// caller has to load the next track itself.
+    var onTrackFinished: ((_ handedOffGapless: Bool) -> Void)?
     var onPlaybackFailed: ((Error?) -> Void)?
     var onPlaybackStalled: (() -> Void)?
 
@@ -49,6 +53,8 @@ final class PlayerEngine: ObservableObject {
     private var gaplessNextURL: URL?
     private var gaplessPreloaded = false
     private var pendingResumeAfterBuffer = false
+    private var advanceObservation: NSKeyValueObservation?
+    private var advanceTimeoutTask: Task<Void, Never>?
 
     init() {
         let p = AVQueuePlayer()
@@ -78,6 +84,7 @@ final class PlayerEngine: ObservableObject {
     }
 
     func play(url: URL) {
+        cancelPendingAdvanceWait()
         playbackToken = UUID()
         let token = playbackToken
         currentURL = url
@@ -182,12 +189,75 @@ final class PlayerEngine: ObservableObject {
     @discardableResult
     func preloadForGapless(url: URL) -> Bool {
         guard let currentItem = player.currentItem else { return false }
+        // A previously preloaded item that never got consumed (the queue changed under it) would
+        // otherwise stay queued behind the new one and play out of order.
+        if let stale = gaplessNextItem { player.remove(stale) }
+        gaplessNextItem = nil
+        gaplessNextURL = nil
+        gaplessPreloaded = false
         let nextItem = makePlayerItem(url: url)
+        // `insert(_:after:)` silently does nothing if `currentItem` is no longer in the queue —
+        // which is exactly what happens if this runs in the brief window after an item ended but
+        // before the queue player has advanced. Only report success if the item is really queued.
+        guard player.canInsert(nextItem, after: currentItem) else { return false }
+        player.insert(nextItem, after: currentItem)
+        guard player.items().contains(nextItem) else { return false }
         gaplessNextItem = nextItem
         gaplessNextURL = url
-        player.insert(nextItem, after: currentItem)
         gaplessPreloaded = true
         return true
+    }
+
+    /// `AVPlayerItemDidPlayToEndTime` is posted *before* the queue player has advanced its
+    /// `currentItem` to the next item — by the time this runs the advance may or may not have
+    /// happened yet. Everything after the swap (most importantly preloading the *following* item,
+    /// which inserts after `currentItem`) is only correct once it has, so wait for it; inserting
+    /// after the item that just ended silently drops the new item, and a queue that then runs dry
+    /// leaves the player "playing" forever with nothing to play. A short timeout keeps a queue
+    /// player that never advances from hanging the handoff — that case falls back to the caller
+    /// loading the next track itself.
+    private func completeGaplessHandoff(to next: AVPlayerItem, token: UUID) {
+        cancelPendingAdvanceWait()
+        if player.currentItem === next {
+            finishGaplessHandoff(to: next, token: token)
+            return
+        }
+        advanceObservation = player.observe(\.currentItem, options: [.new]) { [weak self] observedPlayer, _ in
+            guard observedPlayer.currentItem === next else { return }
+            Task { @MainActor [weak self] in
+                guard let self, self.advanceObservation != nil else { return }
+                self.cancelPendingAdvanceWait()
+                self.finishGaplessHandoff(to: next, token: token)
+            }
+        }
+        advanceTimeoutTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled, let self, self.advanceObservation != nil else { return }
+            self.cancelPendingAdvanceWait()
+            self.finishGaplessHandoff(to: next, token: token)
+        }
+    }
+
+    private func cancelPendingAdvanceWait() {
+        advanceObservation?.invalidate()
+        advanceObservation = nil
+        advanceTimeoutTask?.cancel()
+        advanceTimeoutTask = nil
+    }
+
+    private func finishGaplessHandoff(to next: AVPlayerItem, token: UUID) {
+        guard playbackToken == token else { return }
+        if player.currentItem === next {
+            performGaplessSwap()
+            onTrackFinished?(true)
+        } else {
+            gaplessPreloaded = false
+            gaplessNextItem = nil
+            gaplessNextURL = nil
+            isPlaying = false
+            isActuallyPlaying = false
+            onTrackFinished?(false)
+        }
     }
 
     private func performGaplessSwap() {
@@ -338,6 +408,7 @@ final class PlayerEngine: ObservableObject {
     }
 
     func stop() {
+        cancelPendingAdvanceWait()
         playbackToken = UUID()
         removeTimeObserver()
         removeItemFinishedObserver()
@@ -420,13 +491,12 @@ final class PlayerEngine: ObservableObject {
             guard let self else { return }
             Task { @MainActor in
                 guard self.playbackToken == token else { return }
-                if self.gaplessPreloaded {
-                    self.performGaplessSwap()
-                    self.onTrackFinished?()
+                if self.gaplessPreloaded, let next = self.gaplessNextItem {
+                    self.completeGaplessHandoff(to: next, token: token)
                 } else {
                     self.isPlaying = false
                     self.isActuallyPlaying = false
-                    self.onTrackFinished?()
+                    self.onTrackFinished?(false)
                 }
             }
         }
