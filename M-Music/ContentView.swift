@@ -12,6 +12,11 @@ struct MainView: View {
     /// that publishes `currentTime` twice a second, and observing it would re-run this whole
     /// view (the `TabView` and both overlays) on every tick.
     @State private var hasNowPlaying = PlayerManager.shared.currentTrack != nil || PlayerManager.shared.isRadio
+    /// Flips on shortly after launch. The system-rendered mini player (the bottom accessory) is all
+    /// that's visible at first, so the full-screen player's large subtree — and the one-time
+    /// SwiftUI setup cost of its many view types — is built once the first frames are out of the
+    /// way instead of inside them. Expanding earlier than that still works: `expandPlayer` mounts it.
+    @State private var overlayReady = false
 
     private static let hasNowPlayingPublisher = Publishers
         .CombineLatest(PlayerManager.shared.$currentIndex, PlayerManager.shared.$currentRadioStation)
@@ -62,7 +67,7 @@ struct MainView: View {
                 // in the first second after launch — on a fresh install with no server, that's
                 // all of it wasted. It mounts (hidden, fully collapsed) the moment a track or
                 // station loads, well before anyone can expand it.
-                if hasNowPlaying || expandPlayer {
+                if (hasNowPlaying && overlayReady) || expandPlayer {
                     ExpandableNowPlaying(
                         expanded: $expandPlayer,
                         collapsedFrame: nowPlayingFrame,
@@ -72,6 +77,10 @@ struct MainView: View {
                 }
             }
             .onReceive(Self.hasNowPlayingPublisher) { hasNowPlaying = $0 }
+            .task {
+                try? await Task.sleep(for: .milliseconds(900))
+                overlayReady = true
+            }
     }
 
     func TabBar() -> some View {

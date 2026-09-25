@@ -39,11 +39,25 @@ final class PlayerManager: ObservableObject {
 
     /// The full play queue, e.g. an album's track list. `currentIndex` points into it, so tracks
     /// before it are playback history (reachable via `previous()`) and tracks after it play next.
-    @Published private(set) var queue: [Child] = []
+    @Published private(set) var queue: [Child] = [] {
+        didSet {
+            queueVersion &+= 1
+            // Anything other than the background restore replacing the placeholder queue means the
+            // user has moved on; the restored queue must no longer be swapped in.
+            if !isApplyingRestoredQueue { awaitingFullQueue = false }
+        }
+    }
     @Published private(set) var currentIndex: Int?
     @Published private(set) var isPlaying = false
-    @Published private(set) var currentTime: TimeInterval = 0
-    @Published private(set) var duration: TimeInterval = 0
+    /// Not `@Published`: it changes twice a second during playback, and publishing it here made
+    /// every view observing `PlayerManager` re-render on each tick. Mirrored into
+    /// `PlaybackProgress`, which the scrubber observes instead.
+    private(set) var currentTime: TimeInterval = 0 {
+        didSet { PlaybackProgress.shared.update(currentTime: currentTime) }
+    }
+    private(set) var duration: TimeInterval = 0 {
+        didSet { PlaybackProgress.shared.update(duration: duration) }
+    }
     /// True while the current track is being downloaded into the gapless cache before playback
     /// can start — only possible while `GaplessCacheSettings.isEnabled`, since that setting means
     /// nothing is ever streamed live; a track with nothing cached yet has to be fully downloaded
@@ -161,6 +175,17 @@ final class PlayerManager: ObservableObject {
 
     private let starStore = StarStore.shared
 
+    /// Bumped on every change to `queue`, so `persistState()` only hands the queue to `QueueStore`
+    /// when it actually changed rather than on every playback tick.
+    private var queueVersion = 0
+    private var persistedQueueVersion = -1
+    /// At launch only the current track is restored synchronously (the queue can be thousands of
+    /// tracks); `queue` is a one-element placeholder until the full queue has been read off the
+    /// main thread. While that's pending nothing is persisted, or the placeholder would overwrite
+    /// the real queue and index.
+    private var awaitingFullQueue = false
+    private var isApplyingRestoredQueue = false
+
     /// Bounds how many times `recoverFromPlaybackFailure(error:)` will retry the *same* song
     /// before giving up on it — see that method. Reset whenever the failing track differs from
     /// `retryingTrackId`, so each song gets its own fresh budget.
@@ -170,8 +195,15 @@ final class PlayerManager: ObservableObject {
     init(client: SubsonicClient = .shared) {
         self.client = client
         restorePersistedState()
-        configureRemoteCommandCenter()
         subscribeToEngine()
+        // Lock-screen/Control Center plumbing isn't needed for the first frame: registering the
+        // remote commands and publishing Now Playing info are IPC-heavy, and used to run
+        // synchronously here, on the main thread, before anything was on screen.
+        Task {
+            try? await Task.sleep(for: .milliseconds(400))
+            configureRemoteCommandCenter()
+            updateNowPlayingInfo()
+        }
         // Eagerly, so an already-cached track (from an earlier session) resolves correctly the
         // very first time it's tapped, rather than only after some other download happens to run
         // first and trigger this as a side effect — see `GaplessCacheService.preload()`.
@@ -1192,7 +1224,9 @@ final class PlayerManager: ObservableObject {
 
     // MARK: - Persistence across launches
 
-    private struct PersistedState: Codable {
+    /// The pre-`QueueStore` format: the whole queue inside one `UserDefaults` blob. Only read once,
+    /// to migrate.
+    private struct LegacyPersistedState: Codable {
         let queue: [Child]
         let currentIndex: Int
         let currentTime: TimeInterval
@@ -1200,27 +1234,74 @@ final class PlayerManager: ObservableObject {
         let isPlaylistQueue: Bool?
     }
 
-    private static let persistenceKey = "PlayerManager.state"
+    /// Everything about the current session except the queue itself: small enough (one track) to
+    /// read synchronously at launch and rewrite every few seconds.
+    private struct PersistedSnapshot: Codable {
+        let track: Child
+        let index: Int
+        let currentTime: TimeInterval
+        let isPlaylistQueue: Bool
+    }
+
+    private static let snapshotKey = "PlayerManager.snapshot"
+    private static let legacyPersistenceKey = "PlayerManager.state"
 
     private func persistState() {
         // Radio leaves the last real queue on disk untouched, so it's restored next launch.
         guard !isRadio else { return }
+        // See `awaitingFullQueue`.
+        guard !awaitingFullQueue else { return }
         guard let currentIndex, queue.indices.contains(currentIndex) else {
-            UserDefaults.standard.removeObject(forKey: Self.persistenceKey)
+            UserDefaults.standard.removeObject(forKey: Self.snapshotKey)
+            UserDefaults.standard.removeObject(forKey: Self.legacyPersistenceKey)
+            persistedQueueVersion = queueVersion
+            Task(priority: .utility) { await QueueStore.shared.clear() }
             return
         }
-        let state = PersistedState(queue: queue, currentIndex: currentIndex, currentTime: currentTime, isPlaylistQueue: isPlaylistQueue)
-        guard let data = try? JSONEncoder().encode(state) else { return }
-        UserDefaults.standard.set(data, forKey: Self.persistenceKey)
+        let snapshot = PersistedSnapshot(
+            track: queue[currentIndex], index: currentIndex, currentTime: currentTime, isPlaylistQueue: isPlaylistQueue
+        )
+        if let data = try? JSONEncoder().encode(snapshot) {
+            UserDefaults.standard.set(data, forKey: Self.snapshotKey)
+        }
+        if queueVersion != persistedQueueVersion {
+            persistedQueueVersion = queueVersion
+            let queue = queue
+            Task(priority: .utility) { await QueueStore.shared.save(queue: queue) }
+        }
     }
 
-    /// Restores the last session's queue, current track, and position — without starting
-    /// playback or streaming anything yet. Actual streaming resumes lazily on the first
+    /// Restores the last session's current track and position — without starting playback or
+    /// streaming anything yet. Actual streaming resumes lazily on the first
     /// `resume()`/`togglePlayPause()` call, so this doesn't require server access just to launch
     /// the app or show the mini player.
+    ///
+    /// Only the current track is restored synchronously (that's all the first frame needs); the
+    /// rest of the queue is read and decoded off the main thread and swapped in afterwards.
     private func restorePersistedState() {
-        guard let data = UserDefaults.standard.data(forKey: Self.persistenceKey),
-              let state = try? JSONDecoder().decode(PersistedState.self, from: data),
+        let defaults = UserDefaults.standard
+        if let data = defaults.data(forKey: Self.snapshotKey),
+           let snapshot = try? JSONDecoder().decode(PersistedSnapshot.self, from: data) {
+            isApplyingRestoredQueue = true
+            queue = [snapshot.track]
+            isApplyingRestoredQueue = false
+            awaitingFullQueue = true
+            isPlaylistQueue = snapshot.isPlaylistQueue
+            currentIndex = 0
+            currentTime = snapshot.currentTime
+            duration = TimeInterval(snapshot.track.duration ?? 0)
+            updateArtworkURL()
+            // Not while the launch is still busy building the first screens: nothing needs the rest
+            // of the queue until someone skips or opens the queue.
+            Task(priority: .utility) {
+                try? await Task.sleep(for: .milliseconds(1500))
+                await restoreFullQueue(matching: snapshot)
+            }
+            return
+        }
+        // Migrate the old single-blob format once.
+        guard let data = defaults.data(forKey: Self.legacyPersistenceKey),
+              let state = try? JSONDecoder().decode(LegacyPersistedState.self, from: data),
               state.queue.indices.contains(state.currentIndex)
         else { return }
         queue = state.queue
@@ -1229,6 +1310,22 @@ final class PlayerManager: ObservableObject {
         currentTime = state.currentTime
         duration = TimeInterval(state.queue[state.currentIndex].duration ?? 0)
         updateArtworkURL()
-        updateNowPlayingInfo()
+        defaults.removeObject(forKey: Self.legacyPersistenceKey)
+        persistState()
+    }
+
+    private func restoreFullQueue(matching snapshot: PersistedSnapshot) async {
+        guard let full = await QueueStore.shared.load() else { return }
+        // Skip if the user already started something else, or the file doesn't line up.
+        guard awaitingFullQueue, currentTrack?.id == snapshot.track.id,
+              full.indices.contains(snapshot.index), full[snapshot.index].id == snapshot.track.id
+        else { return }
+        isApplyingRestoredQueue = true
+        queue = full
+        isApplyingRestoredQueue = false
+        currentIndex = snapshot.index
+        awaitingFullQueue = false
+        // What's on disk is exactly this queue.
+        persistedQueueVersion = queueVersion
     }
 }

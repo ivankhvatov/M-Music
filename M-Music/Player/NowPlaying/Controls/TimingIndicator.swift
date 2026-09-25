@@ -3,12 +3,14 @@ import SwiftUI
 /// The scrubber row: elapsed/remaining time labels around an `ElasticSlider` bound to real
 /// playback position, seeking on release.
 struct TimingIndicator: View {
-    @ObservedObject private var player = PlayerManager.shared
+    /// Not observed: only the position, via `progress`, drives this view.
+    private let player = PlayerManager.shared
+    @ObservedObject private var playback = PlaybackProgress.shared
     let spacing: CGFloat
     @State private var progress: Double = 0
     @State private var isDragging = false
 
-    private var range: ClosedRange<Double> { 0 ... max(player.duration, 1) }
+    private var range: ClosedRange<Double> { 0 ... max(playback.duration, 1) }
 
     var body: some View {
         ElasticSlider(
@@ -26,12 +28,12 @@ struct TimingIndicator: View {
         .sliderStyle(.playbackProgress)
         .frame(height: 60)
         .transformEffect(.identity)
-        .onChange(of: player.currentTime) {
+        .onChange(of: playback.currentTime) {
             guard !isDragging else { return }
-            progress = player.currentTime
+            progress = playback.currentTime
         }
         .onAppear {
-            progress = player.currentTime
+            progress = playback.currentTime
         }
     }
 }

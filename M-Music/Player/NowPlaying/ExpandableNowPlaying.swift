@@ -234,15 +234,23 @@ private extension ExpandableNowPlaying {
         )
     }
 
+    /// Colours only need a coarse look at the artwork, so this reads a small decoded tier (the
+    /// dominant-colour pass resamples to 40×40 anyway) and does the pixel work off the main
+    /// actor; only the finished palette is assigned here, once.
     func updateColors() async {
-        guard let url = player.artworkURL, let uiImage = await ImageCache.shared.load(url) else {
+        guard let url = player.artworkURL,
+              let uiImage = await ImageCache.shared.load(url, maxPixelSize: ImageCache.colorSamplingMaxPixelSize)
+        else {
             colors = [.gray]
             return
         }
-        let dominant = uiImage.dominantColors(count: 3)
-            .map { $0.saturated(by: 1.35).darkened(by: 0.75) }
-            .reducedContrast(by: 0.3)
-        colors = dominant.isEmpty ? [.gray] : dominant
+        let palette = await Task.detached(priority: .userInitiated) {
+            uiImage.dominantColors(count: 3)
+                .map { $0.saturated(by: 1.35).darkened(by: 0.75) }
+                .reducedContrast(by: 0.3)
+        }.value
+        guard !Task.isCancelled else { return }
+        colors = palette.isEmpty ? [.gray] : palette
     }
 
     enum Const {

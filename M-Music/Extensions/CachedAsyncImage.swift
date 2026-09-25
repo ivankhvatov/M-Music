@@ -31,6 +31,8 @@ final class ImageCache: @unchecked Sendable {
     static let cardMaxPixelSize = 512
     /// Small round avatars (a 48pt artist row is 144px at 3x).
     static let avatarMaxPixelSize = 256
+    /// For sampling dominant colours only (Now Playing background): far smaller than anything shown.
+    static let colorSamplingMaxPixelSize = 96
 
     private let memory = NSCache<NSString, UIImage>()
     private let fileManager = FileManager.default

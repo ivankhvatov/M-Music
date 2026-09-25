@@ -20,7 +20,17 @@ final class SubsonicClient: @unchecked Sendable {
     /// Sent as the `v` (protocol version) parameter. Navidrome is compatible with 1.16.1.
     static let apiVersion = "1.16.1"
 
-    private let session: URLSession
+    /// Built on first use: creating a `URLSession` costs a noticeable slice of the launch's first
+    /// frame, and `SubsonicClient.shared` is touched (for its credentials) long before any request.
+    private let sessionOverride: URLSession?
+    private var _session: URLSession?
+    private var session: URLSession {
+        lock.lock(); defer { lock.unlock() }
+        if let existing = sessionOverride ?? _session { return existing }
+        let created = Self.makeAPISession()
+        _session = created
+        return created
+    }
     private let lock = NSLock()
     private var _credentials: SubsonicCredentials?
 
@@ -54,8 +64,8 @@ final class SubsonicClient: @unchecked Sendable {
         return URLSession(configuration: config)
     }
 
-    init(session: URLSession = SubsonicClient.makeAPISession()) {
-        self.session = session
+    init(session: URLSession? = nil) {
+        self.sessionOverride = session
         self._credentials = SubsonicCredentialsStore.load()
     }
 

@@ -4,6 +4,7 @@ import CoreImage
 
 struct PlayerView: View {
     @ObservedObject private var player = PlayerManager.shared
+    @ObservedObject private var playback = PlaybackProgress.shared
 
     @State private var hasTimer: Bool = false
     @State private var showLyrics: Bool = false
@@ -12,7 +13,7 @@ struct PlayerView: View {
     @State private var isSettingsActive: Bool = false
 
     /// Live position while the user is dragging the scrubber; `nil` when not scrubbing, so the
-    /// progress bar follows `player.currentTime` the rest of the time.
+    /// progress bar follows `playback.currentTime` the rest of the time.
     @State private var scrubTime: TimeInterval?
     @GestureState private var isScrubbing: Bool = false
 
@@ -22,7 +23,7 @@ struct PlayerView: View {
 
     private var bottomButtonSize : CGFloat = 22
 
-    private var displayTime: TimeInterval { scrubTime ?? player.currentTime }
+    private var displayTime: TimeInterval { scrubTime ?? playback.currentTime }
 
     var body: some View {
             ScrollView {
@@ -143,7 +144,7 @@ struct PlayerView: View {
 
     func ProgressBar() -> some View {
         GeometryReader { geo in
-            let progress = player.duration > 0 ? min(max(displayTime / player.duration, 0), 1) : 0
+            let progress = playback.duration > 0 ? min(max(displayTime / playback.duration, 0), 1) : 0
             let barHeight: CGFloat = isScrubbing ? 12 : 8
 
             ZStack(alignment: .leading) {
@@ -165,7 +166,7 @@ struct PlayerView: View {
                     }
                     .onChanged { value in
                         let newProgress = min(max(value.location.x / geo.size.width, 0), 1)
-                        scrubTime = newProgress * player.duration
+                        scrubTime = newProgress * playback.duration
                     }
                     .onEnded { _ in
                         if let scrubTime {
@@ -182,7 +183,7 @@ struct PlayerView: View {
         HStack {
             Text(formattedTime(displayTime))
             Spacer()
-            Text("-\(formattedTime(player.duration - displayTime))")
+            Text("-\(formattedTime(playback.duration - displayTime))")
         }
         .font(.caption)
         .foregroundStyle(.transparentWhite)
