@@ -606,9 +606,9 @@ struct AlbumView: View {
         private var downloadButton: some ToolbarContent {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    if isAlbumDownloaded {
-                        showingRemoveDownloadConfirmation = true
-                    } else {
+                    // A downloaded album's checkmark is a status indicator only — removing the
+                    // download lives in `moreButton`'s menu.
+                    if !isAlbumDownloaded {
                         downloads.downloadAlbum(songs)
                     }
                 } label: {
@@ -616,15 +616,6 @@ struct AlbumView: View {
                         .foregroundStyle(.primary)
                 }
                 .disabled(songs.isEmpty)
-                .confirmationDialog(
-                    "Delete the album from this device?",
-                    isPresented: $showingRemoveDownloadConfirmation,
-                    titleVisibility: .visible
-                ) {
-                    Button("Delete", role: .destructive) {
-                        downloads.removeAlbum(albumId: album.id.raw)
-                    }
-                }
             }
         }
 
@@ -642,9 +633,26 @@ struct AlbumView: View {
                         Label("Refresh", systemImage: "arrow.clockwise")
                     }
                     .disabled(isRefreshing || !networkMonitor.isOnline)
+
+                    if isAlbumDownloaded {
+                        Button(role: .destructive) {
+                            showingRemoveDownloadConfirmation = true
+                        } label: {
+                            Label("Remove Download", systemImage: "checkmark.circle.fill")
+                        }
+                    }
                 } label: {
                     Image(systemName: "ellipsis")
                         .foregroundStyle(.primary)
+                }
+                .confirmationDialog(
+                    "Delete the album from this device?",
+                    isPresented: $showingRemoveDownloadConfirmation,
+                    titleVisibility: .visible
+                ) {
+                    Button("Delete", role: .destructive) {
+                        downloads.removeAlbum(albumId: album.id.raw)
+                    }
                 }
                 .confirmationDialog(
                     "Refreshing will delete the album from your device.",
