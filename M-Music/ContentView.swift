@@ -1,10 +1,22 @@
 import SwiftUI
+import Combine
 
 struct MainView: View {
     @State private var selectedTab : Int = 0
     @State private var expandPlayer : Bool = false
     @State private var nowPlayingFrame: CGRect = .zero
     @State private var accessoryVisible = true
+    /// Whether anything is loaded in the player (a track, or a radio station). The full-screen
+    /// player overlay below is only built once there is — see its comment. Kept as its own
+    /// `@State`, fed by a de-duplicated publisher, rather than observing `PlayerManager` here:
+    /// that publishes `currentTime` twice a second, and observing it would re-run this whole
+    /// view (the `TabView` and both overlays) on every tick.
+    @State private var hasNowPlaying = PlayerManager.shared.currentTrack != nil || PlayerManager.shared.isRadio
+
+    private static let hasNowPlayingPublisher = Publishers
+        .CombineLatest(PlayerManager.shared.$currentIndex, PlayerManager.shared.$currentRadioStation)
+        .map { index, station in index != nil || station != nil }
+        .removeDuplicates()
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -44,13 +56,22 @@ struct MainView: View {
             .tabBarMinimizeBehavior(.never)
             .environment(\.colorScheme, colorScheme)
             .overlay {
-                ExpandableNowPlaying(
-                    expanded: $expandPlayer,
-                    collapsedFrame: nowPlayingFrame,
-                    accessoryVisible: $accessoryVisible
-                )
-                .toolbarColorScheme(colorScheme, for: .navigationBar)
+                // Nothing to expand into until something's loaded, so don't build the full-screen
+                // player yet: it's a large subtree (the expanded controls, an `AVRoutePickerView`,
+                // the glass and gradient layers) whose one-time SwiftUI setup cost otherwise lands
+                // in the first second after launch — on a fresh install with no server, that's
+                // all of it wasted. It mounts (hidden, fully collapsed) the moment a track or
+                // station loads, well before anyone can expand it.
+                if hasNowPlaying || expandPlayer {
+                    ExpandableNowPlaying(
+                        expanded: $expandPlayer,
+                        collapsedFrame: nowPlayingFrame,
+                        accessoryVisible: $accessoryVisible
+                    )
+                    .toolbarColorScheme(colorScheme, for: .navigationBar)
+                }
             }
+            .onReceive(Self.hasNowPlayingPublisher) { hasNowPlaying = $0 }
     }
 
     func TabBar() -> some View {

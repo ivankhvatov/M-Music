@@ -57,6 +57,9 @@ struct CompactChrome: View {
         .frame(height: NowPlayingLayout.compactHeight)
         .contentShape(.rect)
         .onTapGesture {
+            // Nothing loaded means nothing to expand into (and the full-screen player isn't even
+            // mounted yet — see `MainView`).
+            guard player.currentTrack != nil || player.isRadio else { return }
             withAnimation(.playerExpandAnimation) {
                 expanded = true
             }

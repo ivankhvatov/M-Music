@@ -34,7 +34,7 @@ struct NowPlayingBackground: View {
                 .glassEffect(.regular, in: .rect(cornerRadius: playerCornerRadius))
                 .opacity(showsExpandedContent ? 0 : 1)
                 .animation(nil, value: showsExpandedContent)
-            ColorfulBackground(colors: colors)
+            ColorfulBackground(colors: colors, isActive: showsExpandedContent)
                 // Blending toward black (rather than the mid-gray this used to use) darkens the
                 // gradient while leaving its hue and saturation alone — a gray wash pulls every
                 // color toward gray, which is what was flattening/desaturating this background.

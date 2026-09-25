@@ -17,7 +17,15 @@ final class DownloadStore: ObservableObject {
     private var updateObservationTask: Task<Void, Never>?
 
     private init() {
-        Task { await reload() }
+        // The very first `DownloadDatabase.shared` access creates and migrates the SQLite file
+        // (on a fresh install: directory creation, `sqlite3_open`, migrations with an fsync each).
+        // That's a synchronous static initializer that runs on whatever thread touches it first —
+        // which, from this `@MainActor` class's `reload()`, was the main thread, during launch.
+        // Touch it here from a background task first, so `reload()` finds it already built.
+        Task.detached(priority: .utility) { [weak self] in
+            _ = DownloadDatabase.shared
+            await self?.reload()
+        }
         updateObservationTask = Task { [weak self] in
             guard let self else { return }
             for await update in await DownloadService.shared.updates() {

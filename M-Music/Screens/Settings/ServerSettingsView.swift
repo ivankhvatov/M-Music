@@ -20,65 +20,64 @@ struct ServerSettingsView: View {
     @State private var errorMessage: String?
 
     var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 10) {
-                List {
-                    Section {
-                        TextField("https://music.example.com", text: $serverURL)
-                            .keyboardType(.URL)
-                            .textContentType(.URL)
-                            .autocapitalization(.none)
-                            .autocorrectionDisabled()
-                        TextField("Username", text: $username)
-                            .textContentType(.username)
-                            .autocapitalization(.none)
-                            .autocorrectionDisabled()
-                        SecureField("Password", text: $password)
-                            .textContentType(.password)
-                    } header: {
-                        Text("Navidrome Server")
-                    } footer: {
-                        if let statusMessage {
-                            Label(statusMessage, systemImage: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                        } else if let errorMessage {
-                            Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.red)
-                        } else {
-                            Text("Enter the address of your Navidrome server, e.g. https://music.example.com or http://192.168.1.10:4533")
-                        }
-                    }
-
-                    Section {
-                        Button {
-                            connect()
-                        } label: {
-                            if isConnecting {
-                                ProgressView()
-                                    .frame(maxWidth: .infinity)
-                            } else {
-                                Text(isConnected ? "Reconnect" : "Connect")
-                                    .frame(maxWidth: .infinity)
-                            }
-                        }
-                        .disabled(serverURL.isEmpty || username.isEmpty || password.isEmpty || isConnecting)
-                        .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
-
-                        if isConnected {
-                            Button(role: .destructive) {
-                                disconnect()
-                            } label: {
-                                Text("Disconnect")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
-                        }
+        // No `NavigationStack` of its own: this is pushed onto `LibraryView`'s stack, which
+        // already provides the bar and title — a second one meant a second navigation controller
+        // and glass bar, with keyboard safe-area changes propagating through both.
+        VStack(alignment: .leading, spacing: 10) {
+            List {
+                Section {
+                    TextField("https://music.example.com", text: $serverURL)
+                        .keyboardType(.URL)
+                        .textContentType(.URL)
+                        .autocapitalization(.none)
+                        .autocorrectionDisabled()
+                    TextField("Username", text: $username)
+                        .textContentType(.username)
+                        .autocapitalization(.none)
+                        .autocorrectionDisabled()
+                    SecureField("Password", text: $password)
+                        .textContentType(.password)
+                } header: {
+                    Text("Navidrome Server")
+                } footer: {
+                    if let statusMessage {
+                        Label(statusMessage, systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    } else if let errorMessage {
+                        Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                    } else {
+                        Text("Enter the address of your Navidrome server, e.g. https://music.example.com or http://192.168.1.10:4533")
                     }
                 }
-                .navigationTitle("Server")
+
+                Section {
+                    Button {
+                        connect()
+                    } label: {
+                        if isConnecting {
+                            ProgressView()
+                                .frame(maxWidth: .infinity)
+                        } else {
+                            Text(isConnected ? "Reconnect" : "Connect")
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .disabled(serverURL.isEmpty || username.isEmpty || password.isEmpty || isConnecting)
+                    .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+
+                    if isConnected {
+                        Button(role: .destructive) {
+                            disconnect()
+                        } label: {
+                            Text("Disconnect")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+                    }
+                }
             }
-            .toolbar {
-            }
+            .navigationTitle("Server")
         }
     }
 

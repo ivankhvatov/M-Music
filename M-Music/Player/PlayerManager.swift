@@ -175,15 +175,15 @@ final class PlayerManager: ObservableObject {
         // Eagerly, so an already-cached track (from an earlier session) resolves correctly the
         // very first time it's tapped, rather than only after some other download happens to run
         // first and trigger this as a side effect — see `GaplessCacheService.preload()`.
-        Task { await GaplessCacheService.shared.preload() }
+        Task(priority: .utility) { await GaplessCacheService.shared.preload() }
         // Sweeps leftover ephemeral temp files from a previous launch that was killed before its
         // own cleanup ran — unconditional, regardless of the current "Keep cached for" setting,
         // since the user may have switched away from "Never" since the last launch.
-        Task { await EphemeralGaplessCacheService.shared.cleanupOrphanedFiles() }
+        Task(priority: .utility) { await EphemeralGaplessCacheService.shared.cleanupOrphanedFiles() }
         // Sends any scrobbles left pending from an earlier session, and again whenever the device
         // comes back online (`ScrobbleService` itself retries on a timer for "online but the
         // server's down").
-        Task { await ScrobbleService.shared.flush() }
+        Task(priority: .utility) { await ScrobbleService.shared.flush() }
         NetworkMonitor.shared.$isOnline
             .removeDuplicates()
             .filter { $0 }
@@ -193,7 +193,7 @@ final class PlayerManager: ObservableObject {
         // populates `LocalDownloadIndex`) is otherwise only ever referenced from SwiftUI views —
         // referencing it here is what makes it exist at all in a session that never visits one of
         // those screens before starting playback.
-        Task { await DownloadStore.shared.reload() }
+        _ = DownloadStore.shared
         backgroundObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
         ) { [weak self] _ in

@@ -79,7 +79,9 @@ struct LibraryView: View {
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 32)
 
-            NavigationLink(destination: ServerSettingsView()) {
+            NavigationLink {
+                ServerSettingsView()
+            } label: {
                 Text("Connect")
                     .fontWeight(.semibold)
                     .foregroundStyle(.white)
@@ -255,16 +257,27 @@ struct LibraryView: View {
         private var settingsButton: some ToolbarContent {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    NavigationLink(destination: ServerSettingsView()) {
+                    // Closure-based destinations: the `destination:` autoclosure form built all four
+                    // settings screens' structs (`PlaybackSettingsView` alone has ~17 `@AppStorage`
+                    // properties) every time this view's body ran; these only build on push.
+                    NavigationLink {
+                        ServerSettingsView()
+                    } label: {
                         Label("Server", systemImage: "server.rack")
                     }
-                    NavigationLink(destination: PlaybackSettingsView()) {
+                    NavigationLink {
+                        PlaybackSettingsView()
+                    } label: {
                         Label("Playback", systemImage: "play.circle")
                     }
-                    NavigationLink(destination: DownloadsSettingsView()) {
+                    NavigationLink {
+                        DownloadsSettingsView()
+                    } label: {
                         Label("Downloads", systemImage: "square.and.arrow.down")
                     }
-                    NavigationLink(destination: AppearanceSettingsView()) {
+                    NavigationLink {
+                        AppearanceSettingsView()
+                    } label: {
                         Label("Appearance", systemImage: "paintbrush")
                     }
                 } label: {
