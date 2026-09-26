@@ -42,6 +42,7 @@ struct MainView: View {
                     // accessory — see `accessoryVisible`'s doc comment on `ExpandableNowPlaying`.
                     // `.animation(nil, ...)` because this is a hard cut tied to the *start*/*end*
                     // of the other animation, not something that should itself animate.
+                    .environment(\.playerButtonSymbolTransitions, accessoryVisible)
                     .opacity(accessoryVisible ? 1 : 0)
                     .allowsHitTesting(accessoryVisible)
                     .animation(nil, value: accessoryVisible)

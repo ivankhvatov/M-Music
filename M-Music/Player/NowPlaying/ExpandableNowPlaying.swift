@@ -41,11 +41,6 @@ struct ExpandableNowPlaying: View {
         expandableNowPlaying
             .onChange(of: expanded) {
                 if expanded {
-                    // The expanded chrome sits mounted at opacity 0 while collapsed, and an update
-                    // SwiftUI dropped for it in the meantime (see `PlayerManager`'s foreground
-                    // republish) would otherwise show — e.g. a play/pause button that doesn't
-                    // match the player. Republishing makes it re-read the current state.
-                    player.objectWillChange.send()
                     marqueeRestartToken &+= 1
                     stacked(progress: 1, withAnimation: true)
                     accessoryVisible = false
@@ -122,9 +117,11 @@ private extension ExpandableNowPlaying {
                 // `matchedGeometryEffect` descendant, so there's no risk of two simultaneous sources
                 // for the same id.
                 RegularChrome(size: size, colors: colors, onCollapse: collapse, marqueesActive: marqueesActive, marqueeRestartToken: marqueeRestartToken)
+                    .environment(\.playerButtonSymbolTransitions, expanded)
                     .opacity(chromeProgress)
                     .allowsHitTesting(expanded)
                 CompactChrome(expanded: $expanded, marqueesActive: marqueesActive, marqueeRestartToken: compactMarqueeRestartToken)
+                    .environment(\.playerButtonSymbolTransitions, !expanded)
                     .opacity(1 - chromeProgress)
                     .allowsHitTesting(!expanded)
                 // Artwork alone — a single `matchedGeometryEffect` source at a time (two

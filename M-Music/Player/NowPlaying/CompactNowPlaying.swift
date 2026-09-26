@@ -75,6 +75,14 @@ struct CompactChrome: View {
             // Nothing loaded means nothing to expand into (and the full-screen player isn't even
             // mounted yet — see `MainView`).
             guard player.currentTrack != nil || player.isRadio else { return }
+            // The expanded chrome sits mounted at opacity 0 while collapsed, and an update SwiftUI
+            // dropped for it in the meantime (see `PlayerManager`'s foreground republish) would
+            // otherwise show — e.g. a play/pause button that doesn't match the player — and only
+            // get corrected, visibly, inside the expand animation. Republish first, with
+            // animations off, so it's already right by the time it fades in.
+            var instant = Transaction()
+            instant.disablesAnimations = true
+            withTransaction(instant) { player.objectWillChange.send() }
             withAnimation(.playerExpandAnimation) {
                 expanded = true
             }

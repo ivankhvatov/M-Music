@@ -5,6 +5,7 @@ import SwiftUI
 struct PlayerButton<Content: View>: View {
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.playerButtonConfig) var config
+    @Environment(\.playerButtonSymbolTransitions) private var symbolTransitions
     @State private var showCircle = false
     @State private var pressed = false
     private let onEnded: (() -> Void)?
@@ -48,7 +49,7 @@ struct PlayerButton<Content: View>: View {
                     onEnded?()
                 }
             )
-            .contentTransition(.symbolEffect(.replace))
+            .contentTransition(symbolTransitions ? .symbolEffect(.replace) : .identity)
     }
 }
 
@@ -66,6 +67,12 @@ extension View {
 
 extension EnvironmentValues {
     @Entry var playerButtonConfig = PlayerButtonConfig()
+    /// Whether a symbol change (play <-> pause) animates with the replace transition. That
+    /// transition is played by the render layer, so for a button that's currently hidden (the
+    /// expanded chrome while collapsed, the mini player while expanded) it would be held back until
+    /// the button next appears, and then play in front of the user — a stale symbol first, then the
+    /// swap. Hidden buttons switch this off so they change instantly and are already right.
+    @Entry var playerButtonSymbolTransitions = true
 }
 
 struct PlayerButtonConfig {
