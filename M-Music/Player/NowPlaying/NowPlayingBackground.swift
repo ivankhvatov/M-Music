@@ -38,7 +38,7 @@ struct NowPlayingBackground: View {
                 // Blending toward black (rather than the mid-gray this used to use) darkens the
                 // gradient while leaving its hue and saturation alone — a gray wash pulls every
                 // color toward gray, which is what was flattening/desaturating this background.
-                .overlay(Color.black.opacity(0.4))
+                .overlay(Color.gray.darkened(by: 0.15).opacity(0.3))
                 .opacity(showsExpandedContent ? 1 : 0)
                 .animation(nil, value: showsExpandedContent)
         }

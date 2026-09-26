@@ -134,6 +134,14 @@ extension Color {
         return Color(hue: hue, saturation: saturation, brightness: brightness * factor)
     }
 
+    /// How light the color reads to the eye, 0 (black) to 1 (white) — a luma-weighted mix of the
+    /// channels, so a saturated blue reads as darker than an equally "bright" yellow.
+    var perceivedLightness: CGFloat {
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        UIColor(self).getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        return 0.299 * red + 0.587 * green + 0.114 * blue
+    }
+
     /// Scales saturation up by `factor`, clamped to fully saturated — makes a color more vivid
     /// without touching its hue or brightness.
     func saturated(by factor: CGFloat) -> Color {
@@ -176,5 +184,33 @@ extension [Color] {
         let n = CGFloat(count)
         let average = Color(red: totalRed / n, green: totalGreen / n, blue: totalBlue / n)
         return map { $0.interpolated(to: average, fraction: fraction) }
+    }
+
+    /// Lightens or darkens every color by one shared factor (scaling its RGB, so hue and
+    /// saturation are kept) until the group's *average* perceived lightness equals `target` —
+    /// lets a palette be pinned to a chosen overall lightness (e.g. slightly under the artwork's
+    /// own average) without flattening the differences between its colors.
+    func scaledToAverageLightness(_ target: CGFloat) -> [Color] {
+        guard !isEmpty else { return self }
+        let components: [(r: CGFloat, g: CGFloat, b: CGFloat)] = map { color in
+            var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+            UIColor(color).getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+            return (red, green, blue)
+        }
+        func scaled(_ factor: CGFloat) -> [(r: CGFloat, g: CGFloat, b: CGFloat)] {
+            components.map { (Swift.min($0.r * factor, 1), Swift.min($0.g * factor, 1), Swift.min($0.b * factor, 1)) }
+        }
+        func averageLightness(_ factor: CGFloat) -> CGFloat {
+            scaled(factor).reduce(0) { $0 + 0.299 * $1.r + 0.587 * $1.g + 0.114 * $1.b } / CGFloat(count)
+        }
+        guard averageLightness(1) > 0 else { return self }
+
+        // Channels clamp at 1, so the average only ever rises with the factor — bisect for it.
+        var low: CGFloat = 0, high: CGFloat = 64
+        for _ in 0..<32 {
+            let mid = (low + high) / 2
+            if averageLightness(mid) < target { low = mid } else { high = mid }
+        }
+        return scaled((low + high) / 2).map { Color(red: $0.r, green: $0.g, blue: $0.b) }
     }
 }

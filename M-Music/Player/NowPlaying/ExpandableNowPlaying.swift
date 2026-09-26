@@ -245,15 +245,27 @@ private extension ExpandableNowPlaying {
             return
         }
         let palette = await Task.detached(priority: .userInitiated) {
-            uiImage.dominantColors(count: 3)
-                .map { $0.saturated(by: 1.35).darkened(by: 0.75) }
+            let vivid = uiImage.dominantColors(count: 3)
+                .map { $0.saturated(by: 1.35).darkened() }
                 .reducedContrast(by: 0.3)
+            // Pin the palette's average lightness a little under the artwork's own average
+            // (measured over the whole image, including the near-black/near-white pixels the
+            // dominant-colour pass skips) — so the backdrop follows the artwork's tone, lightening
+            // or darkening the picked colors as needed, but always sits slightly darker than it.
+            guard let artworkLightness = uiImage.averageColor()?.perceivedLightness else {
+                return vivid.map { $0.darkened(by: 0.75) }
+            }
+            return vivid.scaledToAverageLightness(artworkLightness * Const.backdropLightnessRatio)
         }.value
         guard !Task.isCancelled else { return }
         colors = palette.isEmpty ? [.gray] : palette
     }
 
     enum Const {
+        /// How light the backdrop palette's average is relative to the artwork's own average
+        /// lightness — under 1 so the background reads slightly darker than the cover.
+        static let backdropLightnessRatio: CGFloat = 0.8
+
         /// Below this fraction of `expandProgress`, a collapse switches the content/material over
         /// to the mini player's look. Small on purpose — the morph itself should only occupy the
         /// last stretch of the shrink, not race it the whole way down.
