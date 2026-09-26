@@ -106,6 +106,18 @@ actor DownloadDatabase {
         }) ?? []
     }
 
+    /// How many songs of each album are downloaded — one grouped query instead of decoding every
+    /// record, for callers that only need per-album counts.
+    func downloadedSongCountsByAlbumId() async -> [String: Int] {
+        let rows = (try? await dbQueue.read { db in
+            try Row.fetchAll(db, sql: "SELECT albumId, COUNT(*) AS songCount FROM downloads WHERE albumId IS NOT NULL GROUP BY albumId")
+        }) ?? []
+        return Dictionary(uniqueKeysWithValues: rows.compactMap { row -> (String, Int)? in
+            guard let albumId: String = row["albumId"] else { return nil }
+            return (albumId, row["songCount"])
+        })
+    }
+
     func storageStats() async -> DownloadStorageStats {
         (try? await dbQueue.read { db in
             let totalBytes = try Int64.fetchOne(db, sql: "SELECT COALESCE(SUM(byteSize), 0) FROM downloads") ?? 0

@@ -217,25 +217,35 @@ struct AlbumView: View {
 
     /// Fetches the rest of this album's artist catalog and splits it into "other versions" of
     /// this same album (same title, different `version` tag) and everything else by that artist.
-    /// Supplementary content — fails silently rather than surfacing an error for it.
+    /// Offline, or if the server can't be reached, only the artist's fully downloaded albums are
+    /// shown instead, from the library cache. Supplementary content — fails silently rather than
+    /// surfacing an error for it.
     private func loadRelatedAlbums() async {
         guard let artistId = album.artistId?.raw else { return }
         // Fetched, filtered and grouped off the main actor (`nonisolated async`); only the two
         // finished arrays come back here.
-        guard let related = try? await Self.relatedAlbums(
-            of: album, artistId: artistId, groupVersions: groupReleaseVersionsEnabled, client: client
+        guard let related = await Self.relatedAlbums(
+            of: album, artistId: artistId, groupVersions: groupReleaseVersionsEnabled,
+            isOnline: networkMonitor.isOnline, client: client
         ) else { return }
         otherVersions = related.otherVersions
         moreByArtist = related.moreByArtist
     }
 
     private nonisolated static func relatedAlbums(
-        of album: AlbumID3, artistId: String, groupVersions: Bool, client: SubsonicClient
-    ) async throws -> (otherVersions: [AlbumID3], moreByArtist: [AlbumID3]) {
-        let artist = try await client.getArtist(id: artistId)
+        of album: AlbumID3, artistId: String, groupVersions: Bool, isOnline: Bool, client: SubsonicClient
+    ) async -> (otherVersions: [AlbumID3], moreByArtist: [AlbumID3])? {
+        let artistAlbums: [AlbumID3]
+        if isOnline, let fetched = try? await client.getArtist(id: artistId).album {
+            artistAlbums = fetched
+        } else {
+            // A cancelled request (the view went away) isn't "server unavailable".
+            guard !Task.isCancelled else { return nil }
+            artistAlbums = await LibraryCacheDatabase.shared.fullyDownloadedAlbums(byArtist: artistId)
+        }
         let albumName = album.name.lowercased()
-        let others = artist.album.filter { $0.id != album.id && $0.name.lowercased() == albumName }
-        var more = artist.album.filter { $0.name.lowercased() != albumName }
+        let others = artistAlbums.filter { $0.id != album.id && $0.name.lowercased() == albumName }
+        var more = artistAlbums.filter { $0.name.lowercased() != albumName }
         if groupVersions {
             more = more.groupedByPreferredVersion()
         }

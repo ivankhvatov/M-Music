@@ -305,6 +305,24 @@ extension LibraryCacheDatabase {
         await set(album, category: LibraryCacheCategory.albumSongs, key: albumId)
     }
 
+    /// An artist's albums that are downloaded in full, for browsing offline: the album metadata
+    /// comes from the cached artist album list (falling back to the cached whole-album catalog),
+    /// since `DownloadRecord` doesn't know how many songs an album actually has — and "fully
+    /// downloaded" needs that. Runs entirely off the main actor.
+    nonisolated func fullyDownloadedAlbums(byArtist artistId: String) async -> [AlbumID3] {
+        let candidates: [AlbumID3]
+        if let cached = await cachedArtistAlbums(artistId: artistId) {
+            candidates = cached
+        } else {
+            candidates = (await cachedAllAlbums() ?? []).filter { $0.artistId?.raw == artistId }
+        }
+        guard !candidates.isEmpty else { return [] }
+        let downloadedCounts = await DownloadDatabase.shared.downloadedSongCountsByAlbumId()
+        return candidates.filter { album in
+            album.songCount > 0 && downloadedCounts[album.id.raw, default: 0] >= album.songCount
+        }
+    }
+
     nonisolated func removeCachedAlbumSongs(albumId: String) async {
         await remove(category: LibraryCacheCategory.albumSongs, key: albumId)
     }
