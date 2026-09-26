@@ -30,13 +30,14 @@ struct AlbumCardView: View {
             Text(
                 album.name + (album.version != nil ? (" (" + album.version! + ")") : "")
             )
-                .font(.system(size: 15))
+                .font(.system(size: 14))
                 .lineLimit(1)
 
             Text(subtitleText)
                 .font(.caption)
                 .foregroundColor(.gray)
                 .lineLimit(1)
+                .padding(.top, -3)
         }
         .dimmedIfUnavailable(isAvailable)
         .task(id: album.id) {

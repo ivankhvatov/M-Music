@@ -25,13 +25,14 @@ struct PlaylistCardView: View {
             artwork
 
             Text(playlist.name)
-                .font(.system(size: 15))
+                .font(.system(size: 14))
                 .lineLimit(1)
 
             Text(playlist.owner ?? "Unknown Creator")
                 .font(.caption)
                 .foregroundColor(.gray)
                 .lineLimit(1)
+                .padding(.top, -3)
         }
         .dimmedIfUnavailable(isAvailable)
         .task(id: playlist.id) {
