@@ -6,6 +6,9 @@ struct MainView: View {
     @State private var expandPlayer : Bool = false
     @State private var nowPlayingFrame: CGRect = .zero
     @State private var accessoryVisible = true
+    /// Bumped when a collapse starts, so the docked mini player's marquees begin from their start
+    /// position, in step with the ones inside the collapsing pill that hands off to them.
+    @State private var accessoryMarqueeRestartToken = 0
     /// Whether anything is loaded in the player (a track, or a radio station). The full-screen
     /// player overlay below is only built once there is — see its comment. Kept as its own
     /// `@State`, fed by a de-duplicated publisher, rather than observing `PlayerManager` here:
@@ -28,7 +31,11 @@ struct MainView: View {
     var body: some View {
         TabBar()
             .tabViewBottomAccessory {
-                CompactNowPlaying(expanded: $expandPlayer)
+                CompactNowPlaying(
+                    expanded: $expandPlayer,
+                    marqueesActive: accessoryVisible,
+                    marqueeRestartToken: accessoryMarqueeRestartToken
+                )
                     // Hidden (not removed, so its geometry/layout stays reserved and stable) the
                     // instant `ExpandableNowPlaying`'s own pill starts expanding, and shown again
                     // only once that pill has fully handed back off to this real, system-rendered
@@ -75,6 +82,9 @@ struct MainView: View {
                     )
                     .toolbarColorScheme(colorScheme, for: .navigationBar)
                 }
+            }
+            .onChange(of: expandPlayer) {
+                if !expandPlayer { accessoryMarqueeRestartToken &+= 1 }
             }
             .onReceive(Self.hasNowPlayingPublisher) { hasNowPlaying = $0 }
             .task {

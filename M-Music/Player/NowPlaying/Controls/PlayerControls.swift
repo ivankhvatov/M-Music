@@ -5,6 +5,11 @@ import SwiftUI
 struct PlayerControls: View {
     @ObservedObject private var player = PlayerManager.shared
     var colors: [Color]
+    /// Whether the title/artist marquees should be scrolling — false while this chrome is hidden,
+    /// so an invisible copy does no per-frame work. See `NowPlayingMarquee`.
+    var marqueesActive = true
+    /// Bumped to restart the marquees from their start position. See `NowPlayingMarquee`.
+    var marqueeRestartToken = 0
 
     var body: some View {
         GeometryReader {
@@ -44,12 +49,20 @@ private extension CGSize {
 private extension PlayerControls {
     var trackInfo: some View {
         VStack(alignment: .leading, spacing: 4) {
-            MarqueeText(text: player.nowPlayingTitle)
-                .font(.title3)
-                .fontWeight(.semibold)
-                .foregroundStyle(.white)
-            MarqueeText(text: player.nowPlayingSubtitle)
-                .foregroundStyle(Color.transparentWhite)
+            NowPlayingMarquee(
+                text: player.nowPlayingTitle,
+                font: .preferred(.title3, weight: .semibold),
+                isActive: marqueesActive,
+                restartToken: marqueeRestartToken
+            )
+            .foregroundStyle(.white)
+            NowPlayingMarquee(
+                text: player.nowPlayingSubtitle,
+                font: .preferred(.body),
+                isActive: marqueesActive,
+                restartToken: marqueeRestartToken
+            )
+            .foregroundStyle(Color.transparentWhite)
             if let audioInfoLine {
                 Text(audioInfoLine)
                     .font(.caption)

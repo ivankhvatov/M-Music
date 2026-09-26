@@ -10,6 +10,8 @@ struct RegularChrome: View {
     var size: CGSize
     var colors: [Color]
     var onCollapse: () -> Void
+    var marqueesActive = true
+    var marqueeRestartToken = 0
 
     var body: some View {
         VStack(spacing: 12) {
@@ -18,7 +20,7 @@ struct RegularChrome: View {
                 .frame(height: RegularNowPlayingLayout.artworkHeight(for: size))
                 .padding(.vertical, RegularNowPlayingLayout.artworkVerticalPadding(for: size))
                 .padding(.horizontal, RegularNowPlayingLayout.Const.horizontalPadding)
-            PlayerControls(colors: colors)
+            PlayerControls(colors: colors, marqueesActive: marqueesActive, marqueeRestartToken: marqueeRestartToken)
         }
         .padding(.top, NowPlayingLayout.safeAreaInsets.top)
         .padding(.bottom, NowPlayingLayout.safeAreaInsets.bottom)

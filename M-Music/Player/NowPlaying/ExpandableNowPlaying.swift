@@ -29,6 +29,11 @@ struct ExpandableNowPlaying: View {
     /// stays pinned at its pre-drag value for the whole interactive portion of the gesture and only
     /// animates once the gesture ends in a real committed transition.
     @State private var chromeProgress: CGFloat = 0.0
+    /// Bumped every time an expand starts, so the expanded chrome's marquees always begin scrolling
+    /// from their start position instead of wherever their clock happened to be.
+    @State private var marqueeRestartToken = 0
+    /// Bumped every time a collapse starts — the same, for the mini player's marquees.
+    @State private var compactMarqueeRestartToken = 0
     @State private var colors: [Color] = [.gray]
     @Namespace private var animationNamespace
 
@@ -36,8 +41,11 @@ struct ExpandableNowPlaying: View {
         expandableNowPlaying
             .onChange(of: expanded) {
                 if expanded {
+                    marqueeRestartToken &+= 1
                     stacked(progress: 1, withAnimation: true)
                     accessoryVisible = false
+                } else {
+                    compactMarqueeRestartToken &+= 1
                 }
             }
             .onPreferenceChange(NowPlayingExpandProgressPreferenceKey.self) { [$expandProgress] value in
@@ -61,6 +69,12 @@ private extension ExpandableNowPlaying {
 
     var isFullyCollapsed: Bool {
         expandProgress.isZero
+    }
+
+    /// Whether the chromes' marquees should be scrolling: whenever any of the player is on screen.
+    /// (The chromes stay mounted while collapsed at opacity 0; this keeps their timelines paused.)
+    var marqueesActive: Bool {
+        !isFullyCollapsed
     }
 
     /// Gates *only* `NowPlayingBackground`'s material (glass vs. colorful fill) — deliberately
@@ -102,10 +116,10 @@ private extension ExpandableNowPlaying {
                 // always mounted (unlike the artwork below): neither branch contains a
                 // `matchedGeometryEffect` descendant, so there's no risk of two simultaneous sources
                 // for the same id.
-                RegularChrome(size: size, colors: colors, onCollapse: collapse)
+                RegularChrome(size: size, colors: colors, onCollapse: collapse, marqueesActive: marqueesActive, marqueeRestartToken: marqueeRestartToken)
                     .opacity(chromeProgress)
                     .allowsHitTesting(expanded)
-                CompactChrome(expanded: $expanded)
+                CompactChrome(expanded: $expanded, marqueesActive: marqueesActive, marqueeRestartToken: compactMarqueeRestartToken)
                     .opacity(1 - chromeProgress)
                     .allowsHitTesting(!expanded)
                 // Artwork alone — a single `matchedGeometryEffect` source at a time (two

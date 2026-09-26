@@ -9,6 +9,11 @@ import SwiftUI
 struct CompactChrome: View {
     @ObservedObject private var player = PlayerManager.shared
     @Binding var expanded: Bool
+    /// Whether the title/artist marquees should be scrolling — false while this chrome is hidden,
+    /// so an invisible copy does no per-frame work. See `NowPlayingMarquee`.
+    var marqueesActive = true
+    /// Changing this restarts both marquees from their start position. See `NowPlayingMarquee`.
+    var marqueeRestartToken = 0
     @State private var forwardAnimationTrigger: PlayerButtonTrigger = .one(bouncing: false)
     @State private var viewWidth: CGFloat = .zero
 
@@ -17,13 +22,23 @@ struct CompactChrome: View {
             Color.clear
                 .frame(width: 30, height: 30)
             VStack(spacing: 0) {
-                MarqueeText(text: player.nowPlayingTitle)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .font(.system(size: 13, weight: .semibold))
-                MarqueeText(text: player.nowPlayingSubtitle)
-                    .font(.system(size: 12, weight: .regular))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .foregroundStyle(.secondary)
+                NowPlayingMarquee(
+                    text: player.nowPlayingTitle,
+                    font: .systemFont(ofSize: 13, weight: .semibold),
+                    fade: 8,
+                    isActive: marqueesActive,
+                    restartToken: marqueeRestartToken
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+                NowPlayingMarquee(
+                    text: player.nowPlayingSubtitle,
+                    font: .systemFont(ofSize: 12, weight: .regular),
+                    fade: 8,
+                    isActive: marqueesActive,
+                    restartToken: marqueeRestartToken
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .foregroundStyle(.secondary)
             }
             .padding(.leading, 8)
             .geometryGroup()
@@ -141,13 +156,15 @@ struct CompactNowPlaying: View {
     @Binding var expanded: Bool
     var hideArtworkOnExpanded: Bool = true
     var animationNamespace: Namespace.ID?
+    var marqueesActive = true
+    var marqueeRestartToken = 0
 
     var body: some View {
         ZStack(alignment: .leading) {
             if !hideArtworkOnExpanded || !expanded {
                 CompactArtwork(animationNamespace: animationNamespace)
             }
-            CompactChrome(expanded: $expanded)
+            CompactChrome(expanded: $expanded, marqueesActive: marqueesActive, marqueeRestartToken: marqueeRestartToken)
         }
     }
 }

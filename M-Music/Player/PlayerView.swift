@@ -92,13 +92,16 @@ struct PlayerView: View {
 
     func PlayerInfo() -> some View {
         VStack (alignment: .leading, spacing: 4) {
-            MarqueeText(text: player.currentTrack?.title ?? String(localized: "Not Playing"))
-                .font(.title2)
-                .fontWeight(.semibold)
-                .foregroundStyle(.white)
-            MarqueeText(text: player.currentTrack?.artist ?? "")
-                .font(.subheadline)
-                .foregroundStyle(.transparentWhite)
+            NowPlayingMarquee(
+                text: player.currentTrack?.title ?? String(localized: "Not Playing"),
+                font: .preferred(.title2, weight: .semibold)
+            )
+            .foregroundStyle(.white)
+            NowPlayingMarquee(
+                text: player.currentTrack?.artist ?? "",
+                font: .preferred(.subheadline)
+            )
+            .foregroundStyle(.transparentWhite)
             if let audioInfoLine {
                 Text(audioInfoLine)
                     .font(.caption)

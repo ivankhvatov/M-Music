@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		2CD4C7202E1A4B3C00A47724 /* MarqueeText in Frameworks */ = {isa = PBXBuildFile; productRef = 2CD4C7212E1A4B3C00A47724 /* MarqueeText */; };
 		2CEC0DB72FF947BB00DF22A9 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 2CEC0DB62FF947BB00DF22A9 /* Localizable.xcstrings */; };
 		D91C46ADB6DECF22345C588A /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 0B2603EFFAB25A8D5200AEBD /* GRDB */; };
 /* End PBXBuildFile section */
@@ -72,6 +73,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D91C46ADB6DECF22345C588A /* GRDB in Frameworks */,
+				2CD4C7202E1A4B3C00A47724 /* MarqueeText in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -134,6 +136,7 @@
 			name = "M-Music";
 			packageProductDependencies = (
 				0B2603EFFAB25A8D5200AEBD /* GRDB */,
+				2CD4C7212E1A4B3C00A47724 /* MarqueeText */,
 			);
 			productName = "M-Music";
 			productReference = 2CE8FF692FF8D79C0037BA59 /* M-Music.app */;
@@ -221,6 +224,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				B293903C3A91F8DF3B2BF488 /* XCRemoteSwiftPackageReference "GRDB" */,
+				2CD4C71E30681C9000A47724 /* XCRemoteSwiftPackageReference "MarqueeText" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 2CE8FF6A2FF8D79C0037BA59 /* Products */;
@@ -592,6 +596,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		2CD4C71E30681C9000A47724 /* XCRemoteSwiftPackageReference "MarqueeText" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/joekndy/MarqueeText";
+			requirement = {
+				branch = master;
+				kind = branch;
+			};
+		};
 		B293903C3A91F8DF3B2BF488 /* XCRemoteSwiftPackageReference "GRDB" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/groue/GRDB.swift";
@@ -607,6 +619,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = B293903C3A91F8DF3B2BF488 /* XCRemoteSwiftPackageReference "GRDB" */;
 			productName = GRDB;
+		};
+		2CD4C7212E1A4B3C00A47724 /* MarqueeText */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 2CD4C71E30681C9000A47724 /* XCRemoteSwiftPackageReference "MarqueeText" */;
+			productName = MarqueeText;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
