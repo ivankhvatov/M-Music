@@ -41,6 +41,11 @@ struct ExpandableNowPlaying: View {
         expandableNowPlaying
             .onChange(of: expanded) {
                 if expanded {
+                    // The expanded chrome sits mounted at opacity 0 while collapsed, and an update
+                    // SwiftUI dropped for it in the meantime (see `PlayerManager`'s foreground
+                    // republish) would otherwise show — e.g. a play/pause button that doesn't
+                    // match the player. Republishing makes it re-read the current state.
+                    player.objectWillChange.send()
                     marqueeRestartToken &+= 1
                     stacked(progress: 1, withAnimation: true)
                     accessoryVisible = false

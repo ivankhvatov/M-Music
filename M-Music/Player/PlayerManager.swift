@@ -111,6 +111,7 @@ final class PlayerManager: ObservableObject {
     private let engine = PlayerEngine()
     private var subscriptions: Set<AnyCancellable> = []
     private var backgroundObserver: NSObjectProtocol?
+    private var foregroundObserver: NSObjectProtocol?
     private var interruptionObserver: NSObjectProtocol?
     private var didConfigureAudioSession = false
     /// Whether playback was active right before the interruption currently in progress (a phone
@@ -230,6 +231,16 @@ final class PlayerManager: ObservableObject {
             forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
         ) { [weak self] _ in
             Task { @MainActor in self?.persistState() }
+        }
+        // A change published just before the app left the foreground (a play/pause tap right
+        // before going Home, a lock-screen toggle while suspended, ...) can have its SwiftUI update
+        // dropped, leaving views that read this object — the expanded player's transport buttons,
+        // notably — showing the old state until something else happens to change. Republishing on
+        // activation makes every observer re-read the current values.
+        foregroundObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.objectWillChange.send() }
         }
         interruptionObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.interruptionNotification, object: nil, queue: .main
