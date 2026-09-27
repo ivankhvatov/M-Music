@@ -1,3 +1,4 @@
+import AVFoundation
 import AVKit
 import SwiftUI
 import UIKit
@@ -5,6 +6,10 @@ import UIKit
 struct AirPlayButton: View {
     var size: CGFloat = 24
     @State private var presenter = AirPlayPresenter()
+    /// Which device audio is currently routed to — drives the glyph below, the same way Apple
+    /// Music's own AirPlay button swaps its icon for the connected device instead of always
+    /// showing the plain, unfilled AirPlay glyph.
+    @State private var symbolName = Self.symbolName(for: AVAudioSession.sharedInstance().currentRoute.outputs.first)
 
     var body: some View {
         ZStack {
@@ -17,10 +22,48 @@ struct AirPlayButton: View {
             Button(
                 action: { presenter.presentAirPlayPicker() },
                 label: {
-                    Image(systemName: "airplayaudio")
+                    Image(systemName: symbolName)
                         .font(.system(size: size))
+                        .contentTransition(.symbolEffect(.replace))
                 }
             )
+        }
+        // Only real way to find out the route changed — AVRoutePickerView itself never reports
+        // the picked route back to us, and there's no @Published/Combine surface for it.
+        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { _ in
+            withAnimation {
+                symbolName = Self.symbolName(for: AVAudioSession.sharedInstance().currentRoute.outputs.first)
+            }
+        }
+    }
+
+    /// Maps the active output route to the glyph that best represents it: the plain AirPlay glyph
+    /// for the device's own speaker/receiver, and a device-specific glyph once audio is routed
+    /// elsewhere — matched by name for AirPlay and Bluetooth outputs (`AVAudioSession` has no
+    /// finer-grained port type than "airPlay" or "bluetoothA2DP" for e.g. a HomePod vs. a TV, or
+    /// AirPods vs. some other Bluetooth speaker) and falling back to a generic glyph for whatever
+    /// it doesn't recognize by name.
+    private static func symbolName(for output: AVAudioSessionPortDescription?) -> String {
+        guard let output else { return "airplayaudio" }
+        let name = output.portName.lowercased()
+        switch output.portType {
+        case .builtInSpeaker, .builtInReceiver:
+            return "airplayaudio"
+        case .headphones:
+            return "headphones"
+        case .bluetoothA2DP, .bluetoothLE, .bluetoothHFP:
+            if name.contains("airpods max") { return "airpodsmax" }
+            if name.contains("airpods pro") { return "airpodspro" }
+            if name.contains("airpods") { return "airpods" }
+            return "hifispeaker.fill"
+        case .airPlay:
+            if name.contains("homepod") { return "homepod.fill" }
+            if name.contains("tv") { return "tv" }
+            return "hifispeaker.fill"
+        case .carAudio:
+            return "car.fill"
+        default:
+            return "airplayaudio"
         }
     }
 }
