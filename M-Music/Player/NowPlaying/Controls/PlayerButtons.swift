@@ -4,7 +4,7 @@ import SwiftUI
 struct PlayerButtons: View {
     @ObservedObject private var player = PlayerManager.shared
     let spacing: CGFloat
-    let imageSize: CGFloat = 34
+    let imageSize: CGFloat = 36
     @State private var backwardAnimationTrigger: PlayerButtonTrigger = .one(bouncing: false)
     @State private var forwardAnimationTrigger: PlayerButtonTrigger = .one(bouncing: false)
 
@@ -59,7 +59,7 @@ struct PlayerButtons: View {
 extension PlayerButtonConfig {
     static var expandedPlayer: Self {
         Self(
-            circleScale: 0.8,
+            circleScale: 0.85,
             labelColor: .white,
             tint: Color.white.opacity(0.3),
             pressedColor: .white

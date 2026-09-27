@@ -131,7 +131,7 @@ private extension PlayerControls {
             player.toggleStarred()
         } label: {
             Image(systemName: player.isCurrentTrackStarred ? "star.fill" : "star")
-                .font(.system(size: 20))
+                .font(.system(size: 22))
                 .foregroundStyle(Color.transparentWhite)
                 // Leading-aligned in its tap target rather than centered, so the glyph itself
                 // sits on the row's edge — matching trackInfo's text — instead of `(44-20)/2`
@@ -144,7 +144,7 @@ private extension PlayerControls {
     }
 
     var airPlayButton: some View {
-        AirPlayButton(size: 20)
+        AirPlayButton(size: 22)
             .foregroundStyle(Color.transparentWhite)
             .frame(width: 44, height: 44, alignment: .trailing)
             .contentShape(.rect)
