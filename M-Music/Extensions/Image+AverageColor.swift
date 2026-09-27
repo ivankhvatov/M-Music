@@ -124,6 +124,12 @@ extension Color {
         UIColor(self).getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
         return Color(hue: hue, saturation: saturation, brightness: min(brightness, maxBrightness))
     }
+    
+    func halfDarkened(maxBrightness: CGFloat = 0.6) -> Color {
+        var hue: CGFloat = 0, saturation: CGFloat = 0, brightness: CGFloat = 0, alpha: CGFloat = 0
+        UIColor(self).getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
+        return Color(hue: hue, saturation: saturation, brightness: min(brightness, maxBrightness))
+    }
 
     /// Scales brightness down by `factor`, always yielding a color darker than the original —
     /// unlike `darkened(maxBrightness:)`, which only caps brightness and leaves already-dark
@@ -218,7 +224,7 @@ extension [Color] {
             let mid = (low + high) / 2
             if averageLightness(mid) < target { low = mid } else { high = mid }
         }
-        return scaled((low + high) / 2).map { Color(red: $0.r, green: $0.g, blue: $0.b).darkened() }
+        return scaled((low + high) / 2).map { Color(red: $0.r, green: $0.g, blue: $0.b).halfDarkened() }
     }
 
     /// Scales every color's HSB saturation by one shared factor (keeping hue and brightness) until
@@ -246,6 +252,6 @@ extension [Color] {
             let mid = (low + high) / 2
             if averageSaturation(mid) < target { low = mid } else { high = mid }
         }
-        return scaled((low + high) / 2).map { Color(hue: $0.hue, saturation: $0.saturation, brightness: $0.brightness).darkened() }
+        return scaled((low + high) / 2).map { Color(hue: $0.hue, saturation: $0.saturation, brightness: $0.brightness) }
     }
 }
