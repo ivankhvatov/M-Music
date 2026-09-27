@@ -276,16 +276,24 @@ private extension ExpandableNowPlaying {
         }
         let palette = await Task.detached(priority: .userInitiated) {
             let vivid = uiImage.dominantColors(count: 3)
-                .map { $0.saturated(by: 1.35).darkened() }
+                .map { $0.darkened() }
                 .reducedContrast(by: 0.3)
-            // Pin the palette's average lightness a little under the artwork's own average
-            // (measured over the whole image, including the near-black/near-white pixels the
-            // dominant-colour pass skips) — so the backdrop follows the artwork's tone, lightening
-            // or darkening the picked colors as needed, but always sits slightly darker than it.
-            guard let artworkLightness = uiImage.averageColor()?.perceivedLightness else {
+            // Both ratios below are measured against the same single average — the artwork's
+            // overall look, including the near-black/near-white/desaturated pixels the
+            // dominant-colour pass above skips — so the backdrop reads as a natural extension of
+            // the cover's own tone rather than an independently tuned effect.
+            guard let artworkAverage = uiImage.averageColor() else {
                 return vivid.map { $0.darkened(by: 0.75) }
             }
-            return vivid.scaledToAverageLightness(artworkLightness * Const.backdropLightnessRatio)
+            // Pin the palette's average saturation a little above the artwork's own average — a
+            // livelier backdrop than the artwork itself (which, averaged over the whole cover,
+            // reads more muted than any single dominant color in it) — before pinning lightness,
+            // since that scaling is what's relied on to land the *exact* final lightness.
+            let vivider = vivid.scaledToAverageSaturation(artworkAverage.saturation * Const.backdropSaturationRatio)
+            // Pin the palette's average lightness a little under the artwork's own average — so
+            // the backdrop follows the artwork's tone, lightening or darkening the picked colors
+            // as needed, but always sits slightly darker than it.
+            return vivider.scaledToAverageLightness(artworkAverage.perceivedLightness * Const.backdropLightnessRatio)
         }.value
         guard !Task.isCancelled else { return }
         colors = palette.isEmpty ? [.gray] : palette
@@ -295,6 +303,10 @@ private extension ExpandableNowPlaying {
         /// How light the backdrop palette's average is relative to the artwork's own average
         /// lightness — under 1 so the background reads slightly darker than the cover.
         static let backdropLightnessRatio: CGFloat = 0.8
+
+        /// How saturated the backdrop palette's average is relative to the artwork's own average
+        /// saturation — over 1 so the background reads slightly more vivid than the cover.
+        static let backdropSaturationRatio: CGFloat = 1.2
 
         /// Below this fraction of `expandProgress`, a collapse switches the content/material over
         /// to the mini player's look. Small on purpose — the morph itself should only occupy the

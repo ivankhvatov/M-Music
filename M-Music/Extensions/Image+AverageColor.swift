@@ -142,6 +142,13 @@ extension Color {
         return 0.299 * red + 0.587 * green + 0.114 * blue
     }
 
+    /// The color's HSB saturation, 0 (gray) to 1 (fully saturated).
+    var saturation: CGFloat {
+        var hue: CGFloat = 0, saturation: CGFloat = 0, brightness: CGFloat = 0, alpha: CGFloat = 0
+        UIColor(self).getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
+        return saturation
+    }
+
     /// Scales saturation up by `factor`, clamped to fully saturated — makes a color more vivid
     /// without touching its hue or brightness.
     func saturated(by factor: CGFloat) -> Color {
@@ -212,5 +219,33 @@ extension [Color] {
             if averageLightness(mid) < target { low = mid } else { high = mid }
         }
         return scaled((low + high) / 2).map { Color(red: $0.r, green: $0.g, blue: $0.b) }
+    }
+
+    /// Scales every color's HSB saturation by one shared factor (keeping hue and brightness) until
+    /// the group's *average* saturation equals `target` — the saturation counterpart to
+    /// `scaledToAverageLightness(_:)`, used to pin a palette's vividness relative to the artwork's
+    /// own rather than leaving it at whatever `saturated(by:)`'s fixed factor happened to produce.
+    func scaledToAverageSaturation(_ target: CGFloat) -> [Color] {
+        guard !isEmpty else { return self }
+        let components: [(hue: CGFloat, saturation: CGFloat, brightness: CGFloat)] = map { color in
+            var hue: CGFloat = 0, saturation: CGFloat = 0, brightness: CGFloat = 0, alpha: CGFloat = 0
+            UIColor(color).getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
+            return (hue, saturation, brightness)
+        }
+        func scaled(_ factor: CGFloat) -> [(hue: CGFloat, saturation: CGFloat, brightness: CGFloat)] {
+            components.map { ($0.hue, Swift.min($0.saturation * factor, 1), $0.brightness) }
+        }
+        func averageSaturation(_ factor: CGFloat) -> CGFloat {
+            scaled(factor).reduce(0) { $0 + $1.saturation } / CGFloat(count)
+        }
+        guard averageSaturation(1) > 0 else { return self }
+
+        // Saturation clamps at 1, so the average only ever rises with the factor — bisect for it.
+        var low: CGFloat = 0, high: CGFloat = 64
+        for _ in 0..<32 {
+            let mid = (low + high) / 2
+            if averageSaturation(mid) < target { low = mid } else { high = mid }
+        }
+        return scaled((low + high) / 2).map { Color(hue: $0.hue, saturation: $0.saturation, brightness: $0.brightness) }
     }
 }
