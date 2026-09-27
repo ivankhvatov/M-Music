@@ -34,6 +34,10 @@ struct ExpandableNowPlaying: View {
     @State private var marqueeRestartToken = 0
     /// Bumped every time a collapse starts — the same, for the mini player's marquees.
     @State private var compactMarqueeRestartToken = 0
+    /// 1 for full color, 0 for grayscale — see `NowPlayingBackground.saturation`. Reset to 1
+    /// instantly whenever an expand starts (so it's never mid-fade the next time it's needed) and
+    /// animated down to 0 by `collapse()`.
+    @State private var backgroundSaturation: CGFloat = 1
     @State private var colors: [Color] = [.gray]
     @Namespace private var animationNamespace
 
@@ -42,6 +46,7 @@ struct ExpandableNowPlaying: View {
             .onChange(of: expanded) {
                 if expanded {
                     marqueeRestartToken &+= 1
+                    backgroundSaturation = 1
                     stacked(progress: 1, withAnimation: true)
                     accessoryVisible = false
                 } else {
@@ -100,7 +105,8 @@ private extension ExpandableNowPlaying {
                     colors: colors,
                     expanded: expanded,
                     showsExpandedContent: showsExpandedMaterial,
-                    isFullExpanded: isFullyExpanded
+                    isFullExpanded: isFullyExpanded,
+                    saturation: backgroundSaturation
                 )
                 // Chrome (grip + controls, or marquee + buttons) — both always mounted and
                 // cross-faded via `chromeProgress`, rather than swapped through an if/else with a
@@ -218,6 +224,14 @@ private extension ExpandableNowPlaying {
             offsetY = 0
         }
         resetStackedWithAnimation()
+        // Delayed briefly (so the shape has visibly started shrinking, colorful, before the fade
+        // begins) and, once it does begin, shorter than `playerExpandAnimation` — both started in
+        // their own transaction, not the shape morph's — so the gradient has already faded to gray
+        // by the time `showsExpandedMaterial` flips over to Liquid Glass near the end of the
+        // shrink: a beat of color, then a desaturate, then the swap to glass.
+        withAnimation(.smooth(duration: Const.saturationFadeDuration).delay(Const.saturationFadeDelay)) {
+            backgroundSaturation = 0
+        }
     }
 
     func stacked(progress: CGFloat, withAnimation: Bool) {
@@ -286,6 +300,16 @@ private extension ExpandableNowPlaying {
         /// to the mini player's look. Small on purpose — the morph itself should only occupy the
         /// last stretch of the shrink, not race it the whole way down.
         static let collapseMorphThreshold: CGFloat = 0.15
+
+        /// How long a collapse waits before the background starts desaturating — just long enough
+        /// that the shrink is visibly under way, still in full color, before the fade begins.
+        static let saturationFadeDelay: TimeInterval = 0.05
+
+        /// How long the background then takes to desaturate to gray. `saturationFadeDelay +
+        /// saturationFadeDuration` is kept well under `playerExpandAnimationDuration` so the fade
+        /// — delay included — finishes before `collapseMorphThreshold` is reached and the
+        /// background swaps over to Liquid Glass.
+        static let saturationFadeDuration: TimeInterval = 0.12
     }
 }
 

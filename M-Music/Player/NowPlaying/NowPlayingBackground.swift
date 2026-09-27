@@ -12,6 +12,11 @@ struct NowPlayingBackground: View {
     /// Glass right at the end. `expanded` itself must still start the shape shrinking immediately.
     let showsExpandedContent: Bool
     let isFullExpanded: Bool
+    /// 1 for full color, 0 for grayscale — animated down to 0 by `ExpandableNowPlaying` right as a
+    /// collapse commits, faster than the shape/material morph itself, so the colorful gradient
+    /// visibly desaturates to gray *before* it cross-fades into the Liquid Glass pill rather than
+    /// cutting from full color straight to glass.
+    var saturation: CGFloat = 1
 
     var body: some View {
         ZStack {
@@ -39,6 +44,13 @@ struct NowPlayingBackground: View {
                 // gradient while leaving its hue and saturation alone — a gray wash pulls every
                 // color toward gray, which is what was flattening/desaturating this background.
                 .overlay(Color.gray.darkened(by: 0.15).opacity(0.3))
+                .saturation(saturation)
+                // Darkens in lockstep with the desaturation above — both are driven by the same
+                // `saturation` value, so by the time the gradient has gone fully gray it has also
+                // dimmed down toward the Liquid Glass pill's own dark tone. Without this, a
+                // desaturated-but-still-bright gray would cross-fade into the pill as a visible
+                // lightening instead of reading as a continuation of the same surface.
+                .overlay(Color.gray.darkened(by: Const.collapseDarkenOpacity).opacity(1.0 - saturation))
                 .opacity(showsExpandedContent ? 1 : 0)
                 .animation(nil, value: showsExpandedContent)
         }
@@ -61,5 +73,11 @@ extension NowPlayingBackground {
 private extension NowPlayingBackground {
     var playerCornerRadius: CGFloat {
         Self.cornerRadius(expanded: expanded, isFullExpanded: isFullExpanded)
+    }
+
+    enum Const {
+        /// How far the gradient darkens toward black by the time `saturation` reaches 0 — see the
+        /// darkening `.overlay` above.
+        static let collapseDarkenOpacity: CGFloat = 0.4
     }
 }
