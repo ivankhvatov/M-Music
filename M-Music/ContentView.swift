@@ -82,6 +82,18 @@ struct MainView: View {
                         accessoryVisible: $accessoryVisible
                     )
                     .toolbarColorScheme(colorScheme, for: .navigationBar)
+                    // `.identity`, not the SwiftUI default (`.opacity`): tapping the mini player
+                    // before `overlayReady` flips can mount this view for the first time already
+                    // `expanded` (see `ExpandableNowPlaying`'s own `isShapeExpanded` doc comment),
+                    // in the same animated transaction as the tap. Left at the default, that
+                    // insertion itself fades the whole subtree in from 0→1 opacity — on top of,
+                    // and independent from, the pill's own shape morph, which is driven entirely
+                    // by that view's internal state and doesn't need (or want) this mount animated
+                    // at all. `.identity` makes the view appear instantly, already showing
+                    // whatever its own state says (collapsed and invisible, on this first frame),
+                    // and leaves the actual expand animation to start a moment later, from that
+                    // view's own `onAppear`.
+                    .transition(.identity)
                 }
             }
             .onChange(of: expandPlayer) {

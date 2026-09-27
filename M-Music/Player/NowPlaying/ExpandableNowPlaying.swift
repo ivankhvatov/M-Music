@@ -29,6 +29,16 @@ struct ExpandableNowPlaying: View {
     /// stays pinned at its pre-drag value for the whole interactive portion of the gesture and only
     /// animates once the gesture ends in a real committed transition.
     @State private var chromeProgress: CGFloat = 0.0
+    /// Drives the pill's *shape* — frame height, corner radius, the mini/full artwork swap, and
+    /// `NowPlayingBackground`'s own matching shape — kept separate from the `expanded` binding
+    /// itself so a view that's born already `expanded` (see `expandNow()`'s doc comment) still
+    /// starts this at `false` and animates it to `true` a moment later, instead of snapping
+    /// straight to its final geometry on the very first frame. A plain SwiftUI state change can
+    /// only animate a transition an existing view lives through, never the geometry a view is
+    /// *born* with — so `expanded` itself (which really can start `true`) can't drive this
+    /// directly, or the whole shape morph (and the artwork's `matchedGeometryEffect` handoff,
+    /// which depends on it) would be skipped in favor of the overlay's own plain insertion fade.
+    @State private var isShapeExpanded = false
     /// Bumped every time an expand starts, so the expanded chrome's marquees always begin scrolling
     /// from their start position instead of wherever their clock happened to be.
     @State private var marqueeRestartToken = 0
@@ -43,12 +53,23 @@ struct ExpandableNowPlaying: View {
 
     var body: some View {
         expandableNowPlaying
+            .onAppear {
+                // This view can mount already `expanded` — `MainView` defers mounting it until
+                // shortly after launch (to skip its one-time SwiftUI setup cost when nothing's
+                // loaded yet), but mounts it immediately if the mini player is tapped before that
+                // timer fires. `.onChange(of: expanded)` below only fires on a *transition*, so
+                // without this, a view that's born already expanded would never run the setup
+                // that puts it in its expanded visual state: `progressTrackState`/`chromeProgress`
+                // would stay at their zero default, leaving `isFullyCollapsed` permanently true —
+                // the view renders at opacity 0 with hit-testing off (see `expandableNowPlaying`),
+                // i.e. invisible and untappable despite `expanded` being true — and the docked mini
+                // player's own artwork copy stays hidden too (`accessoryVisible` never flips).
+                guard expanded else { return }
+                expandNow()
+            }
             .onChange(of: expanded) {
                 if expanded {
-                    marqueeRestartToken &+= 1
-                    backgroundSaturation = 1
-                    stacked(progress: 1, withAnimation: true)
-                    accessoryVisible = false
+                    expandNow()
                 } else {
                     compactMarqueeRestartToken &+= 1
                 }
@@ -83,18 +104,18 @@ private extension ExpandableNowPlaying {
     }
 
     /// Gates *only* `NowPlayingBackground`'s material (glass vs. colorful fill) — deliberately
-    /// separate from the Regular/Compact content switch below, which must stay tied to `expanded`
-    /// directly. The content switch is what mounts/unmounts the two `matchedGeometryEffect`
-    /// artwork views, so it has to happen immediately, in the same animation transaction as the
-    /// pill's own shape change, for that morph to interpolate smoothly across the whole collapse
-    /// — gating it on this threshold instead delayed the mount swap until the container had
-    /// already shrunk nearly to mini size, leaving nothing left to visibly morph (the artwork just
-    /// rode the shrinking layout straight down instead of animating toward the mini artwork's
-    /// actual position). The background fill has no such constraint, so it alone stays showing
-    /// the expanded/colorful look for most of the shrink and only swaps to real Liquid Glass in
-    /// the final stretch.
+    /// separate from the Regular/Compact content switch below, which must stay tied to
+    /// `isShapeExpanded` directly. The content switch is what mounts/unmounts the two
+    /// `matchedGeometryEffect` artwork views, so it has to happen immediately, in the same
+    /// animation transaction as the pill's own shape change, for that morph to interpolate
+    /// smoothly across the whole collapse — gating it on this threshold instead delayed the mount
+    /// swap until the container had already shrunk nearly to mini size, leaving nothing left to
+    /// visibly morph (the artwork just rode the shrinking layout straight down instead of
+    /// animating toward the mini artwork's actual position). The background fill has no such
+    /// constraint, so it alone stays showing the expanded/colorful look for most of the shrink and
+    /// only swaps to real Liquid Glass in the final stretch.
     var showsExpandedMaterial: Bool {
-        expanded || expandProgress > Const.collapseMorphThreshold
+        isShapeExpanded || expandProgress > Const.collapseMorphThreshold
     }
 
     var expandableNowPlaying: some View {
@@ -103,7 +124,7 @@ private extension ExpandableNowPlaying {
             ZStack(alignment: .top) {
                 NowPlayingBackground(
                     colors: colors,
-                    expanded: expanded,
+                    expanded: isShapeExpanded,
                     showsExpandedContent: showsExpandedMaterial,
                     isFullExpanded: isFullyExpanded,
                     saturation: backgroundSaturation
@@ -133,8 +154,9 @@ private extension ExpandableNowPlaying {
                 // Artwork alone — a single `matchedGeometryEffect` source at a time (two
                 // independently-mounted sources for the same id crashes SwiftUI with "Multiple
                 // inserted views in matched geometry group ... isSource: true"). Swapped on
-                // `expanded` directly (not the delayed material threshold above) so the handoff
-                // runs across the full collapse, in step with the pill's own shape.
+                // `isShapeExpanded` directly (not the delayed material threshold above, and not
+                // the raw `expanded` binding — see its doc comment) so the handoff runs across the
+                // full collapse/expand, in step with the pill's own shape.
                 //
                 // `.transition(.scale(scale: 1))` on both branches — a transition that is, by
                 // construction, visually a no-op (scaling by a factor of 1 changes nothing) but is
@@ -156,7 +178,7 @@ private extension ExpandableNowPlaying {
                 //   `matchedGeometryEffect` still has an animation to interpolate across) while
                 //   never actually changing how the view looks at any point, so there's no opacity
                 //   or scale artifact layered on top of the geometry handoff.
-                if expanded {
+                if isShapeExpanded {
                     RegularArtwork(size: size, animationNamespace: animationNamespace)
                         .transition(.scale(scale: 1))
                 } else {
@@ -165,7 +187,7 @@ private extension ExpandableNowPlaying {
                 }
                 ProgressTracker(progress: progressTrackState)
             }
-            .frame(height: expanded ? nil : NowPlayingLayout.compactHeight, alignment: .top)
+            .frame(height: isShapeExpanded ? nil : NowPlayingLayout.compactHeight, alignment: .top)
             // `NowPlayingBackground` only clips its own fill to the pill/rounded-rect shape —
             // its ZStack siblings (the Compact/Regular content, scaling in via `.transition`)
             // aren't clipped by that on their own, so a mid-animation frame where the content's
@@ -173,7 +195,7 @@ private extension ExpandableNowPlaying {
             // poking past the background's rounded corners. Clipping the whole stack to the same
             // shape guarantees content never renders outside the background's current bounds,
             // however the two animations line up frame to frame.
-            .clipShape(.rect(cornerRadius: NowPlayingBackground.cornerRadius(expanded: expanded, isFullExpanded: isFullyExpanded)))
+            .clipShape(.rect(cornerRadius: NowPlayingBackground.cornerRadius(expanded: isShapeExpanded, isFullExpanded: isFullyExpanded)))
             .frame(maxHeight: .infinity, alignment: .bottom)
             .padding(.bottom, insets.bottom)
             .padding(.leading, insets.leading)
@@ -187,7 +209,16 @@ private extension ExpandableNowPlaying {
             )
             .ignoresSafeArea()
         }
+        // `.animation(nil, ...)`: without it, this opacity swap picks up whatever
+        // `.playerExpandAnimation` is ambient at the time (the same one driving the pill's own
+        // shape morph) and fades in across that full duration — reading as the pill materializing
+        // *while* it grows, on top of the shape morph, rather than the shape alone morphing into
+        // an already-solid pill. `isFullyCollapsed` flips the instant a real expand/collapse
+        // starts (as soon as `expandProgress` leaves/reaches exactly 0), so cutting the animation
+        // here doesn't cost any actual cross-fade — same reasoning as `NowPlayingBackground`'s own
+        // `.animation(nil, value: showsExpandedContent)`.
         .opacity(isFullyCollapsed ? 0 : 1)
+        .animation(nil, value: isFullyCollapsed)
         .allowsHitTesting(!isFullyCollapsed)
     }
 
@@ -234,6 +265,23 @@ private extension ExpandableNowPlaying {
         }
     }
 
+    /// Puts the view in its expanded visual state — shared by the real `expanded` transition
+    /// (`.onChange`) and by mounting already-expanded (`.onAppear`), so both end up in exactly
+    /// the same state, animated the exact same way: `isShapeExpanded` starts (or, for the
+    /// already-expanded case, *stays*) at its collapsed value for this view's very first frame,
+    /// and only flips here — inside an explicit, self-contained animation — which is what makes
+    /// the pill actually grow via `.playerExpandAnimation` instead of the overlay's own insertion
+    /// just fading the final, already-expanded frame into view.
+    func expandNow() {
+        marqueeRestartToken &+= 1
+        backgroundSaturation = 1
+        withAnimation(.playerExpandAnimation) {
+            isShapeExpanded = true
+        }
+        stacked(progress: 1, withAnimation: true)
+        accessoryVisible = false
+    }
+
     func stacked(progress: CGFloat, withAnimation: Bool) {
         if withAnimation {
             SwiftUI.withAnimation(.playerExpandAnimation) {
@@ -249,11 +297,13 @@ private extension ExpandableNowPlaying {
         withAnimation(.playerExpandAnimation) {
             progressTrackState = 0
             chromeProgress = 0
+            isShapeExpanded = false
         }
     }
 
+    /// Branches on `isShapeExpanded`, not the raw `expanded` binding — see its doc comment.
     var insets: EdgeInsets {
-        if expanded {
+        if isShapeExpanded {
             return .init(top: 0, leading: 0, bottom: 0, trailing: 0)
         }
         return .init(
