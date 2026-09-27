@@ -327,7 +327,7 @@ private extension ExpandableNowPlaying {
         let palette = await Task.detached(priority: .userInitiated) {
             let vivid = uiImage.dominantColors(count: 3)
                 .map { $0.darkened() }
-                .reducedContrast(by: 0.3)
+                .reducedContrast(by: 0.2)
             // Both ratios below are measured against the same single average — the artwork's
             // overall look, including the near-black/near-white/desaturated pixels the
             // dominant-colour pass above skips — so the backdrop reads as a natural extension of
@@ -356,7 +356,7 @@ private extension ExpandableNowPlaying {
 
         /// How saturated the backdrop palette's average is relative to the artwork's own average
         /// saturation — over 1 so the background reads slightly more vivid than the cover.
-        static let backdropSaturationRatio: CGFloat = 1.2
+        static let backdropSaturationRatio: CGFloat = 1.3
 
         /// Below this fraction of `expandProgress`, a collapse switches the content/material over
         /// to the mini player's look. Small on purpose — the morph itself should only occupy the

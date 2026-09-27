@@ -218,7 +218,7 @@ extension [Color] {
             let mid = (low + high) / 2
             if averageLightness(mid) < target { low = mid } else { high = mid }
         }
-        return scaled((low + high) / 2).map { Color(red: $0.r, green: $0.g, blue: $0.b) }
+        return scaled((low + high) / 2).map { Color(red: $0.r, green: $0.g, blue: $0.b).darkened() }
     }
 
     /// Scales every color's HSB saturation by one shared factor (keeping hue and brightness) until
@@ -246,6 +246,6 @@ extension [Color] {
             let mid = (low + high) / 2
             if averageSaturation(mid) < target { low = mid } else { high = mid }
         }
-        return scaled((low + high) / 2).map { Color(hue: $0.hue, saturation: $0.saturation, brightness: $0.brightness) }
+        return scaled((low + high) / 2).map { Color(hue: $0.hue, saturation: $0.saturation, brightness: $0.brightness).darkened() }
     }
 }
