@@ -20,7 +20,19 @@ struct RegularChrome: View {
                 .frame(height: RegularNowPlayingLayout.artworkHeight(for: size))
                 .padding(.vertical, RegularNowPlayingLayout.artworkVerticalPadding(for: size))
                 .padding(.horizontal, RegularNowPlayingLayout.Const.horizontalPadding)
-            PlayerControls(colors: colors, marqueesActive: marqueesActive, marqueeRestartToken: marqueeRestartToken)
+            // Everything below the artwork placeholder: the title/artist and scrubber at their
+            // natural height, then the button rows spread evenly through the rest. (The scrubber's
+            // gap to the title scales with the space available, hence the `GeometryReader`.)
+            GeometryReader { geometry in
+                VStack(spacing: 0) {
+                    PlayerTrackInfo(
+                        spacing: geometry.size.height * 0.04,
+                        marqueesActive: marqueesActive,
+                        marqueeRestartToken: marqueeRestartToken
+                    )
+                    PlayerControls()
+                }
+            }
         }
         .padding(.top, NowPlayingLayout.safeAreaInsets.top)
         .padding(.bottom, NowPlayingLayout.safeAreaInsets.bottom)
