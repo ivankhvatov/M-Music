@@ -23,39 +23,42 @@ struct PlayerQueueList: View {
             .padding(.bottom, FadeMask.bottomFade)
         }
         .scrollIndicators(.hidden)
+        .mask { TopFade() }
         .environment(\.colorScheme, .dark)
         // The rows' menu buttons would otherwise pick up the default blue accent.
         .tint(Color.transparentWhite)
     }
 
-    /// Fades whatever it masks out over the top and bottom few points of its own frame, instead of
-    /// cutting it off hard. Applied by `RegularChrome` to the list's *container* rather than to the
-    /// list itself, so the fades stay put — the bottom one ending exactly on the scrubber's top edge
-    /// — while the list slides in or out behind them.
-    struct FadeMask: View {
-        static let topFade: CGFloat = 20
-        static let bottomFade: CGFloat = 56
-
+    /// Fades the bottom `bottomFade` points of whatever it masks out, instead of cutting it off
+    /// hard. Applied by `RegularChrome` to the list's *container* rather than to the list itself,
+    /// so the fade stays put — ending exactly on the scrubber's top edge — while the list slides
+    /// in or out behind it. Fixed-size pieces only, so nothing in it depends on the size it's
+    /// given and it needn't be redrawn when that changes.
+    struct BottomFade: View {
         var body: some View {
-            GeometryReader { geometry in
-                // Fixed point sizes turned into gradient locations. They're clamped so the two
-                // fades never overlap — the frame is far shorter than both while the list is
-                // still sliding in or out.
-                let height = max(geometry.size.height, 1)
-                let topEnd = min(Self.topFade / height, 0.5)
-                let bottomStart = max(1 - Self.bottomFade / height, topEnd)
-                LinearGradient(
-                    stops: [
-                        .init(color: .clear, location: 0),
-                        .init(color: .black, location: topEnd),
-                        .init(color: .black, location: bottomStart),
-                        .init(color: .clear, location: 1)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
+            VStack(spacing: 0) {
+                Rectangle()
+                LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+                    .frame(height: FadeMask.bottomFade)
             }
         }
+    }
+
+    /// The top-edge counterpart, for the list's own mask.
+    struct TopFade: View {
+        var body: some View {
+            VStack(spacing: 0) {
+                LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
+                    .frame(height: FadeMask.topFade)
+                Rectangle()
+            }
+        }
+    }
+
+    /// The fade sizes, shared with the list's padding so its first and last rows rest clear of them.
+    enum FadeMask {
+        static let topFade: CGFloat = 20
+        static let bottomFade: CGFloat = 56
     }
 
     /// The tracks after the current one. Each gets an id from its track id plus how many times that

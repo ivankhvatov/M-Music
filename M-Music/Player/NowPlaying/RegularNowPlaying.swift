@@ -14,6 +14,12 @@ struct RegularChrome: View {
     var marqueeRestartToken = 0
     /// Whether the up-next queue is showing instead of the big artwork — see `lowerRegion`.
     @Binding var showsQueue: Bool
+    /// The queue list's height once it's showing — see `lowerRegion`. 0 until first measured.
+    @State private var queueListHeight: CGFloat = 0
+    /// Whether the queue list is mounted while hidden. It's mounted shortly after the player first
+    /// appears, rather than when the queue is first toggled on, so building its rows doesn't
+    /// stall the start of that animation.
+    @State private var mountsQueueList = false
 
     var body: some View {
         VStack(spacing: 12) {
@@ -26,6 +32,11 @@ struct RegularChrome: View {
         }
         .padding(.top, NowPlayingLayout.safeAreaInsets.top)
         .padding(.bottom, NowPlayingLayout.safeAreaInsets.bottom)
+        .task(id: marqueesActive) {
+            guard marqueesActive, !mountsQueueList else { return }
+            try? await Task.sleep(for: .milliseconds(800))
+            mountsQueueList = true
+        }
     }
 
     /// Everything below the artwork placeholder, top to bottom: the title/artist, the queue list,
@@ -49,29 +60,55 @@ struct RegularChrome: View {
                     marqueeRestartToken: marqueeRestartToken
                 )
                 .padding(.bottom, showsQueue ? -RegularNowPlayingLayout.queueTitleRise : spacing * 2)
-                // Always mounted and pinned to the top of this frame, which is itself pinned to the
-                // title's bottom edge: the list is carried up (and back down) rigidly with the
-                // title, at exactly its speed, rising out from behind the scrubber below — whose
-                // top edge the clip cuts it off at — rather than being revealed in place by the
-                // artwork shrinking away above it. (A move transition instead measured its
-                // distance against the frame's own, still-growing height, so it lagged the title.)
-                PlayerQueueList()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    // The title travels its layout move plus its own offset (`queueTitleRise`); the
-                    // list, hung from the title's layout position, gets that offset too, so the
-                    // two cover the same distance in the same time.
-                    .offset(y: showsQueue ? 0 : RegularNowPlayingLayout.queueTitleRise)
-                    // Fades along with the move, rather than only being cut off at the scrubber.
-                    .opacity(showsQueue ? 1 : 0)
-                    .allowsHitTesting(showsQueue)
-                    .accessibilityHidden(!showsQueue)
+                // Pinned to the top of this frame, which is itself pinned to the title's bottom
+                // edge: the list is carried up (and back down) rigidly with the title, at exactly
+                // its speed, rising out from behind the scrubber below — whose top edge the clip
+                // below cuts it off at — rather than being revealed in place by the artwork
+                // shrinking away above it. (A move transition instead measured its distance
+                // against the frame's own, still-growing height, so it lagged the title.)
+                //
+                // The list is always its final height (`queueListHeight`) and merely overflows
+                // this frame while it's still growing, so the scroll view is never resized —
+                // relaying out a UIKit scroll view and its rows every frame is what made the
+                // toggle stutter.
+                ZStack(alignment: .top) {
+                    if mountsQueueList || showsQueue {
+                        PlayerQueueList()
+                            .frame(
+                                maxWidth: .infinity,
+                                minHeight: queueListHeight,
+                                maxHeight: queueListHeight > 0 ? queueListHeight : .infinity,
+                                alignment: .top
+                            )
+                            // The title travels its layout move plus its own offset
+                            // (`queueTitleRise`); the list, hung from the title's layout
+                            // position, gets that offset too, so the two cover the same distance
+                            // in the same time.
+                            .offset(y: showsQueue ? 0 : RegularNowPlayingLayout.queueTitleRise)
+                            // Fades along with the move, rather than only being cut off at the
+                            // scrubber.
+                            .opacity(showsQueue ? 1 : 0)
+                            .allowsHitTesting(showsQueue)
+                            .accessibilityHidden(!showsQueue)
+                    }
+                }
                 // Full width even while empty, or the clip would grow out from the center as the
                 // list comes in and shrink back into it as it leaves.
-                .frame(maxWidth: .infinity, maxHeight: showsQueue ? .infinity : 0)
-                // Clips the list to this frame and fades its top and bottom edges. It's applied
-                // here, to the fixed frame, rather than inside the list, so the fades are there
-                // while the list slides in or out too.
-                .mask { PlayerQueueList.FadeMask() }
+                .frame(maxWidth: .infinity, maxHeight: showsQueue ? .infinity : 0, alignment: .top)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                    // The final height, which layout reports as soon as the queue is toggled on;
+                    // only ever grown, so a value read mid-animation can't shrink the list.
+                    if showsQueue, height > queueListHeight + 0.5 { queueListHeight = height }
+                }
+                // Clips the list to this frame and fades its bottom edge (the top one is the
+                // list's own, so it travels with it). It's applied here, to the frame, rather
+                // than inside the list, so the fade is there while the list slides in or out too.
+                // The mask is a fixed size, bottom-aligned to the frame, so it only ever moves
+                // instead of being redrawn at a new size every frame.
+                .mask(alignment: .bottom) {
+                    PlayerQueueList.BottomFade()
+                        .frame(maxHeight: queueListHeight > 0 ? queueListHeight : .infinity)
+                }
                 // Reaches down over the empty top of the scrubber's frame (its bar sits a little
                 // below it), so the fade ends right on the bar rather than a gap above it. A
                 // negative padding, after the mask: the frame — and so the mask — gets that much
