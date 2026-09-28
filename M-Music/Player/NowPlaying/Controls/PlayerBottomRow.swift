@@ -1,15 +1,23 @@
 import SwiftUI
 
 /// The row below the transport buttons: lyrics and queue toggles flanking a "more" button.
-/// Display only for now — none of the buttons do anything yet.
+/// The queue toggle reveals the up-next list (see `RegularChrome`); lyrics and "more" don't do
+/// anything yet — lyrics just remembers whether it's on.
 struct PlayerBottomRow: View {
+    @Binding var showsQueue: Bool
+    @State private var showsLyrics = false
+
     var body: some View {
         HStack {
-            PlayerBottomButton(symbol: "quote.bubble", isOn: false, alignment: .leading)
+            PlayerBottomButton(symbol: "quote.bubble", isOn: showsLyrics, alignment: .leading) {
+                showsLyrics.toggle()
+            }
             Spacer(minLength: 0)
-            PlayerBottomButton(symbol: "ellipsis", alignment: .center)
+            PlayerBottomButton(symbol: "ellipsis", alignment: .center) {}
             Spacer(minLength: 0)
-            PlayerBottomButton(symbol: "list.bullet", isOn: false, alignment: .trailing)
+            PlayerBottomButton(symbol: "list.bullet", isOn: showsQueue, alignment: .trailing) {
+                withAnimation(.playerQueueAnimation) { showsQueue.toggle() }
+            }
         }
     }
 }
@@ -20,9 +28,10 @@ private struct PlayerBottomButton: View {
     let symbol: String
     var isOn = false
     var alignment: Alignment
+    let action: () -> Void
 
     var body: some View {
-        Button(action: {}) {
+        Button(action: action) {
             glyph
                 // Aligned within the tap target like the star/AirPlay buttons above, so the
                 // outer two sit on the row's edges instead of `(44 - circle)/2` points in.

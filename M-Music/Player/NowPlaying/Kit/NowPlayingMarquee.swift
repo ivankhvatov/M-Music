@@ -56,7 +56,7 @@ struct NowPlayingMarquee: View {
                     // right by the same amount — so at rest it starts exactly where plain text
                     // would, and the left fade lives in the extra strip, always on, beginning
                     // before the text's start position instead of eating into it.
-                    Color.clear
+                    let label = Color.clear
                         .overlay(alignment: .leading) {
                             HStack(spacing: gap) {
                                 Text(text)
@@ -67,9 +67,17 @@ struct NowPlayingMarquee: View {
                             .fixedSize()
                             .offset(x: edge - offset)
                         }
-                        .clipped()
-                        .mask(fadeMask(edge: edge))
-                        .padding(.leading, -edge)
+                    // Clipped and faded only when there's something to clip: text that fits is
+                    // left alone, since a clip/mask on it does nothing at rest and, while an
+                    // ancestor's layout is animating, can slice the text against its own frame.
+                    if overflows {
+                        label
+                            .clipped()
+                            .mask(fadeMask(edge: edge))
+                            .padding(.leading, -edge)
+                    } else {
+                        label
+                    }
                 }
         }
         .onChange(of: text) { startDate = Date() }

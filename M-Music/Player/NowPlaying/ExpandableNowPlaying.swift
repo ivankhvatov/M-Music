@@ -48,6 +48,9 @@ struct ExpandableNowPlaying: View {
     /// instantly whenever an expand starts (so it's never mid-fade the next time it's needed) and
     /// animated down to 0 by `collapse()`.
     @State private var backgroundSaturation: CGFloat = 1
+    /// Whether the expanded player is showing the up-next queue (toggled from its bottom row):
+    /// the artwork shrinks to the top left and the title/artist move beside it, above the list.
+    @State private var showsQueue = false
     @State private var colors: [Color] = [.gray]
     @Namespace private var animationNamespace
 
@@ -143,7 +146,7 @@ private extension ExpandableNowPlaying {
                 // always mounted (unlike the artwork below): neither branch contains a
                 // `matchedGeometryEffect` descendant, so there's no risk of two simultaneous sources
                 // for the same id.
-                RegularChrome(size: size, colors: colors, onCollapse: collapse, marqueesActive: marqueesActive, marqueeRestartToken: marqueeRestartToken)
+                RegularChrome(size: size, colors: colors, onCollapse: collapse, marqueesActive: marqueesActive, marqueeRestartToken: marqueeRestartToken, showsQueue: $showsQueue)
                     .environment(\.playerButtonSymbolTransitions, expanded)
                     .opacity(chromeProgress)
                     .allowsHitTesting(expanded)
@@ -179,7 +182,7 @@ private extension ExpandableNowPlaying {
                 //   never actually changing how the view looks at any point, so there's no opacity
                 //   or scale artifact layered on top of the geometry handoff.
                 if isShapeExpanded {
-                    RegularArtwork(size: size, animationNamespace: animationNamespace)
+                    RegularArtwork(size: size, animationNamespace: animationNamespace, showsQueue: showsQueue)
                         .transition(.scale(scale: 1))
                 } else {
                     CompactArtwork(animationNamespace: animationNamespace)
