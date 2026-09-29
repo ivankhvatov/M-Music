@@ -350,6 +350,9 @@ struct SongRow: View {
     let track: Child
     let rowArtworkSize: CGFloat
     let displayScale: CGFloat
+    /// Shows a drag-handle glyph in place of the download status and song menu — for the player's
+    /// queue list, where those don't apply.
+    let showsReorderHandle: Bool
 
     private let client = SubsonicClient.shared
     /// Not `@ObservedObject`: `songMenu` only ever calls a method on it (`playNext`/
@@ -368,10 +371,11 @@ struct SongRow: View {
     /// time. Mirrors the fix already applied to `AlbumView`'s artwork URL.
     @State private var artworkURL: URL?
 
-    init(track: Child, rowArtworkSize: CGFloat, displayScale: CGFloat) {
+    init(track: Child, rowArtworkSize: CGFloat, displayScale: CGFloat, showsReorderHandle: Bool = false) {
         self.track = track
         self.rowArtworkSize = rowArtworkSize
         self.displayScale = displayScale
+        self.showsReorderHandle = showsReorderHandle
         let artId = track.coverArt ?? track.albumId?.raw ?? track.id.raw
         let pixelSize = Int(rowArtworkSize * displayScale)
         _artworkURL = State(initialValue: try? SubsonicClient.shared.coverArtURL(forId: artId, size: pixelSize))
@@ -392,6 +396,8 @@ struct SongRow: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                // The queue's compact rows (the ones with the handle) keep to one line each.
+                .lineLimit(showsReorderHandle ? 1 : nil)
             }
             // Dims just the artwork/title — not the indicator or menu below, which should stay
             // fully legible/actionable (e.g. still show a download in progress, or let the user
@@ -401,9 +407,16 @@ struct SongRow: View {
 
             Spacer()
 
-            DownloadStatusIndicator(state: downloads.state(for: track.id.raw))
+            if showsReorderHandle {
+                Image(systemName: "line.3.horizontal")
+                    .foregroundStyle(.secondary)
+                    .font(.system(size: 22))
+                    .frame(height: 20)
+            } else {
+                DownloadStatusIndicator(state: downloads.state(for: track.id.raw))
 
-            songMenu
+                songMenu
+            }
         }
     }
 

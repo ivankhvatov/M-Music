@@ -47,6 +47,9 @@ final class PlayerManager: ObservableObject {
             if !isApplyingRestoredQueue { awaitingFullQueue = false }
         }
     }
+    /// The album or playlist the current queue was started from, when the caller said — shown as
+    /// "From …" above the queue list. Not persisted, so it's `nil` again after a relaunch.
+    @Published private(set) var queueSourceName: String?
     @Published private(set) var currentIndex: Int?
     @Published private(set) var isPlaying = false
     /// Not `@Published`: it changes twice a second during playback, and publishing it here made
@@ -339,12 +342,14 @@ final class PlayerManager: ObservableObject {
     ///
     /// `fromPlaylist` records that the queue came from a playlist, so "Scrobble from playlists"
     /// can exclude its plays. It describes the queue's origin and stays put through
-    /// `playNext`/`addToQueue`; only starting a new queue replaces it.
-    func play(queue newQueue: [Child], startAt index: Int, fromPlaylist: Bool = false) {
+    /// `playNext`/`addToQueue`; only starting a new queue replaces it. `sourceName` is the album or
+    /// playlist's name, for display.
+    func play(queue newQueue: [Child], startAt index: Int, fromPlaylist: Bool = false, sourceName: String? = nil) {
         guard newQueue.indices.contains(index) else { return }
         currentRadioStation = nil
         queue = newQueue
         isPlaylistQueue = fromPlaylist
+        queueSourceName = sourceName
         currentIndex = index
         clearGaplessPreload()
         loadCurrentItem(autoplay: true)
@@ -422,6 +427,7 @@ final class PlayerManager: ObservableObject {
         configureAudioSessionIfNeeded()
         scrobbleSongId = nil
         queue = []
+        queueSourceName = nil
         currentIndex = nil
         isPlaylistQueue = false
         clearGaplessPreload()

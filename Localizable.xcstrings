@@ -1171,6 +1171,22 @@
         }
       }
     },
+    "From %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aus %@"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Из «%@»"
+          }
+        }
+      }
+    },
     "Gapless Caching" : {
       "localizations" : {
         "ru" : {
@@ -2229,6 +2245,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Неизвестный альбом"
+          }
+        }
+      }
+    },
+    "Up next" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Als Nächstes"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Далее"
           }
         }
       }
