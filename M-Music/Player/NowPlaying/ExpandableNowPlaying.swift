@@ -207,7 +207,8 @@ private extension ExpandableNowPlaying {
             .gesture(
                 PanGesture(
                     onChange: { handleGestureChange(value: $0, viewSize: size) },
-                    onEnd: { handleGestureEnd(value: $0, viewSize: size) }
+                    onEnd: { handleGestureEnd(value: $0, viewSize: size) },
+                    deferring: PanGesture.reorderHandleTag
                 )
             )
             .ignoresSafeArea()
@@ -226,7 +227,7 @@ private extension ExpandableNowPlaying {
     }
 
     func handleGestureChange(value: PanGesture.Value, viewSize: CGSize) {
-        guard expanded else { return }
+        guard expanded, !showsQueue else { return }
         let translation = max(value.translation.height, 0)
         offsetY = translation
         windowProgress = max(min(translation / viewSize.height, 1), 0)
@@ -234,7 +235,7 @@ private extension ExpandableNowPlaying {
     }
 
     func handleGestureEnd(value: PanGesture.Value, viewSize: CGSize) {
-        guard expanded else { return }
+        guard expanded, !showsQueue else { return }
         let translation = max(value.translation.height, 0)
         let velocity = value.velocity.height / 5
         if (translation + velocity) > (viewSize.height * 0.3) {

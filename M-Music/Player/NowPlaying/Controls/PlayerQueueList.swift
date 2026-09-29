@@ -9,6 +9,31 @@ struct PlayerQueueList: View {
     @Environment(\.displayScale) private var displayScale
 
     private let rowArtworkSize: CGFloat = 44
+    private let rowSpacing: CGFloat = 12
+
+    /// The id of the entry currently being dragged by its reorder handle, or nil when nothing is.
+    @State private var draggedEntryID: String?
+    /// The dragged row's own visual offset from its resting position: the gesture's raw
+    /// translation minus whatever whole rows have already been committed into the queue — the
+    /// residual, so the row tracks the finger smoothly instead of jumping at each swap.
+    @State private var dragTranslation: CGFloat = 0
+    /// The dragged entry's position in `upcoming` when the drag began — a fixed baseline that
+    /// every callback recomputes the target index from, rather than chaining off the previous
+    /// callback's own result. An earlier version corrected incrementally, per swap, and any small
+    /// error in `rowHeight` compounded across a long drag; recomputing from this fixed origin
+    /// plus the gesture's raw cumulative translation each time can't drift.
+    @State private var dragOriginIndex: Int?
+    /// The dragged entry's position as of the last commit to `player.queue` — tracked here rather
+    /// than read back from `upcoming`'s own `index`, which reflects the *previous* commit only
+    /// once SwiftUI re-renders. Gesture callbacks can fire faster than that render pass completes,
+    /// so a callback reading `index` from `ForEach` could still see a stale position and re-issue
+    /// a move from the wrong place — this state is updated synchronously instead.
+    @State private var dragCurrentIndex: Int?
+    /// One row's height plus the list's own row spacing, measured once from the first row and
+    /// used to convert the drag's point offset into a row-count offset.
+    @State private var rowHeight: CGFloat = 0
+    /// Bumped every time the drag commits a swap, purely to drive the haptic below.
+    @State private var reorderTick = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -19,9 +44,9 @@ struct PlayerQueueList: View {
                     // Scrolls with the rows, so it leaves and enters with the list and needs no
                     // animation of its own.
                     header
-                    LazyVStack(spacing: 12) {
-                        ForEach(upcoming, id: \.id) { entry in
-                            SongRow(track: entry.track, rowArtworkSize: rowArtworkSize, displayScale: displayScale, showsReorderHandle: true)
+                    LazyVStack(spacing: rowSpacing) {
+                        ForEach(Array(upcoming.enumerated()), id: \.element.id) { index, entry in
+                            queueRow(entry, index: index)
                         }
                     }
                 }
@@ -34,6 +59,75 @@ struct PlayerQueueList: View {
             .mask { TopFade() }
         }
         .environment(\.colorScheme, .dark)
+        .sensoryFeedback(.impact(weight: .medium), trigger: reorderTick)
+    }
+
+    /// One queue row, with the dragged row's highlight/shadow/scale and its own live offset —
+    /// deliberately no `.animation(value:)` here: SwiftUI would replay it on every drag callback
+    /// even though nothing but the offset itself changes between them, which is what made the
+    /// row visibly chase its own position instead of tracking the finger directly. The few
+    /// moments that should animate (pickup, a committed swap, the drop) wrap themselves in
+    /// `withAnimation` instead.
+    private func queueRow(_ entry: Entry, index: Int) -> some View {
+        let isDragged = draggedEntryID == entry.id
+        return SongRow(
+            track: entry.track,
+            rowArtworkSize: rowArtworkSize,
+            displayScale: displayScale,
+            showsReorderHandle: true,
+            onReorderDragChanged: { reorderDragChanged($0, entry: entry, index: index) },
+            onReorderDragEnded: { reorderDragEnded() }
+        )
+        .background {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.white.opacity(isDragged ? 0.1 : 0))
+                .padding(.horizontal, -8)
+                .padding(.vertical, -6)
+        }
+        .shadow(color: .black.opacity(isDragged ? 0.3 : 0), radius: 8, y: 4)
+        .scaleEffect(isDragged ? 1.02 : 1)
+        .offset(y: isDragged ? dragTranslation : 0)
+        .zIndex(isDragged ? 1 : 0)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+            if rowHeight == 0, height > 0 { rowHeight = height + rowSpacing }
+        }
+    }
+
+    /// Called continuously while a handle is dragged. `index` is this entry's live position in
+    /// `upcoming` — it moves as swaps commit, since `upcoming` is derived straight from
+    /// `player.queue` and this view re-renders whenever that changes.
+    private func reorderDragChanged(_ value: PanGesture.Value, entry: Entry, index: Int) {
+        guard rowHeight > 0 else { return }
+        if draggedEntryID != entry.id {
+            withAnimation(.easeOut(duration: 0.15)) {
+                draggedEntryID = entry.id
+            }
+            dragOriginIndex = index
+            dragCurrentIndex = index
+        }
+        guard let dragOriginIndex, let dragCurrentIndex else { return }
+
+        let steps = (value.translation.height / rowHeight).rounded()
+        let proposedIndex = min(max(dragOriginIndex + Int(steps), 0), upcoming.count - 1)
+
+        if proposedIndex != dragCurrentIndex {
+            withAnimation(.smooth(duration: 0.25)) {
+                player.moveQueueItem(fromUpcomingIndex: dragCurrentIndex, toUpcomingIndex: proposedIndex)
+            }
+            self.dragCurrentIndex = proposedIndex
+            reorderTick += 1
+        }
+
+        dragTranslation = value.translation.height - CGFloat(proposedIndex - dragOriginIndex) * rowHeight
+    }
+
+    private func reorderDragEnded() {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+            dragTranslation = 0
+            draggedEntryID = nil
+        }
+        dragOriginIndex = nil
+        dragCurrentIndex = nil
     }
 
     /// The shuffle, repeat and non-stop buttons, sharing the row's width. They don't do anything yet.

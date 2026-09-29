@@ -353,6 +353,10 @@ struct SongRow: View {
     /// Shows a drag-handle glyph in place of the download status and song menu — for the player's
     /// queue list, where those don't apply.
     let showsReorderHandle: Bool
+    /// Forwards the reorder handle's drag gesture up to `PlayerQueueList`, which owns the
+    /// dragged-row state and does the actual reordering.
+    var onReorderDragChanged: ((PanGesture.Value) -> Void)?
+    var onReorderDragEnded: (() -> Void)?
 
     private let client = SubsonicClient.shared
     /// Not `@ObservedObject`: `songMenu` only ever calls a method on it (`playNext`/
@@ -371,11 +375,20 @@ struct SongRow: View {
     /// time. Mirrors the fix already applied to `AlbumView`'s artwork URL.
     @State private var artworkURL: URL?
 
-    init(track: Child, rowArtworkSize: CGFloat, displayScale: CGFloat, showsReorderHandle: Bool = false) {
+    init(
+        track: Child,
+        rowArtworkSize: CGFloat,
+        displayScale: CGFloat,
+        showsReorderHandle: Bool = false,
+        onReorderDragChanged: ((PanGesture.Value) -> Void)? = nil,
+        onReorderDragEnded: (() -> Void)? = nil
+    ) {
         self.track = track
         self.rowArtworkSize = rowArtworkSize
         self.displayScale = displayScale
         self.showsReorderHandle = showsReorderHandle
+        self.onReorderDragChanged = onReorderDragChanged
+        self.onReorderDragEnded = onReorderDragEnded
         let artId = track.coverArt ?? track.albumId?.raw ?? track.id.raw
         let pixelSize = Int(rowArtworkSize * displayScale)
         _artworkURL = State(initialValue: try? SubsonicClient.shared.coverArtURL(forId: artId, size: pixelSize))
@@ -411,7 +424,15 @@ struct SongRow: View {
                 Image(systemName: "line.3.horizontal")
                     .foregroundStyle(.secondary)
                     .font(.system(size: 22))
-                    .frame(height: 20)
+                    .frame(width: 44, height: 44)
+                    .contentShape(.rect)
+                    .gesture(
+                        PanGesture(
+                            onChange: { onReorderDragChanged?($0) },
+                            onEnd: { _ in onReorderDragEnded?() },
+                            priorityName: PanGesture.reorderHandleTag
+                        )
+                    )
             } else {
                 DownloadStatusIndicator(state: downloads.state(for: track.id.raw))
 

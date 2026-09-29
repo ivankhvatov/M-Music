@@ -420,6 +420,25 @@ final class PlayerManager: ObservableObject {
         persistState()
     }
 
+    /// Moves a track within the up-next portion of the queue — the part after the currently
+    /// playing track — from one position to another, both counted from zero directly after
+    /// `currentIndex`. Used by the queue list's drag-to-reorder handle: dragging a row up moves
+    /// it earlier in the queue (it plays sooner), dragging it down moves it later.
+    func moveQueueItem(fromUpcomingIndex source: Int, toUpcomingIndex destination: Int) {
+        guard let currentIndex, source != destination else { return }
+        let base = currentIndex + 1
+        let sourceIndex = base + source
+        let destinationIndex = base + destination
+        guard queue.indices.contains(sourceIndex), queue.indices.contains(destinationIndex) else { return }
+        let track = queue.remove(at: sourceIndex)
+        queue.insert(track, at: destinationIndex)
+        if source == 0 || destination == 0 {
+            clearGaplessPreload()
+            prepareNextItem()
+        }
+        persistState()
+    }
+
     /// Starts streaming `station` live, replacing whatever was playing. Radio has no queue,
     /// duration or seeking, and is never scrobbled or cached — see `isRadio`.
     func playRadio(_ station: InternetRadioStation) {
