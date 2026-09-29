@@ -424,7 +424,10 @@ struct SongRow: View {
                 Image(systemName: "line.3.horizontal")
                     .foregroundStyle(.secondary)
                     .font(.system(size: 22))
-                    .frame(width: 44, height: 44)
+                    // No fixed width: a wider tap-target box here would leave empty space past
+                    // the glyph before the row's trailing edge, where the download symbol would
+                    // otherwise sit — the glyph should hug the edge instead.
+                    .frame(height: 20)
                     .contentShape(.rect)
                     .gesture(
                         PanGesture(
