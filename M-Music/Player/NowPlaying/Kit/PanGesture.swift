@@ -18,17 +18,32 @@ struct PanGesture: UIGestureRecognizerRepresentable {
     /// instead of simply scrolling. Set on the queue row's swipe-to-delete gesture, which only
     /// ever wants horizontal movement and otherwise sits on top of a vertically scrolling list.
     var requiresHorizontalMovement = false
+    /// The mirror image of `requiresHorizontalMovement`: fails this recognizer as soon as its
+    /// movement becomes more horizontal than vertical. Set on the whole-player drag-to-dismiss
+    /// gesture, which otherwise has no axis restriction at all and — being a plain
+    /// `UIPanGestureRecognizer` with no failure requirement against the queue list's own internal
+    /// swipe-actions recognizer — would simply win the race for *any* drag on the expanded
+    /// player, including a horizontal swipe on a queue row meant to reveal its delete action. Its
+    /// own callback already no-ops while the queue is showing, so that swipe wasn't just
+    /// interrupted — it visibly did nothing at all, every time.
+    var requiresVerticalMovement = false
 
     static let reorderHandleTag = "com.mmusic.playerQueue.reorderHandle"
 
     func makeCoordinator(converter _: CoordinateSpaceConverter) -> Coordinator {
-        Coordinator(deferring: deferring, requiresHorizontalMovement: requiresHorizontalMovement)
+        Coordinator(
+            deferring: deferring,
+            requiresHorizontalMovement: requiresHorizontalMovement,
+            requiresVerticalMovement: requiresVerticalMovement
+        )
     }
 
     func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
         let recognizer = UIPanGestureRecognizer()
         recognizer.name = priorityName
-        if deferring != nil || requiresHorizontalMovement { recognizer.delegate = context.coordinator }
+        if deferring != nil || requiresHorizontalMovement || requiresVerticalMovement {
+            recognizer.delegate = context.coordinator
+        }
         return recognizer
     }
 
@@ -58,10 +73,12 @@ struct PanGesture: UIGestureRecognizerRepresentable {
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         let deferring: String?
         let requiresHorizontalMovement: Bool
+        let requiresVerticalMovement: Bool
 
-        init(deferring: String?, requiresHorizontalMovement: Bool) {
+        init(deferring: String?, requiresHorizontalMovement: Bool, requiresVerticalMovement: Bool) {
             self.deferring = deferring
             self.requiresHorizontalMovement = requiresHorizontalMovement
+            self.requiresVerticalMovement = requiresVerticalMovement
         }
 
         /// Makes the whole-player gesture require the tagged reorder-handle recognizer to fail
@@ -88,9 +105,11 @@ struct PanGesture: UIGestureRecognizerRepresentable {
         /// which is why scrolling starting on a row worked unpredictably. `shouldBegin` has no
         /// such race — there's only one threshold (this recognizer's own) being evaluated here.
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-            guard requiresHorizontalMovement, let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
+            guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
             let t = pan.translation(in: pan.view)
-            return abs(t.x) >= abs(t.y)
+            if requiresHorizontalMovement { return abs(t.x) >= abs(t.y) }
+            if requiresVerticalMovement { return abs(t.y) >= abs(t.x) }
+            return true
         }
     }
 }

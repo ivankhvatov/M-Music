@@ -208,7 +208,8 @@ private extension ExpandableNowPlaying {
                 PanGesture(
                     onChange: { handleGestureChange(value: $0, viewSize: size) },
                     onEnd: { handleGestureEnd(value: $0, viewSize: size) },
-                    deferring: PanGesture.reorderHandleTag
+                    deferring: PanGesture.reorderHandleTag,
+                    requiresVerticalMovement: true
                 )
             )
             .ignoresSafeArea()
