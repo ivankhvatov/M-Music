@@ -439,6 +439,21 @@ final class PlayerManager: ObservableObject {
         persistState()
     }
 
+    /// Removes a track from the up-next portion of the queue — the part after the currently
+    /// playing track — counted from zero directly after `currentIndex`. Used by the queue list's
+    /// swipe-to-delete.
+    func removeFromQueue(atUpcomingIndex index: Int) {
+        guard let currentIndex else { return }
+        let queueIndex = currentIndex + 1 + index
+        guard queue.indices.contains(queueIndex) else { return }
+        queue.remove(at: queueIndex)
+        if index == 0 {
+            clearGaplessPreload()
+            prepareNextItem()
+        }
+        persistState()
+    }
+
     /// Starts streaming `station` live, replacing whatever was playing. Radio has no queue,
     /// duration or seeking, and is never scrobbled or cached — see `isRadio`.
     func playRadio(_ station: InternetRadioStation) {
