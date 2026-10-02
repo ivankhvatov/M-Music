@@ -11,6 +11,10 @@ struct LibraryView: View {
     @State private var isLoadingAlbums = false
     @State private var loadError: String?
     @State private var hasLoadedOnce = false
+    /// Keeps the grid hidden on first open until the first screenful's covers are in memory.
+    @State private var imageReadiness = ImageReadiness()
+    /// Where each album is in the grid, for warming the ones below a card that scrolls into view.
+    @State private var rowPositions = RowPositions()
 
     @ObservedObject private var downloads = DownloadStore.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
@@ -121,11 +125,13 @@ struct LibraryView: View {
                 hasLoadedOnce = true
                 isLoadingAlbums = false
                 prefetchArtwork(for: cached)
+                rememberFirstScreenful(of: cached)
             case .fresh(let albums):
                 loadError = nil
                 isLoadingAlbums = false
                 hasLoadedOnce = true
                 recentAlbums = albums
+                rememberFirstScreenful(of: albums)
                 // Kick off every album's artwork now, before the user has even looked at the
                 // grid, instead of waiting for each card to scroll into view and start its
                 // own fetch — by the time anything is tapped, ImageCache should already have it.
@@ -144,6 +150,28 @@ struct LibraryView: View {
                 }
             }
         }
+    }
+
+    /// Tells `ImageWarmer` which covers this screen opens with, to decode them ahead of the next
+    /// visit, and holds the grid back until they're in memory (see `ImageReadiness`).
+    private func rememberFirstScreenful(of albums: [AlbumID3]) {
+        rowPositions.update(ids: albums.map { $0.id.raw })
+        let requests = artworkRequests(for: albums.prefix(ImageWarmer.manifestLimit))
+        imageReadiness.require(requests)
+        Task { await ImageWarmer.shared.remember(.library, requests) }
+    }
+
+    private func artworkRequests(for albums: ArraySlice<AlbumID3>) -> [ArtworkRequest] {
+        albums.map { ArtworkRequest.albumCard($0.coverArt ?? $0.id.raw) }
+    }
+
+    /// A card scrolled into view: warm the ones just below it, so a fast scroll finds them ready.
+    private func warmAhead(after album: AlbumID3) {
+        guard let index = rowPositions.position(of: album.id.raw),
+              recentAlbums.indices.contains(index), recentAlbums[index].id == album.id else { return }
+        let requests = artworkRequests(for: recentAlbums[(index + 1)...].prefix(ImageWarmer.scrollAheadCount))
+        guard !requests.isEmpty else { return }
+        Task { await ImageWarmer.shared.warmAhead(requests) }
     }
 
     /// Downloads each album's original cover to disk (no decoding) so opening it from here
@@ -185,6 +213,12 @@ struct LibraryView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 16)
+        } else if !imageReadiness.isReady {
+            // Opened before the first screenful's covers were ready: hold the grid back until
+            // they are (see `ImageReadiness`) rather than showing placeholders.
+            ProgressView()
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 24)
         } else {
             LazyVGrid(columns: gridColumns, spacing: 16) {
                 ForEach(recentAlbums) { album in
@@ -193,6 +227,7 @@ struct LibraryView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(!(networkMonitor.isOnline || downloads.hasDownloadedSong(inAlbum: album.id.raw)))
+                    .onAppear { warmAhead(after: album) }
                 }
             }
             .padding(.horizontal, 16)

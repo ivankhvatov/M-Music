@@ -26,6 +26,10 @@ struct PlaylistsListView: View {
     @AppStorage("library.playlistsDisplayStyle") private var displayStyleStorage = LibraryDisplayStyle.grid.storageKey
     @AppStorage(OfflineModeSettings.Keys.showUnavailableInLists) private var showUnavailableInLists = true
 
+    /// Keeps the content hidden on first open until the first screenful's images are in memory.
+    @State private var imageReadiness = ImageReadiness()
+    /// Where each displayed row is, for warming the ones below a row that scrolls into view.
+    @State private var rowPositions = RowPositions()
     @ObservedObject private var downloads = DownloadStore.shared
     @ObservedObject private var libraryCacheStatus = LibraryCacheStatus.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
@@ -55,6 +59,11 @@ struct PlaylistsListView: View {
                 Text("No playlists found.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if !imageReadiness.isReady {
+                // Opened before the first screenful's images were ready: hold the content back
+                // until they are (see `ImageReadiness`) rather than showing placeholders.
+                ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 switch displayStyle {
@@ -86,6 +95,7 @@ struct PlaylistsListView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(!isAvailable(playlist))
+                .onAppear { warmAhead(after: playlist) }
             }
         }
         .padding(.horizontal, 16)
@@ -100,6 +110,7 @@ struct PlaylistsListView: View {
                 }
                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                 .disabled(!isAvailable(playlist))
+                .onAppear { warmAhead(after: playlist) }
             }
         }
         .listStyle(.plain)
@@ -133,6 +144,36 @@ struct PlaylistsListView: View {
             result = result.filter { isFullyDownloaded($0) }
         }
         displayedPlaylists = result
+        rememberFirstScreenful()
+    }
+
+    /// The requests the screen's cards or rows make for `playlists`, in the current display style.
+    private func artworkRequests(for playlists: ArraySlice<PlaylistSummary>) -> [ArtworkRequest] {
+        let isGrid = displayStyle == .grid
+        let scale = displayScale
+        return playlists.map { playlist in
+            let artworkId = playlist.coverArt ?? playlist.id.raw
+            return isGrid ? .playlistCard(artworkId) : .playlistRow(artworkId, scale: scale)
+        }
+    }
+
+    /// A row scrolled into view: warm the ones just below it, so a fast scroll finds them ready.
+    private func warmAhead(after playlist: PlaylistSummary) {
+        guard let index = rowPositions.position(of: playlist.id.raw),
+              displayedPlaylists.indices.contains(index), displayedPlaylists[index].id == playlist.id else { return }
+        let requests = artworkRequests(for: displayedPlaylists[(index + 1)...].prefix(ImageWarmer.scrollAheadCount))
+        guard !requests.isEmpty else { return }
+        Task { await ImageWarmer.shared.warmAhead(requests) }
+    }
+
+    /// Tells `ImageWarmer` what this screen shows first, so its artwork is decoded ahead of the
+    /// next visit (a search's results aren't what the screen normally opens with).
+    private func rememberFirstScreenful() {
+        rowPositions.update(ids: displayedPlaylists.map { $0.id.raw })
+        let requests = artworkRequests(for: displayedPlaylists.prefix(ImageWarmer.manifestLimit))
+        imageReadiness.require(requests)
+        guard searchText.isEmpty else { return }
+        Task { await ImageWarmer.shared.remember(.playlists, requests) }
     }
 
     /// Stale-while-revalidate: shows cached playlists immediately (no spinner) if any are cached,
@@ -222,8 +263,7 @@ private struct PlaylistRow: View {
     init(playlist: PlaylistSummary, zoomNamespace: Namespace.ID? = nil, displayScale: CGFloat) {
         self.playlist = playlist
         self.zoomNamespace = zoomNamespace
-        let pixelSize = ImageCache.RowArtwork.pixels(rowArtworkSize, scale: displayScale)
-        _artworkURL = State(initialValue: SubsonicClient.shared.cachedCoverArtURL(forId: playlist.coverArt ?? playlist.id.raw, size: pixelSize))
+        _artworkURL = State(initialValue: ArtworkRequest.playlistRow(playlist.coverArt ?? playlist.id.raw, scale: displayScale).url)
     }
 
     var body: some View {
@@ -246,7 +286,11 @@ private struct PlaylistRow: View {
         // `playlist.id` so scrolling this row's cell to a different playlist (cell reuse)
         // cancels the stale prefetch and starts the right one.
         .task(id: playlist.id) {
-            await ImageCache.shared.prefetchOriginalData(try? SubsonicClient.shared.coverArtURL(forId: playlist.coverArt ?? playlist.id.raw))
+            let artworkId = playlist.coverArt ?? playlist.id.raw
+            await ImageCache.shared.prefetchOriginalData(ArtworkRequest.playlistHeader(artworkId).url)
+            // And decoded (with the first songs' thumbnails), once the row has stayed on screen a
+            // moment, so the playlist's own screen opens with its images — see `ImageWarmer`.
+            await ImageWarmer.shared.warmPlaylist(id: playlist.id.raw, artworkId: artworkId)
         }
     }
 

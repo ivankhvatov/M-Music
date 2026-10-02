@@ -72,7 +72,7 @@ struct AlbumView: View {
         _backgroundColor = State(initialValue: Color(.systemBackground))
         _darkenedBackgroundColor = State(initialValue: Self.placeholderDarkenedBackground)
         _darkenedRelatedSectionBackground = State(initialValue: Self.placeholderDarkenedRelatedSectionBackground)
-        _artworkURL = State(initialValue: SubsonicClient.shared.cachedCoverArtURL(forId: album.coverArt ?? album.id.raw))
+        _artworkURL = State(initialValue: ArtworkRequest.albumHeader(album.coverArt ?? album.id.raw).url)
     }
 
     var body: some View {

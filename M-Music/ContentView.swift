@@ -42,6 +42,10 @@ struct MainView: View {
         .removeDuplicates()
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
+    /// Set once the launch warm-up has been started, so the `.active` that accompanies the launch
+    /// itself doesn't start it earlier — in the middle of the first frames.
+    @State private var didWarmAtLaunch = false
 
     var body: some View {
         TabBar()
@@ -65,7 +69,34 @@ struct MainView: View {
                 // First use of the image cache creates its directories synchronously; do it here
                 // rather than on the main thread when the first artwork view appears.
                 await Task.detached(priority: .utility) { _ = ImageCache.shared }.value
+                // With everything else settled, decode the artwork the screens are about to show
+                // — see `ImageWarmer`.
+                didWarmAtLaunch = true
+                await Self.warmImages()
             }
+            .onChange(of: scenePhase) { _, phase in
+                // iOS empties the in-memory image cache while the app is in the background, so a
+                // resume starts with every screen's artwork cold again; what's still decoded is
+                // skipped.
+                switch phase {
+                case .active where didWarmAtLaunch: Task { await Self.warmImages() }
+                case .background: Task { await ImageWarmer.shared.cancel() }
+                default: break
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
+                Task { await ImageWarmer.shared.memoryWasPurged() }
+            }
+    }
+
+    /// Warms Now Playing's artwork and the up-next queue's thumbnails, then each screen's
+    /// remembered first screenful, off the main actor.
+    private static func warmImages() async {
+        let player = PlayerManager.shared
+        let artworkURL = player.artworkURL
+        // The expanded player's queue list shows the tracks after the current one.
+        let upcoming = Array(player.queue.dropFirst((player.currentIndex ?? -1) + 1).prefix(ImageWarmer.destinationItemLimit))
+        await ImageWarmer.shared.warmAll(nowPlayingURL: artworkURL, upcoming: upcoming)
     }
 
     func TabBar() -> some View {

@@ -72,7 +72,22 @@ final class ImageCache: @unchecked Sendable {
     /// Requests in flight, keyed by the same stable key plus size tier as the memory cache, so a
     /// view's own load (or several views wanting the same image at once) share one fetch instead
     /// of racing duplicate ones.
-    private var inFlightTasks: [String: Task<UIImage?, Never>] = [:]
+    private var inFlightTasks: [String: InFlight] = [:]
+
+    /// One shared load, and how many callers are still waiting for it. When the last one leaves
+    /// (its view scrolled away, its screen was popped) the load is cancelled — see `load`.
+    private final class InFlight: @unchecked Sendable {
+        let task: Task<UIImage?, Never>
+        var waiters = 1
+        init(task: Task<UIImage?, Never>) { self.task = task }
+    }
+
+    /// Makes sure one caller only leaves an `InFlight` once, whether it finished or was cancelled.
+    private final class Departure: @unchecked Sendable {
+        private let lock = NSLock()
+        private var left = false
+        func claim() -> Bool { lock.withLock { defer { left = true }; return !left } }
+    }
 
     /// Decodes run one at a time, each followed by `decodeCooldown` of idle time before the next
     /// may start. Decoding is the CPU-heavy part of loading an image; without a bound, opening a
@@ -82,11 +97,16 @@ final class ImageCache: @unchecked Sendable {
     /// solid while a queue drains. Only cold decodes pay this: anything already in memory is
     /// returned before reaching the gate. Raise `limit` / lower the cooldown to trade CPU for
     /// artwork appearing sooner.
-    private let decodeGate = AsyncLimiter(limit: 1)
-    private static let decodeCooldown: Duration = .milliseconds(20)
+    private let decodeGate = AsyncLimiter(limit: 2)
+    private static let decodeCooldown: Duration = .milliseconds(10)
     /// Same idea for `prefetchOriginalData`'s downloads — not CPU-heavy, but a screen full of
     /// rows shouldn't open dozens of simultaneous connections either.
     private let prefetchGate = AsyncLimiter(limit: 4)
+    /// `preload`'s own gate: warm-ups queue up here one at a time, so at most one of them is ever
+    /// waiting at the `decodeGate` — an on-screen cell's decode is never stuck behind a backlog of
+    /// them — and the pause after each keeps a long warm-up from pinning a core.
+    private let warmGate = AsyncLimiter(limit: 1)
+    private static let warmCooldown: Duration = .milliseconds(40)
 
     init(
         regularDirectory: URL? = ImageCache.defaultRegularDirectory(),
@@ -132,36 +152,51 @@ final class ImageCache: @unchecked Sendable {
         let memKey = memoryKey(key, maxPixelSize: maxPixelSize)
         if let cached = memory.object(forKey: memKey) { return cached }
 
-        let (task, isNew) = inFlightTaskOrRegister(memKey: memKey, key: key, url: url, maxPixelSize: maxPixelSize)
-        let result = await task.value
-        if isNew {
-            clearInFlightTask(forKey: memKey as String)
+        let entry = joinOrStart(memKey: memKey, key: key, url: url, maxPixelSize: maxPixelSize)
+        let departure = Departure()
+        // A caller that goes away — a row scrolled off screen, a popped screen — stops waiting;
+        // once nobody is left waiting the load itself is cancelled, so a fast scroll doesn't leave
+        // a queue of decodes for images that are no longer visible ahead of the ones that are.
+        let result = await withTaskCancellationHandler {
+            await entry.task.value
+        } onCancel: {
+            leave(entry, memKey: memKey as String, departure)
         }
+        leave(entry, memKey: memKey as String, departure)
         return result
     }
 
-    /// Returns the in-flight task for `memKey` if one's already running, otherwise creates,
-    /// registers, and returns a new one — atomically, so two concurrent callers for the same
-    /// key can't both decide to start their own fetch. Synchronous (unlike `load` itself) so
-    /// the locking stays a plain, provably-safe critical section instead of straddling
-    /// `async` suspension points.
-    private func inFlightTaskOrRegister(
-        memKey: NSString, key: String, url: URL, maxPixelSize: Int?
-    ) -> (task: Task<UIImage?, Never>, isNew: Bool) {
+    /// Returns the in-flight load for `memKey` — counting the caller among its waiters — or
+    /// creates and registers a new one, atomically, so two concurrent callers for the same key
+    /// can't both decide to start their own fetch. Synchronous (unlike `load` itself) so the
+    /// locking stays a plain, provably-safe critical section instead of straddling `async`
+    /// suspension points.
+    private func joinOrStart(memKey: NSString, key: String, url: URL, maxPixelSize: Int?) -> InFlight {
         lock.withLock {
             if let existing = inFlightTasks[memKey as String] {
-                return (existing, false)
+                existing.waiters += 1
+                return existing
             }
             let task = Task<UIImage?, Never> { [weak self] in
                 await self?.fetch(url, key: key, memKey: memKey, maxPixelSize: maxPixelSize)
             }
-            inFlightTasks[memKey as String] = task
-            return (task, true)
+            let entry = InFlight(task: task)
+            inFlightTasks[memKey as String] = entry
+            return entry
         }
     }
 
-    private func clearInFlightTask(forKey key: String) {
-        lock.withLock { inFlightTasks[key] = nil }
+    /// A caller stops waiting for `entry`. The last one out unregisters it (so a later request
+    /// starts fresh rather than joining a cancelled load) and cancels it.
+    private func leave(_ entry: InFlight, memKey: String, _ departure: Departure) {
+        guard departure.claim() else { return }
+        let isLast = lock.withLock { () -> Bool in
+            entry.waiters -= 1
+            guard entry.waiters == 0 else { return false }
+            if inFlightTasks[memKey] === entry { inFlightTasks[memKey] = nil }
+            return true
+        }
+        if isLast { entry.task.cancel() }
     }
 
     private func fetch(_ url: URL, key: String, memKey: NSString, maxPixelSize: Int?) async -> UIImage? {
@@ -170,6 +205,12 @@ final class ImageCache: @unchecked Sendable {
         guard let data = await originalData(for: url, key: key) else { return nil }
 
         await decodeGate.acquire()
+        // Cancelled while waiting its turn (nobody wants this image any more): give the slot
+        // straight back, with no decode and no cooldown.
+        if Task.isCancelled {
+            await decodeGate.release()
+            return nil
+        }
         let image = decodedImage(from: data, maxPixelSize: maxPixelSize)
         if let image { store(image, forKey: memKey) }
         // The cooldown runs in its own task, holding the slot, so this image is handed back to
@@ -217,6 +258,55 @@ final class ImageCache: @unchecked Sendable {
         guard !Task.isCancelled else { return }
         guard let data = await downloadImageData(url) else { return }
         writeRegular(data, forKey: key)
+    }
+
+    /// Whether `request`'s decoded image is already in memory.
+    func isCached(_ request: ArtworkRequest) -> Bool {
+        guard let url = request.url else { return false }
+        return image(for: url, maxPixelSize: request.maxPixelSize) != nil
+    }
+
+    /// Decodes `request`'s image into memory ahead of the screen that will show it, so that screen
+    /// opens with the image already on its first frame (`CachedAsyncImage` reads memory at init)
+    /// instead of a placeholder that fills in after a disk read and a decode.
+    ///
+    /// Warm-ups go through their own gate — one at a time, with a longer pause after each — and
+    /// then through the ordinary `load`, so they never start a burst of decodes, and a view that
+    /// wants the same image meanwhile just joins the in-flight load. Cancellable (call it from a
+    /// task that's cancelled when the screen or row goes away). Without `allowNetwork` an image
+    /// that isn't already on disk is skipped: bulk warming must never fan out into downloads.
+    /// `paced: false` skips the warm-up gate and its pause, for a screen that's already open and
+    /// waiting on these images (it still goes through the decode gate, one at a time).
+    /// Returns whether the image is in memory afterwards.
+    @discardableResult
+    func preload(_ request: ArtworkRequest, allowNetwork: Bool = false, paced: Bool = true) async -> Bool {
+        guard let url = request.url else { return false }
+        return await preload(url, maxPixelSize: request.maxPixelSize, allowNetwork: allowNetwork, paced: paced)
+    }
+
+    /// `preload(_:allowNetwork:paced:)` for a URL that's already in hand (Now Playing's `artworkURL`).
+    @discardableResult
+    func preload(_ url: URL, maxPixelSize: Int?, allowNetwork: Bool = false, paced: Bool = true) async -> Bool {
+        guard !Task.isCancelled else { return false }
+        let key = stableKey(for: url)
+        let memKey = memoryKey(key, maxPixelSize: maxPixelSize)
+        if memory.object(forKey: memKey) != nil { return true }
+        if !allowNetwork, !fileExists(regularURL(forKey: key)), !fileExists(permanentURL(forKey: key)) {
+            return false
+        }
+        guard paced else { return await load(url, maxPixelSize: maxPixelSize) != nil }
+
+        await warmGate.acquire()
+        let gate = warmGate
+        defer {
+            Task {
+                try? await Task.sleep(for: Self.warmCooldown)
+                await gate.release()
+            }
+        }
+        guard !Task.isCancelled else { return false }
+        if memory.object(forKey: memKey) != nil { return true }
+        return await load(url, maxPixelSize: maxPixelSize) != nil
     }
 
     /// Makes sure `url`'s image is saved in *both* the regular cache and the permanent one,

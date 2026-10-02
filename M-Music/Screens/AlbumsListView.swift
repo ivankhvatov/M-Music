@@ -95,6 +95,10 @@ struct AlbumsListView: View {
         LibraryDisplayStyle(storageKey: displayStyleStorage)
     }
 
+    /// Keeps the content hidden on first open until the first screenful's images are in memory.
+    @State private var imageReadiness = ImageReadiness()
+    /// Where each displayed row is, for warming the ones below a row that scrolls into view.
+    @State private var rowPositions = RowPositions()
     @State private var albums: [AlbumID3] = []
     /// Cached result of filtering/sorting `albums`, recomputed only by `recompute()`
     /// (see its call sites) rather than on every `body` evaluation — `body` reads it 2-3 times a
@@ -140,6 +144,11 @@ struct AlbumsListView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if !imageReadiness.isReady {
+                // Opened before the first screenful's images were ready: hold the content back
+                // until they are (see `ImageReadiness`) rather than showing placeholders.
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 switch displayStyle {
                 case .grid:
@@ -178,6 +187,7 @@ struct AlbumsListView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(!isAvailable(album))
+                .onAppear { warmAhead(after: album) }
             }
         }
         .padding(.horizontal, 16)
@@ -192,6 +202,7 @@ struct AlbumsListView: View {
                 }
                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                 .disabled(!isAvailable(album))
+                .onAppear { warmAhead(after: album) }
             }
         }
         .listStyle(.plain)
@@ -247,6 +258,7 @@ struct AlbumsListView: View {
                 }
                 : result.displayed
             isLoading = false
+            rememberFirstScreenful()
         })
     }
 
@@ -265,6 +277,35 @@ struct AlbumsListView: View {
                 return spec.ascending ? lhsYear < rhsYear : lhsYear > rhsYear
             }
         }
+    }
+
+    /// The requests the screen's cards or rows make for `albums`, in the current display style.
+    private func artworkRequests(for albums: ArraySlice<AlbumID3>) -> [ArtworkRequest] {
+        let isGrid = displayStyle == .grid
+        let scale = displayScale
+        return albums.map { album in
+            let artworkId = album.coverArt ?? album.id.raw
+            return isGrid ? .albumCard(artworkId) : .albumRow(artworkId, scale: scale)
+        }
+    }
+
+    /// A row scrolled into view: warm the ones just below it, so a fast scroll finds them ready.
+    private func warmAhead(after album: AlbumID3) {
+        guard let index = rowPositions.position(of: album.id.raw),
+              displayedAlbums.indices.contains(index), displayedAlbums[index].id == album.id else { return }
+        let requests = artworkRequests(for: displayedAlbums[(index + 1)...].prefix(ImageWarmer.scrollAheadCount))
+        guard !requests.isEmpty else { return }
+        Task { await ImageWarmer.shared.warmAhead(requests) }
+    }
+
+    /// Tells `ImageWarmer` what this screen shows first, so its artwork is decoded ahead of the
+    /// next visit (a search's results aren't what the screen normally opens with).
+    private func rememberFirstScreenful() {
+        rowPositions.update(ids: displayedAlbums.map { $0.id.raw })
+        let requests = artworkRequests(for: displayedAlbums.prefix(ImageWarmer.manifestLimit))
+        imageReadiness.require(requests)
+        guard searchText.isEmpty else { return }
+        Task { await ImageWarmer.shared.remember(.albums, requests) }
     }
 
     /// Whether the offline "hide what isn't downloaded" filter is currently in effect — the only
@@ -430,8 +471,7 @@ private struct AlbumRow: View {
     init(album: AlbumID3, zoomNamespace: Namespace.ID? = nil, displayScale: CGFloat) {
         self.album = album
         self.zoomNamespace = zoomNamespace
-        let pixelSize = ImageCache.RowArtwork.pixels(rowArtworkSize, scale: displayScale)
-        _artworkURL = State(initialValue: SubsonicClient.shared.cachedCoverArtURL(forId: album.coverArt ?? album.id.raw, size: pixelSize))
+        _artworkURL = State(initialValue: ArtworkRequest.albumRow(album.coverArt ?? album.id.raw, scale: displayScale).url)
     }
 
     var body: some View {
@@ -454,7 +494,11 @@ private struct AlbumRow: View {
         // `album.id` so scrolling this row's cell to a different album (cell reuse) cancels the
         // stale prefetch and starts the right one.
         .task(id: album.id) {
-            await ImageCache.shared.prefetchOriginalData(try? SubsonicClient.shared.coverArtURL(forId: album.coverArt ?? album.id.raw))
+            let artworkId = album.coverArt ?? album.id.raw
+            await ImageCache.shared.prefetchOriginalData(ArtworkRequest.albumHeader(artworkId).url)
+            // And decoded, once the row has stayed on screen a moment, so the album's own screen
+            // opens with its header already in memory — see `ImageWarmer`.
+            await ImageWarmer.shared.warmAlbum(id: album.id.raw, artworkId: artworkId)
         }
     }
 

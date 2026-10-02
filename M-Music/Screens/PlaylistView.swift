@@ -51,7 +51,7 @@ struct PlaylistView: View {
         self.zoomNamespace = zoomNamespace
         _backgroundColor = State(initialValue: Color(.systemBackground))
         _darkenedBackgroundColor = State(initialValue: Self.placeholderDarkenedBackground)
-        _artworkURL = State(initialValue: SubsonicClient.shared.cachedCoverArtURL(forId: playlist.coverArt ?? playlist.id.raw))
+        _artworkURL = State(initialValue: ArtworkRequest.playlistHeader(playlist.coverArt ?? playlist.id.raw).url)
     }
 
     var body: some View {

@@ -206,3 +206,231 @@ struct ImageCacheTests {
         #expect(dirs.fileCount(dirs.permanent) == 0)
     }
 }
+
+/// In an extension of `ImageCacheTests`, not a suite of their own: they share `ImageStub`'s
+/// request counter, so they must not run in parallel with the tests above.
+extension ImageCacheTests {
+    @Test func preloadingFromDiskPutsTheDecodedImageInMemory() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        let url = coverURL("al-1")
+        await dirs.makeCache().load(url)          // fills the regular cache
+        let relaunched = dirs.makeCache()          // empty memory, like after a launch or a resume
+        #expect(relaunched.image(for: url) == nil)
+
+        let warmed = await relaunched.preload(url, maxPixelSize: ImageCache.standardMaxPixelSize)
+        #expect(warmed)
+        #expect(relaunched.image(for: url) != nil)
+        #expect(ImageStub.requestCount == 1)
+    }
+
+    @Test func bulkPreloadNeverGoesToTheNetwork() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        let cache = dirs.makeCache()
+        let url = coverURL("al-2")
+
+        let warmed = await cache.preload(url, maxPixelSize: ImageCache.standardMaxPixelSize)
+        #expect(!warmed)
+        #expect(ImageStub.requestCount == 0)
+        #expect(cache.image(for: url) == nil)
+    }
+
+    @Test func preloadCanFetchWhenAskedTo() async {
+        ImageStub.reset()
+        let cache = Directories().makeCache()
+        let url = coverURL("al-3")
+
+        #expect(await cache.preload(url, maxPixelSize: nil, allowNetwork: true))
+        #expect(ImageStub.requestCount == 1)
+        #expect(cache.image(for: url, maxPixelSize: nil) != nil)
+    }
+
+    @Test func preloadFindsTheImageInThePermanentCacheAfterARegularPurge() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        let url = coverURL("al-4")
+        let first = dirs.makeCache()
+        await first.load(url)
+        await first.savePermanently(url)
+        dirs.purgeRegular()
+
+        let relaunched = dirs.makeCache()
+        #expect(await relaunched.preload(url, maxPixelSize: ImageCache.standardMaxPixelSize))
+        #expect(ImageStub.requestCount == 1)
+    }
+
+    @Test func anImageAlreadyInMemoryIsNotLoadedAgain() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        let cache = dirs.makeCache()
+        let url = coverURL("al-5")
+        await cache.load(url)
+        dirs.purgeRegular()                        // nothing left to read: only memory has it
+
+        #expect(await cache.preload(url, maxPixelSize: ImageCache.standardMaxPixelSize))
+        #expect(ImageStub.requestCount == 1)
+    }
+
+    @Test func aPreloadAtOneTierDoesNotStandInForAnother() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        let url = coverURL("al-6")
+        await dirs.makeCache().load(url)
+        let cache = dirs.makeCache()
+
+        #expect(await cache.preload(url, maxPixelSize: ImageCache.cardMaxPixelSize))
+        #expect(cache.image(for: url, maxPixelSize: ImageCache.cardMaxPixelSize) != nil)
+        #expect(cache.image(for: url, maxPixelSize: ImageCache.standardMaxPixelSize) == nil)
+    }
+
+    @Test func aSigningDifferenceDoesNotMakeAPreloadMiss() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        await dirs.makeCache().load(coverURL("al-7", token: "old"))
+        let cache = dirs.makeCache()
+
+        await cache.preload(coverURL("al-7", token: "old"), maxPixelSize: ImageCache.standardMaxPixelSize)
+        #expect(cache.image(for: coverURL("al-7", token: "new")) != nil)
+    }
+
+    @Test func anUnpacedPreloadDecodesTheSameWay() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        let url = coverURL("al-9")
+        await dirs.makeCache().load(url)
+        let cache = dirs.makeCache()
+
+        #expect(await cache.preload(url, maxPixelSize: ImageCache.standardMaxPixelSize, paced: false))
+        #expect(cache.image(for: url) != nil)
+    }
+
+    @Test func cancellingOneWaiterDoesNotCancelTheLoadAnotherNeeds() async {
+        ImageStub.reset()
+        let cache = Directories().makeCache()
+        let url = coverURL("al-10")
+
+        let leaving = Task { await cache.load(url) }
+        let staying = Task { await cache.load(url) }
+        leaving.cancel()
+        #expect(await staying.value != nil)
+        #expect(cache.image(for: url) != nil)
+    }
+
+    @Test func aLoadEveryoneGaveUpOnCanBeStartedAgain() async {
+        ImageStub.reset()
+        let cache = Directories().makeCache()
+        let url = coverURL("al-11")
+
+        let abandoned = Task { await cache.load(url) }
+        abandoned.cancel()
+        _ = await abandoned.value
+        #expect(await cache.load(url) != nil)
+        #expect(cache.image(for: url) != nil)
+    }
+
+    @Test func aCancelledPreloadDoesNothing() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        let url = coverURL("al-8")
+        await dirs.makeCache().load(url)
+        let cache = dirs.makeCache()
+
+        let task = Task { () -> Bool in
+            try? await Task.sleep(for: .seconds(5))
+            return await cache.preload(url, maxPixelSize: ImageCache.standardMaxPixelSize)
+        }
+        task.cancel()
+        #expect(await task.value == false)
+        #expect(cache.image(for: url) == nil)
+    }
+}
+
+@Suite(.serialized)
+struct ImageWarmerManifestTests {
+    private func makeWarmer() -> ImageWarmer {
+        let suite = "ImageWarmerTests-\(UUID().uuidString)"
+        return ImageWarmer(defaults: UserDefaults(suiteName: suite)!, cache: Directories().makeCache(), scale: { 3 })
+    }
+
+    @Test func aRememberedFirstScreenfulComesBackInOrder() async {
+        let warmer = makeWarmer()
+        let requests = (0..<5).map { ArtworkRequest.albumCard("al-\($0)") }
+        await warmer.remember(.albums, requests)
+        #expect(await warmer.manifest(for: .albums) == requests)
+        #expect(await warmer.manifest(for: .artists).isEmpty)
+    }
+
+    @Test func onlyTheFirstScreenfulIsKept() async {
+        let warmer = makeWarmer()
+        let requests = (0..<100).map { ArtworkRequest.songRow("s-\($0)", scale: 3) }
+        await warmer.remember(.songs, requests)
+        #expect(await warmer.manifest(for: .songs) == Array(requests.prefix(ImageWarmer.manifestLimit)))
+    }
+
+    @Test func requestsKeepTheTierTheViewsUse() {
+        #expect(ArtworkRequest.albumCard("a").maxPixelSize == ImageCache.cardMaxPixelSize)
+        #expect(ArtworkRequest.albumCard("a").size == nil)
+        #expect(ArtworkRequest.albumRow("a", scale: 3).size == ImageCache.RowArtwork.pixels(ImageCache.RowArtwork.album, scale: 3))
+        #expect(ArtworkRequest.albumRow("a", scale: 3).maxPixelSize == ImageCache.standardMaxPixelSize)
+        #expect(ArtworkRequest.albumHeader("a").maxPixelSize == ImageCache.standardMaxPixelSize)
+        #expect(ArtworkRequest.artistRow("a", scale: 2).maxPixelSize == ImageCache.avatarMaxPixelSize)
+        #expect(ArtworkRequest.artistHeader("a").maxPixelSize == ImageCache.cardMaxPixelSize)
+        #expect(ArtworkRequest.nowPlaying("a").maxPixelSize == nil)
+        #expect(ArtworkRequest.colorSampling("a").maxPixelSize == ImageCache.colorSamplingMaxPixelSize)
+    }
+}
+
+@Suite(.serialized)
+struct ArtistAlbumOrderingTests {
+    private func album(_ id: String, _ name: String, year: Int, type: String? = nil) -> AlbumID3 {
+        let json = """
+        {"id":"\(id)","name":"\(name)","year":\(year),"songCount":1,"duration":1,"created":"2024-01-01T00:00:00Z"\(type.map { ",\"releaseTypes\":[\"\($0)\"]" } ?? "")}
+        """
+        return try! JSONDecoder().decode(AlbumID3.self, from: Data(json.utf8))
+    }
+
+    private var albums: [AlbumID3] {
+        [album("a", "Beta", year: 2001), album("b", "Alpha", year: 2010), album("c", "Gamma", year: 1999)]
+    }
+
+    @Test func theFirstScreenfulFollowsTheSelectedSortFieldAndOrder() {
+        func ids(_ settings: ArtistAlbumOrdering.Settings) -> [String] {
+            ArtistAlbumOrdering.firstScreenful(of: albums, settings: settings, limit: 2).map(\.id.raw)
+        }
+        #expect(ids(.init(field: .title, ascending: true)) == ["b", "a"])
+        #expect(ids(.init(field: .title, ascending: false)) == ["c", "a"])
+        #expect(ids(.init(field: .year, ascending: true)) == ["c", "a"])
+        #expect(ids(.init(field: .year, ascending: false)) == ["b", "a"])
+    }
+
+    @Test func separatedReleaseTypesListTheFirstCardsOfEachCarouselInFixedOrder() {
+        let mixed = [
+            album("s1", "Zed", year: 2020, type: "single"),
+            album("l1", "Live", year: 2019, type: "album"),
+            album("l2", "Another", year: 2018, type: "album"),
+        ]
+        let settings = ArtistAlbumOrdering.Settings(field: .title, ascending: true, separateReleaseTypes: true)
+        let ids = ArtistAlbumOrdering.firstScreenful(of: mixed, settings: settings, limit: 12).map(\.id.raw)
+        #expect(ids == ["l2", "l1", "s1"])
+    }
+
+    @Test func settingsAreReadFromTheSameDefaultsKeysTheViewStores() {
+        let defaults = UserDefaults(suiteName: "ordering-\(UUID().uuidString)")!
+        defaults.set("year", forKey: "artistAlbums.sortField")
+        defaults.set("descending", forKey: "artistAlbums.sortOrder")
+        defaults.set(true, forKey: "library.separateReleaseTypes")
+        let settings = ArtistAlbumOrdering.Settings.stored(in: defaults)
+        #expect(settings == .init(field: .year, ascending: false, groupVersions: false, separateReleaseTypes: true))
+    }
+}
+
+@MainActor
+struct ImageReadinessTests {
+    @Test func aScreenWithNothingToWaitForIsReadyAtOnce() {
+        let readiness = ImageReadiness()
+        #expect(!readiness.isReady)
+        readiness.require([])
+        #expect(readiness.isReady)
+    }
+}

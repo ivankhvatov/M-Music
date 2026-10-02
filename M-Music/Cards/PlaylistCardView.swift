@@ -19,7 +19,7 @@ struct PlaylistCardView: View {
     init(playlist: PlaylistSummary, zoomNamespace: Namespace.ID? = nil) {
         self.playlist = playlist
         self.zoomNamespace = zoomNamespace
-        _artworkURL = State(initialValue: SubsonicClient.shared.cachedCoverArtURL(forId: playlist.coverArt ?? playlist.id.raw))
+        _artworkURL = State(initialValue: ArtworkRequest.playlistCard(playlist.coverArt ?? playlist.id.raw).url)
     }
 
     @ObservedObject private var downloads = DownloadStore.shared
@@ -41,6 +41,11 @@ struct PlaylistCardView: View {
                 .padding(.top, -3)
         }
         .dimmedIfUnavailable(isAvailable)
+        // Warms what the playlist's own screen will show (header, first songs' thumbnails) once
+        // the card has stayed on screen a moment — see `ImageWarmer`.
+        .task(id: playlist.id) {
+            await ImageWarmer.shared.warmPlaylist(id: playlist.id.raw, artworkId: playlist.coverArt ?? playlist.id.raw)
+        }
     }
 
     /// Nothing is ever "unavailable" while online — only offline does whether this playlist has
@@ -68,7 +73,7 @@ struct PlaylistCardView: View {
                 // Same URL PlaylistView requests (original size, no `size` param), so opening
                 // this playlist reuses the image straight from ImageCache instead of triggering
                 // a second fetch — see CachedAsyncImage.
-                CachedAsyncImage(url: artworkURL, maxPixelSize: ImageCache.cardMaxPixelSize, loadDelay: .milliseconds(150)) { image in
+                CachedAsyncImage(url: artworkURL, maxPixelSize: ImageCache.cardMaxPixelSize, loadDelay: .milliseconds(50)) { image in
                     image
                         .resizable()
                         .aspectRatio(contentMode: .fit)

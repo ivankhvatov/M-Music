@@ -24,7 +24,7 @@ struct AlbumCardView: View {
         self.album = album
         self.zoomNamespace = zoomNamespace
         self.subtitle = subtitle
-        _artworkURL = State(initialValue: SubsonicClient.shared.cachedCoverArtURL(forId: album.coverArt ?? album.id.raw))
+        _artworkURL = State(initialValue: ArtworkRequest.albumCard(album.coverArt ?? album.id.raw).url)
     }
 
     @ObservedObject private var downloads = DownloadStore.shared
@@ -80,7 +80,7 @@ struct AlbumCardView: View {
                 // Same URL AlbumView requests (original size, no `size` param), so opening this
                 // album reuses the image straight from ImageCache instead of triggering a second
                 // fetch — see CachedAsyncImage.
-                CachedAsyncImage(url: artworkURL, maxPixelSize: ImageCache.cardMaxPixelSize, loadDelay: .milliseconds(150)) { image in
+                CachedAsyncImage(url: artworkURL, maxPixelSize: ImageCache.cardMaxPixelSize, loadDelay: .milliseconds(50)) { image in
                     image
                         .resizable()
                         .aspectRatio(contentMode: .fit)

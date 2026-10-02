@@ -116,6 +116,10 @@ struct SongsListView: View {
     /// changes — see `AlbumsListView.sortedAlbums`. For a library of thousands of tracks the sort
     /// is the expensive part; filtering (search, favorites, offline) preserves this order.
     @State private var sortedSongs: [Child] = []
+    /// Keeps the content hidden on first open until the first screenful's images are in memory.
+    @State private var imageReadiness = ImageReadiness()
+    /// Where each displayed row is, for warming the ones below a row that scrolls into view.
+    @State private var rowPositions = RowPositions()
     /// Sorts/filters off the main actor — see `OffMainDeriver`.
     @State private var deriver = OffMainDeriver()
 
@@ -140,6 +144,11 @@ struct SongsListView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if !imageReadiness.isReady {
+                // Opened before the first screenful's images were ready: hold the content back
+                // until they are (see `ImageReadiness`) rather than showing placeholders.
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
                     ForEach(displayedSongs) { track in
@@ -150,6 +159,7 @@ struct SongsListView: View {
                             onPlay: { play(track) }
                         )
                         .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                        .onAppear { warmAhead(after: track) }
                     }
                 }
                 .listStyle(.plain)
@@ -233,7 +243,32 @@ struct SongsListView: View {
                 ? result.displayed.filter { downloads.isDownloaded($0.id.raw) }
                 : result.displayed
             isLoading = false
+            rememberFirstScreenful()
         })
+    }
+
+    private func artworkRequests(for songs: ArraySlice<Child>) -> [ArtworkRequest] {
+        let scale = displayScale
+        return songs.map { ArtworkRequest.songRow(ArtworkRequest.artworkId(of: $0), scale: scale) }
+    }
+
+    /// A row scrolled into view: warm the ones just below it, so a fast scroll finds them ready.
+    private func warmAhead(after track: Child) {
+        guard let index = rowPositions.position(of: track.id.raw),
+              displayedSongs.indices.contains(index), displayedSongs[index].id == track.id else { return }
+        let requests = artworkRequests(for: displayedSongs[(index + 1)...].prefix(ImageWarmer.scrollAheadCount))
+        guard !requests.isEmpty else { return }
+        Task { await ImageWarmer.shared.warmAhead(requests) }
+    }
+
+    /// Tells `ImageWarmer` what this screen shows first, so its artwork is decoded ahead of the
+    /// next visit (a search's results aren't what the screen normally opens with).
+    private func rememberFirstScreenful() {
+        rowPositions.update(ids: displayedSongs.map { $0.id.raw })
+        let requests = artworkRequests(for: displayedSongs.prefix(ImageWarmer.manifestLimit))
+        imageReadiness.require(requests)
+        guard searchText.isEmpty else { return }
+        Task { await ImageWarmer.shared.remember(.songs, requests) }
     }
 
     private nonisolated static func sorted(_ songs: [Child], _ spec: DerivationSpec) -> [Child] {
@@ -437,18 +472,6 @@ struct SongRow: View {
     /// time. Mirrors the fix already applied to `AlbumView`'s artwork URL.
     @State private var artworkURL: URL?
 
-    /// Caches a signed artwork URL by art id + pixel size, so repeatedly constructing a `SongRow`
-    /// for the *same* track — e.g. the queue list's dragged row, reconstructed on every gesture
-    /// callback while it tracks the finger — doesn't redo `coverArtURL`'s signing (a random salt
-    /// plus an MD5 hash, hex-formatted byte by byte) each time purely to throw the result away
-    /// via `@State`'s first-appearance-only semantics. Subsonic's salt+token scheme has no
-    /// server-side single-use/expiry tracking — the server just recomputes the hash from the
-    /// salt and password — so a cached URL keeps working for as long as the credentials do; this
-    /// is safe to reuse indefinitely within a session, not just across one render pass. Plain
-    /// `static var`, not an actor: `SongRow.init` only ever runs on the main thread (SwiftUI
-    /// constructs views on the main actor), so there's nothing concurrent to guard against.
-    private static var artworkURLCache: [String: URL] = [:]
-
     init(
         track: Child,
         rowArtworkSize: CGFloat,
@@ -463,16 +486,7 @@ struct SongRow: View {
         self.showsReorderHandle = showsReorderHandle
         self.onReorderDragChanged = onReorderDragChanged
         self.onReorderDragEnded = onReorderDragEnded
-        let artId = track.coverArt ?? track.albumId?.raw ?? track.id.raw
-        let pixelSize = ImageCache.RowArtwork.pixels(rowArtworkSize, scale: displayScale)
-        let cacheKey = "\(artId)#\(pixelSize)"
-        if let cached = Self.artworkURLCache[cacheKey] {
-            _artworkURL = State(initialValue: cached)
-        } else {
-            let resolved = try? SubsonicClient.shared.coverArtURL(forId: artId, size: pixelSize)
-            if let resolved { Self.artworkURLCache[cacheKey] = resolved }
-            _artworkURL = State(initialValue: resolved)
-        }
+        _artworkURL = State(initialValue: ArtworkRequest.songRow(ArtworkRequest.artworkId(of: track), scale: displayScale).url)
     }
 
     var body: some View {

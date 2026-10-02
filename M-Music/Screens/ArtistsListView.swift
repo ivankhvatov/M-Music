@@ -58,6 +58,10 @@ struct ArtistsListView: View {
     @State private var isLoading = false
     @State private var loadError: String?
     @State private var hasLoadedOnce = false
+    /// Keeps the content hidden on first open until the first screenful's images are in memory.
+    @State private var imageReadiness = ImageReadiness()
+    /// Where each displayed row is, for warming the ones below a row that scrolls into view.
+    @State private var rowPositions = RowPositions()
 
     @AppStorage("artistsList.filterOption") private var filterOptionStorage = ArtistFilterOption.all.storageKey
     @AppStorage("artistsList.sortOrder") private var sortOrderStorage = ArtistSortOrder.ascending.storageKey
@@ -97,6 +101,11 @@ struct ArtistsListView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if !imageReadiness.isReady {
+                // Opened before the first screenful's images were ready: hold the content back
+                // until they are (see `ImageReadiness`) rather than showing placeholders.
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
                     ForEach(displayedArtists) { artist in
@@ -105,6 +114,7 @@ struct ArtistsListView: View {
                         }
                         .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                         .disabled(!isAvailable(artist))
+                        .onAppear { warmAhead(after: artist) }
                     }
                 }
                 .listStyle(.plain)
@@ -166,7 +176,31 @@ struct ArtistsListView: View {
                 }
                 : result.displayed
             isLoading = false
+            rememberFirstScreenful()
         })
+    }
+
+    private func artworkRequests(for artists: ArraySlice<ArtistID3>) -> [ArtworkRequest] {
+        artists.map { ArtworkRequest.artistRow($0.coverArt ?? $0.id.raw, scale: displayScale) }
+    }
+
+    /// A row scrolled into view: warm the ones just below it, so a fast scroll finds them ready.
+    private func warmAhead(after artist: ArtistID3) {
+        guard let index = rowPositions.position(of: artist.id.raw),
+              displayedArtists.indices.contains(index), displayedArtists[index].id == artist.id else { return }
+        let requests = artworkRequests(for: displayedArtists[(index + 1)...].prefix(ImageWarmer.scrollAheadCount))
+        guard !requests.isEmpty else { return }
+        Task { await ImageWarmer.shared.warmAhead(requests) }
+    }
+
+    /// Tells `ImageWarmer` what this screen shows first, so its artwork is decoded ahead of the
+    /// next visit (a search's results aren't what the screen normally opens with).
+    private func rememberFirstScreenful() {
+        rowPositions.update(ids: displayedArtists.map { $0.id.raw })
+        let requests = artworkRequests(for: displayedArtists.prefix(ImageWarmer.manifestLimit))
+        imageReadiness.require(requests)
+        guard searchText.isEmpty else { return }
+        Task { await ImageWarmer.shared.remember(.artists, requests) }
     }
 
     /// See `AlbumsListView.offlineFilterActive`.
@@ -296,8 +330,7 @@ private struct ArtistRow: View {
     /// cache saves for artists with downloaded songs (see `DownloadedArtwork`).
     init(artist: ArtistID3, displayScale: CGFloat) {
         self.artist = artist
-        let pixelSize = ImageCache.RowArtwork.pixels(rowArtworkSize, scale: displayScale)
-        _artworkURL = State(initialValue: SubsonicClient.shared.cachedCoverArtURL(forId: artist.coverArt ?? artist.id.raw, size: pixelSize))
+        _artworkURL = State(initialValue: ArtworkRequest.artistRow(artist.coverArt ?? artist.id.raw, scale: displayScale).url)
     }
 
     @ObservedObject private var downloads = DownloadStore.shared
@@ -305,7 +338,7 @@ private struct ArtistRow: View {
 
     var body: some View {
         HStack(spacing: 16) {
-            CachedAsyncImage(url: artworkURL, maxPixelSize: ImageCache.avatarMaxPixelSize, loadDelay: .milliseconds(150)) { image in
+            CachedAsyncImage(url: artworkURL, maxPixelSize: ImageCache.avatarMaxPixelSize, loadDelay: .milliseconds(50)) { image in
                 image
                     .resizable()
                     .aspectRatio(contentMode: .fill)
@@ -324,6 +357,14 @@ private struct ArtistRow: View {
                 .font(.body)
         }
         .dimmedIfUnavailable(networkMonitor.isOnline || downloads.hasDownloadedSong(byArtist: artist.name))
+        // The artist's own screen opens with its picture and first albums' covers already
+        // decoded: fetched to disk, then decoded once the row has stayed on screen a moment —
+        // see `ImageWarmer`. Keyed to `artist.id` so a reused cell cancels the stale one.
+        .task(id: artist.id) {
+            let artworkId = artist.coverArt ?? artist.id.raw
+            await ImageCache.shared.prefetchOriginalData(ArtworkRequest.artistHeader(artworkId).url)
+            await ImageWarmer.shared.warmArtist(id: artist.id.raw, artworkId: artworkId)
+        }
     }
 }
 

@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-private enum ArtistAlbumSortField: LocalizedStringKey, CaseIterable {
+enum ArtistAlbumSortField: LocalizedStringKey, CaseIterable {
     case title = "Title"
     case year = "Year"
 
@@ -23,7 +23,7 @@ private enum ArtistAlbumSortField: LocalizedStringKey, CaseIterable {
     }
 }
 
-private enum ArtistAlbumSortOrder: LocalizedStringKey, CaseIterable {
+enum ArtistAlbumSortOrder: LocalizedStringKey, CaseIterable {
     case ascending = "Ascending"
     case descending = "Descending"
 
@@ -42,7 +42,7 @@ private enum ArtistAlbumSortOrder: LocalizedStringKey, CaseIterable {
 /// Buckets for the RELEASETYPE tag (OpenSubsonic), recognized case-insensitively in both
 /// singular and plural form. `allCases` is declared in the exact order carousels should appear
 /// in, with anything unrecognized (including no tag at all) falling into `.other`.
-private enum ReleaseTypeCategory: LocalizedStringKey, CaseIterable, Hashable {
+enum ReleaseTypeCategory: LocalizedStringKey, CaseIterable, Hashable {
     case album = "Albums"
     case ep = "EPs"
     case single = "Singles"
@@ -61,6 +61,62 @@ private enum ReleaseTypeCategory: LocalizedStringKey, CaseIterable, Hashable {
         case "instrumental", "instrumentals": self = .instrumental
         default: self = .other
         }
+    }
+}
+
+/// The order `ArtistAlbumsView` shows an artist's albums in, for the user's selected settings
+/// (sort field and order, "Group release versions", "Separate release types"). A pure function of
+/// those settings so the view and `ImageWarmer` — which has to decode the covers that will really
+/// be first on screen, not the first ones in the server's order — can't disagree.
+enum ArtistAlbumOrdering {
+    struct Settings: Equatable, Sendable {
+        var field: ArtistAlbumSortField = .title
+        var ascending = true
+        var groupVersions = false
+        var separateReleaseTypes = false
+
+        /// The settings as the view's `@AppStorage` properties currently hold them.
+        static func stored(in defaults: UserDefaults = .standard) -> Settings {
+            Settings(
+                field: ArtistAlbumSortField(storageKey: defaults.string(forKey: "artistAlbums.sortField") ?? ""),
+                ascending: ArtistAlbumSortOrder(storageKey: defaults.string(forKey: "artistAlbums.sortOrder") ?? "") == .ascending,
+                groupVersions: defaults.bool(forKey: "library.groupReleaseVersions"),
+                separateReleaseTypes: defaults.bool(forKey: "library.separateReleaseTypes")
+            )
+        }
+    }
+
+    /// `albums` sorted by the selected field and order.
+    static func sorted(_ albums: [AlbumID3], field: ArtistAlbumSortField, ascending: Bool) -> [AlbumID3] {
+        switch field {
+        case .title:
+            return albums.sortedByLocalizedKey(ascending: ascending) { $0.name.sortKey }
+        case .year:
+            return albums.sorted { lhs, rhs in
+                let lhsYear = lhs.year ?? 0
+                let rhsYear = rhs.year ?? 0
+                return ascending ? lhsYear < rhsYear : lhsYear > rhsYear
+            }
+        }
+    }
+
+    /// Buckets sorted albums by release type: each bucket keeps the sort internally, but the
+    /// buckets themselves always come in the order `ReleaseTypeCategory.allCases` declares.
+    static func releaseTypeGroups(_ sorted: [AlbumID3]) -> [(category: ReleaseTypeCategory, albums: [AlbumID3])] {
+        let buckets = Dictionary(grouping: sorted, by: { ReleaseTypeCategory(rawTag: $0.releaseTypes?.first) })
+        return ReleaseTypeCategory.allCases.compactMap { category in
+            buckets[category].map { (category: category, albums: $0) }
+        }
+    }
+
+    /// The albums an artist's screen shows first: the top of the grid, or — with release types
+    /// separated into carousels — the first few cards of each carousel, top carousel first.
+    static func firstScreenful(of albums: [AlbumID3], settings: Settings, limit: Int, perCarousel: Int = 4) -> [AlbumID3] {
+        let candidates = settings.groupVersions ? albums.groupedByPreferredVersion() : albums
+        let sorted = sorted(candidates, field: settings.field, ascending: settings.ascending)
+        let groups = releaseTypeGroups(sorted)
+        guard settings.separateReleaseTypes, groups.count > 1 else { return Array(sorted.prefix(limit)) }
+        return Array(groups.flatMap { $0.albums.prefix(perCarousel) }.prefix(limit))
     }
 }
 
@@ -114,7 +170,7 @@ struct ArtistAlbumsView: View {
 
     init(artist: ArtistID3) {
         self.artist = artist
-        _artworkURL = State(initialValue: SubsonicClient.shared.cachedCoverArtURL(forId: artist.coverArt ?? artist.id.raw))
+        _artworkURL = State(initialValue: ArtworkRequest.artistHeader(artist.coverArt ?? artist.id.raw).url)
         _isStarred = State(initialValue: artist.isStarred)
     }
 
@@ -240,17 +296,7 @@ struct ArtistAlbumsView: View {
     private var sortedAlbums: [AlbumID3] {
         // Settings read once, outside the sort: each read builds a `Binding` and scans `allCases`,
         // which the old comparator did on every single comparison.
-        let ascending = sortOrder.wrappedValue == .ascending
-        switch sortField.wrappedValue {
-        case .title:
-            return displayAlbums.sortedByLocalizedKey(ascending: ascending) { $0.name.sortKey }
-        case .year:
-            return displayAlbums.sorted { lhs, rhs in
-                let lhsYear = lhs.year ?? 0
-                let rhsYear = rhs.year ?? 0
-                return ascending ? lhsYear < rhsYear : lhsYear > rhsYear
-            }
-        }
+        ArtistAlbumOrdering.sorted(displayAlbums, field: sortField.wrappedValue, ascending: sortOrder.wrappedValue == .ascending)
     }
 
     private var hasMultipleReleaseTypes: Bool {
@@ -262,10 +308,7 @@ struct ArtistAlbumsView: View {
     /// order `ReleaseTypeCategory.allCases` declares (Albums, EPs, Singles, Compilations, Live
     /// albums, Instrumentals, Other), regardless of the album sort setting.
     private var releaseTypeGroups: [(category: ReleaseTypeCategory, albums: [AlbumID3])] {
-        let buckets = Dictionary(grouping: sortedAlbums, by: { ReleaseTypeCategory(rawTag: $0.releaseTypes?.first) })
-        return ReleaseTypeCategory.allCases.compactMap { category in
-            buckets[category].map { (category: category, albums: $0) }
-        }
+        ArtistAlbumOrdering.releaseTypeGroups(sortedAlbums)
     }
 
     private var releaseTypeCarousels: some View {
