@@ -51,7 +51,13 @@ struct NowPlayingBackground: View {
                 // desaturated-but-still-bright gray would cross-fade into the pill as a visible
                 // lightening instead of reading as a continuation of the same surface.
                 .overlay(Color.gray.darkened(by: Const.collapseDarkenOpacity).opacity(1.0 - saturation))
-                .opacity(showsExpandedContent ? 1 : 0)
+                // Exactly 0 opacity defeats the point of keeping this mounted while collapsed:
+                // Core Animation skips compositing a fully-transparent layer, so the Metal shader
+                // backing `ColorfulBackground` still never actually compiles until the first real
+                // expand — the CPU spike this was meant to avoid. A value indistinguishable from 0
+                // to the eye still composites, forcing that one-time compile to land during the
+                // idle collapsed state instead of on the user's first expand.
+                .opacity(showsExpandedContent ? 1 : 0.001)
                 .animation(nil, value: showsExpandedContent)
         }
         .clipShape(.rect(cornerRadius: playerCornerRadius))

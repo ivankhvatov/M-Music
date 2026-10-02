@@ -66,12 +66,27 @@ private extension UnitPoint {
 }
 
 private extension Color {
+    /// `MulticolorGradient.uniforms` rebuilds a fresh `Uniforms` — and so re-resolves every
+    /// point's `simd` here — on every single frame of `ColorfulBackgroundModel`'s continuous 40s
+    /// reshuffle animation, for as long as the player sits expanded. Reshuffling only ever moves
+    /// a point's *position* (`ColorPoints.shuffled` keeps each point's own `color` unchanged), so
+    /// the exact same `Color` gets bridged through `UIColor(self).getRed(...)` over and over —
+    /// real, measured CPU cost (ObjC bridging, 8 points, every frame) for a value that never
+    /// actually changes between those frames. Caching by the `Color` value itself (`Color` is
+    /// `Hashable`) turns every repeat into a dictionary lookup; the cache only grows with how many
+    /// *distinct* colors a listening session ever shows (dozens at most — one per track's
+    /// extracted palette), trivial memory for a real, continuous CPU win.
+    static var simdCache: [Color: simd_float4] = [:]
+
     var simd: simd_float4 {
+        if let cached = Self.simdCache[self] { return cached }
         var red: CGFloat = 0
         var green: CGFloat = 0
         var blue: CGFloat = 0
         var alpha: CGFloat = 0
         UIColor(self).getRed(&red, green: &green, blue: &blue, alpha: &alpha)
-        return simd_float4(Float(red), Float(green), Float(blue), Float(alpha))
+        let value = simd_float4(Float(red), Float(green), Float(blue), Float(alpha))
+        Self.simdCache[self] = value
+        return value
     }
 }
