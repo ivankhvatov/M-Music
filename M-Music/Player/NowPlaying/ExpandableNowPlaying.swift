@@ -232,7 +232,10 @@ private extension ExpandableNowPlaying {
                     onChange: { handleGestureChange(value: $0, viewSize: size) },
                     onEnd: { handleGestureEnd(value: $0, viewSize: size) },
                     deferring: PanGesture.reorderHandleTag,
-                    requiresVerticalMovement: true
+                    requiresVerticalMovement: true,
+                    // With the queue showing, a drag on its list belongs to the list; a drag
+                    // anywhere else still dismisses the player.
+                    ignoresScrollViewTouches: showsQueue
                 )
             )
             .ignoresSafeArea()
@@ -251,14 +254,14 @@ private extension ExpandableNowPlaying {
     }
 
     func handleGestureChange(value: PanGesture.Value, viewSize: CGSize) {
-        guard expanded, !showsQueue else { return }
+        guard expanded else { return }
         let translation = max(value.translation.height, 0)
         offsetY = translation
         stacked(progress: 1 - max(min(translation / viewSize.height, 1), 0), withAnimation: false)
     }
 
     func handleGestureEnd(value: PanGesture.Value, viewSize: CGSize) {
-        guard expanded, !showsQueue else { return }
+        guard expanded else { return }
         let translation = max(value.translation.height, 0)
         let velocity = value.velocity.height / 5
         if (translation + velocity) > (viewSize.height * 0.3) {

@@ -23,10 +23,13 @@ struct PanGesture: UIGestureRecognizerRepresentable {
     /// gesture, which otherwise has no axis restriction at all and — being a plain
     /// `UIPanGestureRecognizer` with no failure requirement against the queue list's own internal
     /// swipe-actions recognizer — would simply win the race for *any* drag on the expanded
-    /// player, including a horizontal swipe on a queue row meant to reveal its delete action. Its
-    /// own callback already no-ops while the queue is showing, so that swipe wasn't just
-    /// interrupted — it visibly did nothing at all, every time.
+    /// player, including a horizontal swipe on a queue row meant to reveal its delete action.
     var requiresVerticalMovement = false
+    /// Doesn't receive touches that land on a scroll view (or something inside one), leaving them
+    /// to it. Set on the whole-player drag-to-dismiss gesture while the queue is showing, so a
+    /// drag on the queue list scrolls (or reorders, or swipes) it as usual, while a drag anywhere
+    /// else on the player still dismisses it.
+    var ignoresScrollViewTouches = false
 
     static let reorderHandleTag = "com.mmusic.playerQueue.reorderHandle"
 
@@ -34,21 +37,23 @@ struct PanGesture: UIGestureRecognizerRepresentable {
         Coordinator(
             deferring: deferring,
             requiresHorizontalMovement: requiresHorizontalMovement,
-            requiresVerticalMovement: requiresVerticalMovement
+            requiresVerticalMovement: requiresVerticalMovement,
+            ignoresScrollViewTouches: ignoresScrollViewTouches
         )
     }
 
     func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
         let recognizer = UIPanGestureRecognizer()
         recognizer.name = priorityName
-        if deferring != nil || requiresHorizontalMovement || requiresVerticalMovement {
+        if deferring != nil || requiresHorizontalMovement || requiresVerticalMovement || ignoresScrollViewTouches {
             recognizer.delegate = context.coordinator
         }
         return recognizer
     }
 
-    func updateUIGestureRecognizer(_ recognizer: UIPanGestureRecognizer, context _: Context) {
+    func updateUIGestureRecognizer(_ recognizer: UIPanGestureRecognizer, context: Context) {
         recognizer.name = priorityName
+        context.coordinator.ignoresScrollViewTouches = ignoresScrollViewTouches
     }
 
     func handleUIGestureRecognizerAction(_ recognizer: UIPanGestureRecognizer, context _: Context) {
@@ -74,11 +79,30 @@ struct PanGesture: UIGestureRecognizerRepresentable {
         let deferring: String?
         let requiresHorizontalMovement: Bool
         let requiresVerticalMovement: Bool
+        var ignoresScrollViewTouches: Bool
 
-        init(deferring: String?, requiresHorizontalMovement: Bool, requiresVerticalMovement: Bool) {
+        init(
+            deferring: String?,
+            requiresHorizontalMovement: Bool,
+            requiresVerticalMovement: Bool,
+            ignoresScrollViewTouches: Bool
+        ) {
             self.deferring = deferring
             self.requiresHorizontalMovement = requiresHorizontalMovement
             self.requiresVerticalMovement = requiresVerticalMovement
+            self.ignoresScrollViewTouches = ignoresScrollViewTouches
+        }
+
+        /// Backs `ignoresScrollViewTouches`: walks up from the touched view to the one this
+        /// recognizer is attached to, and refuses the touch if it passes through a scroll view.
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            guard ignoresScrollViewTouches else { return true }
+            var view = touch.view
+            while let current = view, current !== gestureRecognizer.view {
+                if current is UIScrollView { return false }
+                view = current.superview
+            }
+            return true
         }
 
         /// Makes the whole-player gesture require the tagged reorder-handle recognizer to fail
