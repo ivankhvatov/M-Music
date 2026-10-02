@@ -39,7 +39,7 @@ struct PlaylistView: View {
     @State private var showingRemoveDownloadConfirmation = false
 
     /// Point size artwork renders at in a song row — mirrors `SongsListView.rowArtworkSize`.
-    private let rowArtworkSize: CGFloat = 44
+    private let rowArtworkSize: CGFloat = ImageCache.RowArtwork.song
 
     /// `init` runs for every `PlaylistView(...)` a list constructs — one per realized row/card,
     /// on every parent re-render — and `darkened()` goes through `UIColor`'s HSB bridge, so the

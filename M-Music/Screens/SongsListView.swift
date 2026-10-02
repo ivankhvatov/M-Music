@@ -121,7 +121,7 @@ struct SongsListView: View {
 
     /// Point size artwork renders at in a row — the server is asked to downscale to this times
     /// `displayScale` rather than sending full-size cover art for a 44x44 thumbnail.
-    private let rowArtworkSize: CGFloat = 44
+    private let rowArtworkSize: CGFloat = ImageCache.RowArtwork.song
 
     var body: some View {
         Group {
@@ -464,7 +464,7 @@ struct SongRow: View {
         self.onReorderDragChanged = onReorderDragChanged
         self.onReorderDragEnded = onReorderDragEnded
         let artId = track.coverArt ?? track.albumId?.raw ?? track.id.raw
-        let pixelSize = Int(rowArtworkSize * displayScale)
+        let pixelSize = ImageCache.RowArtwork.pixels(rowArtworkSize, scale: displayScale)
         let cacheKey = "\(artId)#\(pixelSize)"
         if let cached = Self.artworkURLCache[cacheKey] {
             _artworkURL = State(initialValue: cached)

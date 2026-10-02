@@ -212,7 +212,7 @@ private struct PlaylistRow: View {
     /// cost for the row itself.
     @State private var artworkURL: URL?
 
-    private let rowArtworkSize: CGFloat = 64
+    private let rowArtworkSize: CGFloat = ImageCache.RowArtwork.playlist
     private let artworkCornerRadius: CGFloat = 4
 
     @ObservedObject private var downloads = DownloadStore.shared
@@ -222,7 +222,7 @@ private struct PlaylistRow: View {
     init(playlist: PlaylistSummary, zoomNamespace: Namespace.ID? = nil, displayScale: CGFloat) {
         self.playlist = playlist
         self.zoomNamespace = zoomNamespace
-        let pixelSize = Int(rowArtworkSize * displayScale)
+        let pixelSize = ImageCache.RowArtwork.pixels(rowArtworkSize, scale: displayScale)
         _artworkURL = State(initialValue: SubsonicClient.shared.cachedCoverArtURL(forId: playlist.coverArt ?? playlist.id.raw, size: pixelSize))
     }
 

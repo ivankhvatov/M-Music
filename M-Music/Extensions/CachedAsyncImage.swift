@@ -2,9 +2,19 @@ import SwiftUI
 import ImageIO
 import UniformTypeIdentifiers
 
-/// Cache for downloaded images, backed by both an in-memory `NSCache` and disk
-/// (`Caches/SubsonicImageCache/`), so artwork already fetched once — this session or a
-/// previous one — is available without a network round trip.
+/// Cache for downloaded images, in three tiers:
+///
+/// 1. **Memory** — an `NSCache` of decoded bitmaps.
+/// 2. **The regular cache** — `Caches/SubsonicImageCache/`. Every image the app shows lives here,
+///    and this is the only place `load(_:)` ever looks first. iOS may purge it under storage
+///    pressure with no notice.
+/// 3. **The permanent cache** — `Application Support/DownloadedArtwork/`, which iOS never purges.
+///    Written only by `savePermanently(_:)` — for the artwork of everything that has downloaded
+///    music (see `DownloadedArtwork`) — never by browsing, so it doesn't grow unboundedly.
+///
+/// When an image is missing from the regular cache (never fetched, or purged) it's loaded from the
+/// permanent cache if that has it, otherwise from the server — and either way written back to the
+/// regular cache, so the next load is a regular-cache hit again.
 ///
 /// `SubsonicClient.url(for:_:)` signs every request with a freshly-randomized salt/token (see
 /// its token-auth scheme), so calling `coverArtURL(forId:)` twice for the *same* album returns
@@ -34,14 +44,29 @@ final class ImageCache: @unchecked Sendable {
     /// For sampling dominant colours only (Now Playing background): far smaller than anything shown.
     static let colorSamplingMaxPixelSize = 96
 
+    /// The point size of the artwork in each kind of list row. Rows request a server-downscaled
+    /// thumbnail of that size (`coverArtURL(forId:size:)`), and the permanent cache saves exactly
+    /// those thumbnails for downloaded content — so both read their sizes from here, or a
+    /// mismatch would quietly turn every saved thumbnail into a miss.
+    enum RowArtwork {
+        static let song: CGFloat = 44
+        static let album: CGFloat = 64
+        static let playlist: CGFloat = 64
+        static let artist: CGFloat = 48
+
+        /// The `size` parameter to request a row thumbnail with, for a screen of this scale.
+        static func pixels(_ points: CGFloat, scale: CGFloat) -> Int {
+            Int(points * scale)
+        }
+    }
+
     private let memory = NSCache<NSString, UIImage>()
     private let fileManager = FileManager.default
-    private let directory: URL?
-    /// A second, durable disk tier under `Application Support/DownloadedArtwork/` — unlike
-    /// `directory` (`Caches/`), iOS never purges this under storage pressure with no notice.
-    /// Populated only by `precacheDurably(_:)` (called when a song finishes downloading), never
-    /// by the normal `load(_:)` path, so browsing alone doesn't grow it unboundedly.
-    private let durableDirectory: URL?
+    private let session: URLSession
+    /// The regular cache (`Caches/`) — see the type's doc comment.
+    private let regularDirectory: URL?
+    /// The permanent cache (`Application Support/`) — see the type's doc comment.
+    private let permanentDirectory: URL?
 
     private let lock = NSLock()
     /// Requests in flight, keyed by the same stable key plus size tier as the memory cache, so a
@@ -63,25 +88,32 @@ final class ImageCache: @unchecked Sendable {
     /// rows shouldn't open dozens of simultaneous connections either.
     private let prefetchGate = AsyncLimiter(limit: 4)
 
-    init() {
+    init(
+        regularDirectory: URL? = ImageCache.defaultRegularDirectory(),
+        permanentDirectory: URL? = ImageCache.defaultPermanentDirectory(),
+        session: URLSession = .shared
+    ) {
         memory.totalCostLimit = 120 * 1024 * 1024
-        if let caches = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first {
-            let dir = caches.appendingPathComponent("SubsonicImageCache", isDirectory: true)
-            try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
-            directory = dir
-        } else {
-            directory = nil
-        }
-        if let support = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
-            var dir = support.appendingPathComponent("DownloadedArtwork", isDirectory: true)
-            try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
-            var values = URLResourceValues()
-            values.isExcludedFromBackup = true
-            try? dir.setResourceValues(values)
-            durableDirectory = dir
-        } else {
-            durableDirectory = nil
-        }
+        self.regularDirectory = regularDirectory
+        self.permanentDirectory = permanentDirectory
+        self.session = session
+    }
+
+    private static func defaultRegularDirectory() -> URL? {
+        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return nil }
+        let dir = caches.appendingPathComponent("SubsonicImageCache", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private static func defaultPermanentDirectory() -> URL? {
+        guard let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
+        var dir = support.appendingPathComponent("DownloadedArtwork", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? dir.setResourceValues(values)
+        return dir
     }
 
     /// In-memory-only lookup, synchronous — used by `CachedAsyncImage` at init so a warm
@@ -91,8 +123,9 @@ final class ImageCache: @unchecked Sendable {
         memory.object(forKey: memoryKey(stableKey(for: url), maxPixelSize: maxPixelSize))
     }
 
-    /// Returns the cached image for `url` if present (memory, then disk), otherwise downloads
-    /// it and caches the result both ways.
+    /// Returns the cached image for `url` if present (memory, then the regular cache), otherwise
+    /// loads it from the permanent cache or the server — see `originalData(for:key:)` — and
+    /// caches the result.
     @discardableResult
     func load(_ url: URL, maxPixelSize: Int? = ImageCache.standardMaxPixelSize) async -> UIImage? {
         let key = stableKey(for: url)
@@ -150,63 +183,71 @@ final class ImageCache: @unchecked Sendable {
         return image
     }
 
-    /// The original bytes for `url` from the first tier that has them (Caches disk, then the
-    /// durable directory), otherwise the network — which also writes them to the Caches disk tier.
+    /// The original bytes for `url`: from the regular cache if it has them; otherwise — it was
+    /// never fetched, or iOS purged it — from the permanent cache, then the server. Whichever of
+    /// those supplies them, they're written back to the regular cache, so every later load is a
+    /// regular-cache hit.
     private func originalData(for url: URL, key: String) async -> Data? {
-        if let fileURL = diskURL(forKey: key), let data = try? Data(contentsOf: fileURL) {
+        if let data = readRegular(key) { return data }
+        if let data = readPermanent(key) {
+            writeRegular(data, forKey: key)
             return data
         }
-        if let fileURL = durableURL(forKey: key), let data = try? Data(contentsOf: fileURL) {
-            return data
-        }
-        guard let data = try? await URLSession.shared.data(from: url).0 else { return nil }
-        writeToDisk(data, forKey: key)
+        guard let data = await downloadImageData(url) else { return nil }
+        writeRegular(data, forKey: key)
         return data
     }
 
-    /// Downloads `url`'s original bytes to the disk cache if they aren't there already, without
-    /// decoding anything — for warming the cache ahead of a screen that will want the full image
-    /// (e.g. so opening an album from a list doesn't wait on the network), without paying for a
-    /// decode of an image that may never be shown at that size. Cancellable: call it from a
-    /// `.task`, which cancels it when the row scrolls away.
+    /// Makes sure `url`'s original bytes are in the regular cache, without decoding anything —
+    /// for warming the cache ahead of a screen that will want the full image (e.g. so opening an
+    /// album from a list doesn't wait on the network), without paying for a decode of an image
+    /// that may never be shown at that size. Cancellable: call it from a `.task`, which cancels it
+    /// when the row scrolls away.
     func prefetchOriginalData(_ url: URL?) async {
         guard let url else { return }
         let key = stableKey(for: url)
-        if let fileURL = diskURL(forKey: key), fileManager.fileExists(atPath: fileURL.path) { return }
-        if let fileURL = durableURL(forKey: key), fileManager.fileExists(atPath: fileURL.path) { return }
+        if fileExists(regularURL(forKey: key)) { return }
+        if let data = readPermanent(key) {
+            writeRegular(data, forKey: key)
+            return
+        }
 
         await prefetchGate.acquire()
         defer { Task { await prefetchGate.release() } }
         guard !Task.isCancelled else { return }
-        guard let data = try? await URLSession.shared.data(from: url).0 else { return }
-        writeToDisk(data, forKey: key)
+        guard let data = await downloadImageData(url) else { return }
+        writeRegular(data, forKey: key)
     }
 
-    /// Fetches `url`'s image if not already cached anywhere, and stores it durably under
-    /// Application Support (survives `Caches/` eviction) in addition to the normal Caches-disk
-    /// tier. For downloaded songs' artwork, so it's still available offline even under storage
-    /// pressure. Returns whether the image ended up durably cached — already was, or was just
-    /// fetched and stored — `false` only on a genuine failure (offline, deleted on server, ...).
-    /// Only stores bytes; it doesn't decode anything into the in-memory cache, since nothing
-    /// needs it warm right when a download finishes.
+    /// Makes sure `url`'s image is saved in *both* the regular cache and the permanent one,
+    /// fetching it from the server only if neither has it — whichever one has it supplies the
+    /// other. For the artwork of downloaded content, so it's still available offline even after
+    /// iOS purges the regular cache. Returns whether the image ended up in both — `false` only on
+    /// a genuine failure (offline, deleted on the server, ...). Only stores bytes; it doesn't
+    /// decode anything into the in-memory cache, since nothing needs it warm.
     @discardableResult
-    func precacheDurably(_ url: URL) async -> Bool {
+    func savePermanently(_ url: URL) async -> Bool {
         let key = stableKey(for: url)
-        if let durableURL = durableURL(forKey: key), fileManager.fileExists(atPath: durableURL.path) {
-            return true
+        let inRegular = fileExists(regularURL(forKey: key))
+        let inPermanent = fileExists(permanentURL(forKey: key))
+        if inRegular && inPermanent { return true }
+
+        if inRegular, let data = readRegular(key) {
+            writeToPermanent(data, forKey: key)
+            return fileExists(permanentURL(forKey: key))
         }
-        if let cachesURL = diskURL(forKey: key), let data = try? Data(contentsOf: cachesURL) {
-            writeDurably(data, forKey: key)
-            return true
+        if inPermanent, let data = readPermanent(key) {
+            writeRegular(data, forKey: key)
+            return fileExists(regularURL(forKey: key))
         }
-        guard let data = try? await URLSession.shared.data(from: url).0 else { return false }
-        writeToDisk(data, forKey: key)
-        writeDurably(data, forKey: key)
+        guard let data = await downloadImageData(url) else { return false }
+        writeRegular(data, forKey: key)
+        writeToPermanent(data, forKey: key)
         return true
     }
 
-    /// Drops `url`'s image from every tier — each in-memory size tier, the Caches disk tier and
-    /// the durable one — so the next load refetches it from the server. Keyed the same stable way
+    /// Drops `url`'s image from every tier — each in-memory size tier, the regular cache and the
+    /// permanent one — so the next load refetches it from the server. Keyed the same stable way
     /// as everything else here, so any freshly-signed URL for the same image works.
     func remove(_ url: URL) {
         let key = stableKey(for: url)
@@ -214,16 +255,37 @@ final class ImageCache: @unchecked Sendable {
         for tier in tiers {
             memory.removeObject(forKey: memoryKey(key, maxPixelSize: tier))
         }
-        if let fileURL = diskURL(forKey: key) { try? fileManager.removeItem(at: fileURL) }
-        if let fileURL = durableURL(forKey: key) { try? fileManager.removeItem(at: fileURL) }
+        if let fileURL = regularURL(forKey: key) { try? fileManager.removeItem(at: fileURL) }
+        if let fileURL = permanentURL(forKey: key) { try? fileManager.removeItem(at: fileURL) }
     }
 
-    /// Drops every cached entry (memory and disk), e.g. when switching to a different server.
+    /// Drops every cached entry from memory and the regular cache, e.g. when switching to a
+    /// different server. The permanent cache is left alone: it's keyed by the server's host, so
+    /// it can't be mistaken for another server's artwork, and it's what keeps downloaded content's
+    /// artwork available offline.
     func invalidateAll() {
         memory.removeAllObjects()
-        guard let directory else { return }
-        try? fileManager.removeItem(at: directory)
-        try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        guard let regularDirectory else { return }
+        try? fileManager.removeItem(at: regularDirectory)
+        try? fileManager.createDirectory(at: regularDirectory, withIntermediateDirectories: true)
+    }
+
+    // MARK: - Network
+
+    /// `url`'s bytes, but only if the server answered successfully *and* what came back is
+    /// actually an image. Without the second check, an error body (Subsonic reports a missing
+    /// cover as a JSON error) would be written to disk — and, for downloaded content, to the
+    /// permanent cache — as if it were the artwork, and never retried.
+    private func downloadImageData(_ url: URL) async -> Data? {
+        guard let (data, response) = try? await session.data(from: url) else { return nil }
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) { return nil }
+        guard Self.isImage(data) else { return nil }
+        return data
+    }
+
+    private static func isImage(_ data: Data) -> Bool {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return false }
+        return CGImageSourceGetCount(source) > 0
     }
 
     // MARK: - Memory layer
@@ -252,27 +314,46 @@ final class ImageCache: @unchecked Sendable {
         return components.url?.absoluteString ?? url.absoluteString
     }
 
-    // MARK: - Disk layer
+    // MARK: - Disk tiers
 
-    private func diskURL(forKey key: String) -> URL? {
-        guard let directory else { return nil }
-        return directory.appendingPathComponent(SubsonicClient.md5Hex(key)).appendingPathExtension("img")
+    private func regularURL(forKey key: String) -> URL? {
+        regularDirectory.map { $0.appendingPathComponent(SubsonicClient.md5Hex(key)).appendingPathExtension("img") }
     }
 
-    private func writeToDisk(_ data: Data, forKey key: String) {
-        guard let fileURL = diskURL(forKey: key) else { return }
-        try? data.write(to: fileURL, options: .atomic)
+    private func permanentURL(forKey key: String) -> URL? {
+        permanentDirectory.map { $0.appendingPathComponent(SubsonicClient.md5Hex(key)).appendingPathExtension("img") }
     }
 
-    // MARK: - Durable disk layer (Application Support, survives Caches/ eviction)
-
-    private func durableURL(forKey key: String) -> URL? {
-        guard let durableDirectory else { return nil }
-        return durableDirectory.appendingPathComponent(SubsonicClient.md5Hex(key)).appendingPathExtension("img")
+    private func fileExists(_ url: URL?) -> Bool {
+        url.map { fileManager.fileExists(atPath: $0.path) } ?? false
     }
 
-    private func writeDurably(_ data: Data, forKey key: String) {
-        guard let fileURL = durableURL(forKey: key) else { return }
+    private func readRegular(_ key: String) -> Data? {
+        regularURL(forKey: key).flatMap { try? Data(contentsOf: $0) }
+    }
+
+    private func readPermanent(_ key: String) -> Data? {
+        permanentURL(forKey: key).flatMap { try? Data(contentsOf: $0) }
+    }
+
+    private func writeRegular(_ data: Data, forKey key: String) {
+        guard let fileURL = regularURL(forKey: key) else { return }
+        write(data, to: fileURL)
+    }
+
+    private func writeToPermanent(_ data: Data, forKey key: String) {
+        guard let fileURL = permanentURL(forKey: key) else { return }
+        write(data, to: fileURL)
+    }
+
+    /// Recreates the directory first if it's gone — iOS can purge `Caches/` wholesale, folder
+    /// included, while the app is running, and the images that purge took out are exactly the ones
+    /// that need writing back.
+    private func write(_ data: Data, to fileURL: URL) {
+        let directory = fileURL.deletingLastPathComponent()
+        if !fileManager.fileExists(atPath: directory.path) {
+            try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
         try? data.write(to: fileURL, options: .atomic)
     }
 

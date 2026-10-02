@@ -49,6 +49,10 @@ struct DownloadRecord: Codable, Identifiable, Equatable, FetchableRecord, Persis
     /// tracks it for cache entries. `nil` for a download made before this field existed; treated
     /// as always valid (there's no format on record to second-guess it against).
     var format: String?
+    /// The song's artist id — what the permanent artwork cache needs to find the artist's picture
+    /// (the name alone can't). `nil` for a download made before this field existed; the artist is
+    /// then derived from the song's album instead.
+    var artistId: String?
 
     var id: String { songId }
     /// Reconstructed from the *current* `DownloadDatabase.rootDirectory()` plus just the stored
@@ -75,7 +79,8 @@ struct DownloadRecord: Codable, Identifiable, Equatable, FetchableRecord, Persis
             id: FlexibleID(songId), title: title, album: album, artist: artist, track: track,
             year: year, genre: genre, coverArt: coverArt, size: byteSize, contentType: contentType,
             suffix: fileExtension, duration: duration, bitRate: bitRate, discNumber: discNumber,
-            starred: nil, albumId: albumId.map { FlexibleID($0) }, artistId: nil, replayGain: replayGain
+            starred: nil, albumId: albumId.map { FlexibleID($0) }, artistId: artistId.map { FlexibleID($0) },
+            replayGain: replayGain
         )
     }
 }

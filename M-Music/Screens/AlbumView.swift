@@ -187,9 +187,12 @@ struct AlbumView: View {
                 artworkIds.insert(song.coverArt ?? song.id.raw)
             }
         }
-        // Full size, plus the row-thumbnail sizes `SongsListView`/`PlaylistView` (44pt) and
-        // `AlbumsListView` (64pt) request — see `DownloadService.precacheArtwork`.
-        let pixelSizes: [Int?] = [nil, Int(44 * displayScale), Int(64 * displayScale)]
+        // Full size, plus the row-thumbnail sizes song rows and album rows request.
+        let pixelSizes: [Int?] = [
+            nil,
+            ImageCache.RowArtwork.pixels(ImageCache.RowArtwork.song, scale: displayScale),
+            ImageCache.RowArtwork.pixels(ImageCache.RowArtwork.album, scale: displayScale),
+        ]
         let artworkURLs = artworkIds.flatMap { id in
             pixelSizes.compactMap { try? client.coverArtURL(forId: id, size: $0) }
         }
@@ -212,6 +215,9 @@ struct AlbumView: View {
         // A newly signed URL is what makes `CachedAsyncImage` reload; its stable cache key was
         // just purged, so this refetches the header artwork from the server.
         artworkURL = try? client.coverArtURL(forId: fresh.coverArt ?? album.coverArt ?? album.id.raw)
+        // The purge above also dropped the permanent copies; if the album still has downloaded
+        // songs, save the refreshed artwork there again.
+        await DownloadedArtwork.shared.requestSync()
     }
 
     /// Fetches the rest of this album's artist catalog and splits it into "other versions" of

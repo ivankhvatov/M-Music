@@ -273,85 +273,20 @@ actor DownloadService {
                 year: job.year, genre: job.genre, filePath: destination.path, fileExtension: ext,
                 contentType: contentType, bitRate: job.bitRate, byteSize: byteSize,
                 replayGainTrackGain: job.replayGainTrackGain, replayGainAlbumGain: job.replayGainAlbumGain,
-                addedAt: Date(), format: job.format
+                addedAt: Date(), format: job.format, artistId: job.artistId
             )
             await DownloadDatabase.shared.upsert(record)
             LocalDownloadIndex.shared.setEntry(
                 songId: job.songId, entry: .init(path: destination.path, format: job.format, bitRate: job.bitRate)
             )
-            Task {
-                await self.precacheArtwork(
-                    coverArt: job.coverArt, albumId: job.albumId, artistId: job.artistId, songId: job.songId
-                )
-            }
+            // Saves this song's artwork — and its album's, its artist's and its playlists' — to the
+            // permanent cache. Coalesced with the rest of an album's downloads, and best-effort:
+            // it never affects whether the download itself succeeded.
+            Task { await DownloadedArtwork.shared.requestSync() }
             continuation?.yield(Update(songId: job.songId, state: .completed))
         } catch {
             continuation?.yield(Update(songId: job.songId, state: .failed(message: error.localizedDescription)))
         }
-    }
-
-    /// Best-effort: pre-warms durable artwork for a just-finished download, at both the sizes
-    /// `SongRow` and `AlbumRow` actually request, plus the song's artist picture (full size only —
-    /// `ArtistsListView`/`ArtistAlbumsView` both request it unscaled), so it's all available
-    /// offline without the eviction risk of the regular Caches-backed image cache. Never affects
-    /// download completion — every failure here just means that artwork stays lazily-fetched like
-    /// before this feature existed. `precacheDurably` itself already no-ops if an entry is already
-    /// cached, so this is safe to call on every download without checking "is it cached?" first.
-    private func precacheArtwork(coverArt: String?, albumId: String?, artistId: String?, songId: String) async {
-        let songArtId = coverArt ?? albumId ?? songId
-        let scale = await MainActor.run { UIScreen.main.scale }
-        // Mirrors SongsListView.rowArtworkSize/PlaylistView.rowArtworkSize (44pt) and
-        // AlbumsListView.rowArtworkSize (64pt) — kept in sync by hand since those are private
-        // per-view constants; a mismatch only means a missed cache hit, not a correctness bug.
-        let songThumbSize = Int(44 * scale)
-        let albumThumbSize = Int(64 * scale)
-
-        if let songFullURL = try? client.coverArtURL(forId: songArtId) {
-            await ImageCache.shared.precacheDurably(songFullURL)
-        }
-        if let songThumbURL = try? client.coverArtURL(forId: songArtId, size: songThumbSize) {
-            await ImageCache.shared.precacheDurably(songThumbURL)
-        }
-
-        if let albumId {
-            let albumArtId = await resolveAlbumCoverArtId(albumId: albumId) ?? albumId
-            if let albumFullURL = try? client.coverArtURL(forId: albumArtId) {
-                await ImageCache.shared.precacheDurably(albumFullURL)
-            }
-            if let albumThumbURL = try? client.coverArtURL(forId: albumArtId, size: albumThumbSize) {
-                await ImageCache.shared.precacheDurably(albumThumbURL)
-            }
-        }
-
-        if let artistId {
-            let artistArtId = await resolveArtistCoverArtId(artistId: artistId) ?? artistId
-            if let artistFullURL = try? client.coverArtURL(forId: artistArtId) {
-                await ImageCache.shared.precacheDurably(artistFullURL)
-            }
-        }
-    }
-
-    /// The album's own authoritative `coverArt` id — checked against the offline library-metadata
-    /// cache first (already populated in the common case: opening an album's screen, which is how
-    /// a user gets to the "Download Album" button in the first place, already caches this),
-    /// falling back to a live lookup only if it's genuinely never been fetched this session/install.
-    private func resolveAlbumCoverArtId(albumId: String) async -> String? {
-        if let cached = await LibraryCacheDatabase.shared.cachedAlbumSongs(albumId: albumId) {
-            return cached.coverArt
-        }
-        return try? await client.getAlbum(id: albumId).coverArt
-    }
-
-    /// The artist's own authoritative `coverArt` id — same reasoning as `resolveAlbumCoverArtId`:
-    /// checked against the offline library-metadata cache first (`ArtistsListView`/
-    /// `LibrarySyncService` already populate this in the common case), falling back to a live
-    /// lookup only if this artist's never been fetched this session/install.
-    private func resolveArtistCoverArtId(artistId: String) async -> String? {
-        if let cachedArtists = await LibraryCacheDatabase.shared.cachedAllArtists(),
-           let match = cachedArtists.first(where: { $0.id.raw == artistId }) {
-            return match.coverArt
-        }
-        return try? await client.getArtist(id: artistId).coverArt
     }
 
     fileprivate func handleTaskCompletion(taskIdentifier: Int, error: Error?) {

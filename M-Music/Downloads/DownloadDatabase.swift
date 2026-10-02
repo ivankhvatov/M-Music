@@ -66,6 +66,11 @@ actor DownloadDatabase {
                 t.add(column: "format", .text)
             }
         }
+        migrator.registerMigration("addDownloadArtistId") { db in
+            try db.alter(table: DownloadRecord.databaseTableName) { t in
+                t.add(column: "artistId", .text)
+            }
+        }
         return migrator
     }
 

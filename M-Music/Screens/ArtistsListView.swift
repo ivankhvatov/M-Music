@@ -43,6 +43,7 @@ private enum ArtistSortOrder: LocalizedStringKey, CaseIterable {
 
 struct ArtistsListView: View {
     private let client = SubsonicClient.shared
+    @Environment(\.displayScale) private var displayScale
 
     @State private var searchText = ""
     @State private var artists: [ArtistID3] = []
@@ -100,7 +101,7 @@ struct ArtistsListView: View {
                 List {
                     ForEach(displayedArtists) { artist in
                         NavigationLink(destination: LazyDestination { ArtistAlbumsView(artist: artist) }) {
-                            ArtistRow(artist: artist)
+                            ArtistRow(artist: artist, displayScale: displayScale)
                         }
                         .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                         .disabled(!isAvailable(artist))
@@ -288,11 +289,15 @@ private struct ArtistRow: View {
 
     @State private var artworkURL: URL?
 
-    private let rowArtworkSize: CGFloat = 48
+    private let rowArtworkSize: CGFloat = ImageCache.RowArtwork.artist
 
-    init(artist: ArtistID3) {
+    /// Requests the row-sized thumbnail, not the full picture the artist's own screen uses — a
+    /// 48pt avatar has no use for the original, and a small download is also what the permanent
+    /// cache saves for artists with downloaded songs (see `DownloadedArtwork`).
+    init(artist: ArtistID3, displayScale: CGFloat) {
         self.artist = artist
-        _artworkURL = State(initialValue: SubsonicClient.shared.cachedCoverArtURL(forId: artist.coverArt ?? artist.id.raw))
+        let pixelSize = ImageCache.RowArtwork.pixels(rowArtworkSize, scale: displayScale)
+        _artworkURL = State(initialValue: SubsonicClient.shared.cachedCoverArtURL(forId: artist.coverArt ?? artist.id.raw, size: pixelSize))
     }
 
     @ObservedObject private var downloads = DownloadStore.shared

@@ -18,7 +18,7 @@ struct PlayerQueueList: View, Equatable {
     @ObservedObject private var player = PlayerManager.shared
     @Environment(\.displayScale) private var displayScale
 
-    private let rowArtworkSize: CGFloat = 44
+    private let rowArtworkSize: CGFloat = ImageCache.RowArtwork.song
     private let rowSpacing: CGFloat = 12
 
     /// The id of the entry currently being dragged by its reorder handle, or nil when nothing is.

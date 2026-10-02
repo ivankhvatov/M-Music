@@ -202,6 +202,29 @@ actor LibraryCacheDatabase {
         }
     }
 
+    /// The ids of the cached playlists that contain at least one of `songIds` — read with SQLite's
+    /// own JSON functions, like `summary()`, so no playlist's song list is decoded. Used to find
+    /// the playlists whose artwork belongs in the permanent cache (those with a downloaded song).
+    nonisolated func playlistIds(containingAnyOf songIds: Set<String>) async -> Set<String> {
+        guard !songIds.isEmpty else { return [] }
+        let found: Set<String>? = try? await dbQueue.read { db in
+            var found = Set<String>()
+            let rows = try Row.fetchCursor(db, sql: """
+                SELECT c.key AS ownerKey, json_extract(s.value, '$.id') AS itemId
+                FROM cached_entries AS c, json_each(c.json) AS s
+                WHERE c.category = ? AND json_valid(c.json)
+                """, arguments: [LibraryCacheCategory.playlistSongs])
+            while let row = try rows.next() {
+                guard let playlistId: String = row["ownerKey"], !found.contains(playlistId),
+                      let songId: String = row["itemId"], songIds.contains(songId)
+                else { continue }
+                found.insert(playlistId)
+            }
+            return found
+        }
+        return found ?? []
+    }
+
     /// The same `Summary`, built the slow way — full `Codable` decodes of every relevant cached
     /// entry. Only used if `summary()` fails.
     func summaryByDecoding() async -> Summary {
@@ -310,6 +333,8 @@ extension LibraryCacheDatabase {
 
     nonisolated func cacheAllPlaylists(_ playlists: [PlaylistSummary]) async {
         await set(playlists, category: LibraryCacheCategory.allPlaylists, key: Self.wholeCatalogKey)
+        // A playlist's cover may have changed.
+        await DownloadedArtwork.shared.requestSync()
     }
 
     nonisolated func cachedAllPlaylists() async -> [PlaylistSummary]? {
@@ -321,6 +346,8 @@ extension LibraryCacheDatabase {
     nonisolated func cachePlaylistSongs(_ songs: [Child], playlistId: String) async {
         await set(songs, category: LibraryCacheCategory.playlistSongs, key: playlistId)
         await LibraryCacheIndex.shared.setSongIds(songs.map(\.id.raw), forPlaylist: playlistId)
+        // The playlist may now contain a downloaded song.
+        await DownloadedArtwork.shared.requestSync()
     }
 
     nonisolated func cachedPlaylistSongs(playlistId: String) async -> [Child]? {

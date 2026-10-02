@@ -166,6 +166,11 @@ final class DownloadStore: ObservableObject {
         if changes.songIds { downloadedSongIds = new.songIds }
         if changes.totalBytes { totalBytes = new.totalBytes }
         if changes.records || changes.songIds { revision &+= 1 }
+        // The downloads changed — or this is the first load of a launch that has some — so make
+        // sure all their artwork is saved in the permanent cache. Cheap when nothing's missing.
+        if changes.records && !new.records.isEmpty {
+            Task(priority: .utility) { await DownloadedArtwork.shared.requestSync() }
+        }
         dropStaleProgress()
     }
 
