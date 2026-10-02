@@ -70,10 +70,18 @@ extension ElasticSliderConfig {
 
 private extension BinaryFloatingPoint {
     var asTimeString: String {
+        TimeFormatter.shared.string(from: TimeInterval(self)) ?? ""
+    }
+}
+
+/// One shared formatter: it runs for both labels on every scrubber update, and allocating and
+/// configuring a `DateComponentsFormatter` each time costs far more than formatting.
+private enum TimeFormatter {
+    static let shared: DateComponentsFormatter = {
         let formatter = DateComponentsFormatter()
         formatter.allowedUnits = [.minute, .second]
         formatter.unitsStyle = .positional
         formatter.zeroFormattingBehavior = .pad
-        return formatter.string(from: TimeInterval(self)) ?? ""
-    }
+        return formatter
+    }()
 }

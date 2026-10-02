@@ -17,9 +17,27 @@ final class PlaybackProgress: ObservableObject {
 
     private init() {}
 
+    /// The newest position reported, whether or not it was published.
+    private var latestTime: TimeInterval = 0
+
     /// Assigned only on change, so an unchanged value never announces itself.
+    ///
+    /// The position is published only while the expanded player is on screen: its scrubber is the
+    /// only reader, and while the mini player is docked that scrubber sits hidden in an
+    /// always-mounted view tree — so publishing twice a second re-ran its body (and a slider
+    /// rebuild) on every screen of the app for nothing. `syncNow()` catches it up on expand.
     func update(currentTime: TimeInterval? = nil, duration: TimeInterval? = nil) {
-        if let currentTime, currentTime != self.currentTime { self.currentTime = currentTime }
+        if let currentTime {
+            latestTime = currentTime
+            if !PlayerPresentation.shared.accessoryVisible, currentTime != self.currentTime {
+                self.currentTime = currentTime
+            }
+        }
         if let duration, duration != self.duration { self.duration = duration }
+    }
+
+    /// Publishes the latest position that was held back while the player was collapsed.
+    func syncNow() {
+        if latestTime != currentTime { currentTime = latestTime }
     }
 }

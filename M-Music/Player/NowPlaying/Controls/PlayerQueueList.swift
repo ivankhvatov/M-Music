@@ -14,7 +14,7 @@ import SwiftUI
 /// button's exact look (a plain red background with a leading icon instead). Drag-to-reorder is
 /// kept exactly as it was — the custom always-visible handle below, not `List`'s own `.onMove`
 /// (which only shows its handle in edit mode, and would've meant losing the handle entirely).
-struct PlayerQueueList: View {
+struct PlayerQueueList: View, Equatable {
     @ObservedObject private var player = PlayerManager.shared
     @Environment(\.displayScale) private var displayScale
 
@@ -123,6 +123,17 @@ struct PlayerQueueList: View {
             bottom: rowSpacing / 2, trailing: NowPlayingLayout.cardPaddings
         )
     }
+
+    /// `PlayerQueueList()` takes no initializer parameters and reads only its own `@ObservedObject`/
+    /// `@State`/`@Environment` — nothing external that two instances could differ on — so any two
+    /// instances are interchangeable from the outside. `.equatable()` at the call site
+    /// (`RegularNowPlaying.swift`) relies on this to skip reconstructing this view (and rebuilding
+    /// `upcoming`/the `List`) every time the enclosing `GeometryReader` reruns during the player's
+    /// 0.3s expand/collapse morph — which happens every rendered frame, for a reason entirely
+    /// unrelated to the queue's own contents. This doesn't block the view's own reactivity: its
+    /// `@ObservedObject`/`@State` still invalidate and re-render it normally, independent of this
+    /// check — exactly like `QueueRowView` below already relies on for per-row reconstruction during drag.
+    static func == (lhs: Self, rhs: Self) -> Bool { true }
 
     /// One queue row, wrapped in `.equatable()` at its call site in `body` so SwiftUI skips
     /// calling `body` — and therefore skips constructing a fresh `SongRow`, whose `init` signs a
@@ -421,10 +432,28 @@ struct PlayerQueueList: View {
     /// The tracks after the current one. Each gets an id from its track id plus how many times that
     /// track has already appeared above it (a queue can hold the same song twice) — stable as
     /// playback advances, which `SongRow` needs: it resolves its artwork URL once, in `init`.
+    ///
+    /// Built once per queue change (`queueVersion`) or step through the queue (`currentIndex`) and
+    /// reused: it's O(queue length) — filtering, a per-track occurrence count and a string id each,
+    /// on a queue that can hold thousands — and `body` reads it several times and re-runs on every
+    /// `PlayerManager` publish (play/pause, buffering, star, ...), none of which touch the queue.
     private var upcoming: [Entry] {
-        guard let currentIndex = player.currentIndex, player.queue.indices.contains(currentIndex) else { return [] }
+        let version = player.queueVersion
+        let index = player.currentIndex
+        if let memo = Self.upcomingMemo, memo.version == version, memo.currentIndex == index {
+            return memo.entries
+        }
+        let entries = Self.buildUpcoming(queue: player.queue, currentIndex: index)
+        Self.upcomingMemo = (version, index, entries)
+        return entries
+    }
+
+    private static var upcomingMemo: (version: Int, currentIndex: Int?, entries: [Entry])?
+
+    private static func buildUpcoming(queue: [Child], currentIndex: Int?) -> [Entry] {
+        guard let currentIndex, queue.indices.contains(currentIndex) else { return [] }
         var seen: [String: Int] = [:]
-        return player.queue[(currentIndex + 1)...].map { track in
+        return queue[(currentIndex + 1)...].map { track in
             let occurrence = seen[track.id.raw, default: 0]
             seen[track.id.raw] = occurrence + 1
             return Entry(id: "\(track.id.raw)#\(occurrence)", track: track)

@@ -36,7 +36,7 @@ struct NowPlayingMarquee: View {
     @State private var startDate = Date()
 
     var body: some View {
-        let metrics = NSString(string: text).size(withAttributes: [.font: font])
+        let metrics = Self.metrics(for: text, font: font)
         let overflows = containerWidth > 0 && metrics.width > containerWidth
         let gap = metrics.height * 2
         let travel = metrics.width + gap
@@ -82,6 +82,27 @@ struct NowPlayingMarquee: View {
         }
         .onChange(of: text) { startDate = Date() }
         .onChange(of: restartToken) { startDate = Date() }
+    }
+
+    private struct MetricsKey: Hashable {
+        let text: String
+        let fontName: String
+        let pointSize: CGFloat
+    }
+
+    /// Measuring text is a UIKit/CoreText call, and `body` re-runs whenever the label's width or
+    /// state changes — on most frames of the expand/collapse morph, for each of the four labels.
+    /// A label's metrics only depend on its text and font, so they're measured once. Main-thread
+    /// only, like `SongRow.artworkURLCache`.
+    private static var metricsCache: [MetricsKey: CGSize] = [:]
+
+    private static func metrics(for text: String, font: UIFont) -> CGSize {
+        let key = MetricsKey(text: text, fontName: font.fontName, pointSize: font.pointSize)
+        if let cached = metricsCache[key] { return cached }
+        let size = NSString(string: text).size(withAttributes: [.font: font])
+        if metricsCache.count >= 256 { metricsCache.removeAll(keepingCapacity: true) }
+        metricsCache[key] = size
+        return size
     }
 
     /// 0 while pausing at the start of a loop, then growing at `speed` until one full copy of the

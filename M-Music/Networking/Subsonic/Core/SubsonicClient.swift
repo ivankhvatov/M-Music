@@ -33,6 +33,8 @@ final class SubsonicClient: @unchecked Sendable {
     }
     private let lock = NSLock()
     private var _credentials: SubsonicCredentials?
+    /// Signed cover-art URLs handed to views, by `"<id>#<size>"` — see `cachedCoverArtURL`.
+    private var coverURLCache: [String: URL] = [:]
 
     var credentials: SubsonicCredentials? {
         get {
@@ -42,11 +44,34 @@ final class SubsonicClient: @unchecked Sendable {
         set {
             lock.lock()
             _credentials = newValue
+            coverURLCache.removeAll()
             lock.unlock()
         }
     }
 
     var isConfigured: Bool { credentials != nil }
+
+    /// `coverArtURL`, memoized per `(id, size)` for views that resolve their artwork URL while
+    /// being built. Every signing mints a random salt and an MD5 (~16 `String(format:)` calls for
+    /// the hex), and a screen constructs dozens of cards/rows — plus a detail view per
+    /// `NavigationLink` — on every re-render of its parent; `ImageCache` keys on the URL with the
+    /// auth items stripped anyway, so reusing one signed URL per image is equivalent. Cleared
+    /// whenever the credentials change. `AlbumView.refreshAlbum` deliberately keeps calling
+    /// `coverArtURL` directly: a *new* URL is what makes it reload a changed cover.
+    func cachedCoverArtURL(forId id: String, size: Int? = nil) -> URL? {
+        let key = "\(id)#\(size ?? 0)"
+        lock.lock()
+        if let cached = coverURLCache[key] {
+            lock.unlock()
+            return cached
+        }
+        lock.unlock()
+        guard let url = try? coverArtURL(forId: id, size: size) else { return nil }
+        lock.lock()
+        coverURLCache[key] = url
+        lock.unlock()
+        return url
+    }
 
     /// Coalesces identical concurrent GETs — see `InFlightRequests`.
     private let inFlight = InFlightRequests()

@@ -72,7 +72,7 @@ struct AlbumView: View {
         _backgroundColor = State(initialValue: Color(.systemBackground))
         _darkenedBackgroundColor = State(initialValue: Self.placeholderDarkenedBackground)
         _darkenedRelatedSectionBackground = State(initialValue: Self.placeholderDarkenedRelatedSectionBackground)
-        _artworkURL = State(initialValue: try? SubsonicClient.shared.coverArtURL(forId: album.coverArt ?? album.id.raw))
+        _artworkURL = State(initialValue: SubsonicClient.shared.cachedCoverArtURL(forId: album.coverArt ?? album.id.raw))
     }
 
     var body: some View {
@@ -96,7 +96,10 @@ struct AlbumView: View {
 
     var albumList: some View {
         ScrollView {
-            VStack (spacing: 0) {
+            // Lazy: a plain `VStack` builds every `TrackRow` (three `@ObservedObject`s and a `Menu`
+            // each) the moment the album is pushed — a 150-track compilation held the main thread
+            // for the better part of a second inside the zoom transition.
+            LazyVStack(spacing: 0) {
                 albumHeader()
                     .padding(.top, 16)
                     .padding(.bottom, 26)
@@ -278,7 +281,7 @@ struct AlbumView: View {
                 // their artwork) — an eager `HStack` started every card's image load at once.
                 LazyHStack(alignment: .top, spacing: 16) {
                     ForEach(albums) { relatedAlbum in
-                        NavigationLink(destination: AlbumView(album: relatedAlbum, zoomNamespace: relatedAlbumZoomNamespace)) {
+                        NavigationLink(destination: LazyDestination { AlbumView(album: relatedAlbum, zoomNamespace: relatedAlbumZoomNamespace) }) {
                             AlbumCardView(album: relatedAlbum, zoomNamespace: relatedAlbumZoomNamespace, subtitle: .year)
                                 .frame(width: 160)
                         }

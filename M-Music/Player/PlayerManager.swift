@@ -180,8 +180,9 @@ final class PlayerManager: ObservableObject {
     private let starStore = StarStore.shared
 
     /// Bumped on every change to `queue`, so `persistState()` only hands the queue to `QueueStore`
-    /// when it actually changed rather than on every playback tick.
-    private var queueVersion = 0
+    /// when it actually changed rather than on every playback tick — and readable so views can
+    /// cache anything derived from the queue against it instead of rebuilding on every publish.
+    private(set) var queueVersion = 0
     private var persistedQueueVersion = -1
     /// At launch only the current track is restored synchronously (the queue can be thousands of
     /// tracks); `queue` is a one-element placeholder until the full queue has been read off the
@@ -189,6 +190,9 @@ final class PlayerManager: ObservableObject {
     /// the real queue and index.
     private var awaitingFullQueue = false
     private var isApplyingRestoredQueue = false
+    /// Whether anything has published since the last `republishForExpandIfNeeded()` — i.e. whether
+    /// a view mounted at opacity 0 could have missed an update.
+    private var needsExpandRepublish = false
 
     /// Bounds how many times `recoverFromPlaybackFailure(error:)` will retry the *same* song
     /// before giving up on it — see that method. Reset whenever the failing track differs from
@@ -200,6 +204,9 @@ final class PlayerManager: ObservableObject {
         self.client = client
         restorePersistedState()
         subscribeToEngine()
+        objectWillChange
+            .sink { [weak self] in self?.needsExpandRepublish = true }
+            .store(in: &subscriptions)
         // Lock-screen/Control Center plumbing isn't needed for the first frame: registering the
         // remote commands and publishing Now Playing info are IPC-heavy, and used to run
         // synchronously here, on the main thread, before anything was on screen.
@@ -252,6 +259,18 @@ final class PlayerManager: ObservableObject {
         }
     }
 
+    /// Republishes for the expanded player's chrome — which sits mounted at opacity 0 while
+    /// collapsed, where an update SwiftUI dropped would otherwise only show, visibly, inside the
+    /// expand animation — but only if something has actually published since the last time. An
+    /// unconditional republish on every tap invalidated every observer of this object (and
+    /// rebuilt the queue list) on the first frame of the morph, even when nothing had changed.
+    func republishForExpandIfNeeded() {
+        guard needsExpandRepublish else { return }
+        objectWillChange.send()
+        // The send above publishes, which sets the flag again through the sink in `init`.
+        needsExpandRepublish = false
+    }
+
     private func subscribeToEngine() {
         engine.$currentTime
             .sink { [weak self] time in self?.handleTimeUpdate(time) }
@@ -263,7 +282,10 @@ final class PlayerManager: ObservableObject {
             }
             .store(in: &subscriptions)
         engine.$isPlaying
-            .sink { [weak self] isPlaying in self?.isPlaying = isPlaying }
+            .sink { [weak self] isPlaying in
+                guard let self, self.isPlaying != isPlaying else { return }
+                self.isPlaying = isPlaying
+            }
             .store(in: &subscriptions)
         // Keeps `isCurrentTrackStarred` (and the lock screen's "favorite" toggle) in sync with
         // every star/unstar change — including ones made elsewhere, like `AlbumView` or
@@ -275,7 +297,8 @@ final class PlayerManager: ObservableObject {
         starStore.$overrides
             .sink { [weak self] overrides in
                 guard let self, let track = self.currentTrack else { return }
-                self.isCurrentTrackStarred = overrides[track.id.raw] ?? track.isStarred
+                let starred = overrides[track.id.raw] ?? track.isStarred
+                if self.isCurrentTrackStarred != starred { self.isCurrentTrackStarred = starred }
                 self.updateNowPlayingFeedback()
             }
             .store(in: &subscriptions)
@@ -1124,15 +1147,29 @@ final class PlayerManager: ObservableObject {
 
     private func updateArtworkURL() {
         if let station = currentRadioStation {
-            artworkURL = station.coverArt.flatMap { try? client.coverArtURL(forId: $0) }
+            setArtworkURL(station.coverArt.flatMap { try? client.coverArtURL(forId: $0) })
             return
         }
         guard let track = currentTrack else {
-            artworkURL = nil
+            setArtworkURL(nil)
             return
         }
         let artId = track.coverArt ?? track.albumId?.raw ?? track.id.raw
-        artworkURL = try? client.coverArtURL(forId: artId)
+        setArtworkURL(try? client.coverArtURL(forId: artId))
+    }
+
+    /// Every signing mints a different URL for the same image (random salt), so a bare assignment
+    /// published a "new" `artworkURL` several times per track change — re-rendering every observer
+    /// and re-running the palette extraction each time — even though `ImageCache` (which keys on
+    /// the URL with the auth items stripped) would load the very same image. Only a URL that
+    /// identifies a different image is worth publishing.
+    private func setArtworkURL(_ url: URL?) {
+        if let url, let current = artworkURL,
+           ImageCache.shared.stableKey(for: url) == ImageCache.shared.stableKey(for: current) {
+            return
+        }
+        guard artworkURL != url else { return }
+        artworkURL = url
     }
 
     /// Activating an audio session is a synchronous, "relatively time consuming" call by Apple's

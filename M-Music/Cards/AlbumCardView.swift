@@ -13,12 +13,19 @@ struct AlbumCardView: View {
     var zoomNamespace: Namespace.ID? = nil
     var subtitle: Subtitle = .artist
 
-    /// Computed once per `album.id` and cached, rather than inline in `artwork` — `coverArtURL`
+    /// Resolved once per `album.id`, in `init`, from a shared memo of signed URLs — `coverArtURL`
     /// signs every call with a fresh random token, so recomputing it on every body evaluation
     /// (e.g. every time a `LazyVGrid` re-renders this cell) makes `CachedAsyncImage` see a "new"
-    /// URL each time and re-run its load task, even though `ImageCache` itself dedupes by a
-    /// token-stripped key underneath. At grid scale that's a lot of redundant task churn.
+    /// URL each time and re-run its load task. Set here rather than from a `.task`, which made
+    /// every cell render once with no URL, once with it, and once more with the image.
     @State private var artworkURL: URL?
+
+    init(album: AlbumID3, zoomNamespace: Namespace.ID? = nil, subtitle: Subtitle = .artist) {
+        self.album = album
+        self.zoomNamespace = zoomNamespace
+        self.subtitle = subtitle
+        _artworkURL = State(initialValue: SubsonicClient.shared.cachedCoverArtURL(forId: album.coverArt ?? album.id.raw))
+    }
 
     @ObservedObject private var downloads = DownloadStore.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
@@ -40,9 +47,6 @@ struct AlbumCardView: View {
                 .padding(.top, -3)
         }
         .dimmedIfUnavailable(isAvailable)
-        .task(id: album.id) {
-            artworkURL = try? SubsonicClient.shared.coverArtURL(forId: album.coverArt ?? album.id.raw)
-        }
     }
 
     /// Nothing is ever "unavailable" while online (everything can still stream) — only offline

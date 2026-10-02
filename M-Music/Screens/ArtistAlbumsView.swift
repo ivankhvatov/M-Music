@@ -114,7 +114,7 @@ struct ArtistAlbumsView: View {
 
     init(artist: ArtistID3) {
         self.artist = artist
-        _artworkURL = State(initialValue: try? SubsonicClient.shared.coverArtURL(forId: artist.coverArt ?? artist.id.raw))
+        _artworkURL = State(initialValue: SubsonicClient.shared.cachedCoverArtURL(forId: artist.coverArt ?? artist.id.raw))
         _isStarred = State(initialValue: artist.isStarred)
     }
 
@@ -133,11 +133,6 @@ struct ArtistAlbumsView: View {
             sortButton
         }
         .task { await refresh() }
-        .onAppear {
-            // So "is this album fully downloaded" reads correctly offline even before any live
-            // fetch has happened this session — guarded internally, cheap to call again.
-            Task(priority: .utility) { await LibraryCacheStatus.shared.preload() }
-        }
     }
 
     private var artistHeader: some View {
@@ -220,7 +215,7 @@ struct ArtistAlbumsView: View {
         } else {
             LazyVGrid(columns: gridColumns, spacing: 16) {
                 ForEach(sortedAlbums) { album in
-                    NavigationLink(destination: AlbumView(album: album, zoomNamespace: albumZoomNamespace)) {
+                    NavigationLink(destination: LazyDestination { AlbumView(album: album, zoomNamespace: albumZoomNamespace) }) {
                         AlbumCardView(album: album, zoomNamespace: albumZoomNamespace, subtitle: .year)
                     }
                     .buttonStyle(.plain)
@@ -294,7 +289,7 @@ struct ArtistAlbumsView: View {
                 // their artwork) — an eager `HStack` started every card's image load at once.
                 LazyHStack(alignment: .top, spacing: 16) {
                     ForEach(albums) { album in
-                        NavigationLink(destination: AlbumView(album: album, zoomNamespace: albumZoomNamespace)) {
+                        NavigationLink(destination: LazyDestination { AlbumView(album: album, zoomNamespace: albumZoomNamespace) }) {
                             AlbumCardView(album: album, zoomNamespace: albumZoomNamespace, subtitle: .year)
                                 .frame(width: 160)
                         }

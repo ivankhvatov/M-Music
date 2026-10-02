@@ -28,9 +28,9 @@ extension UIApplication {
 }
 
 extension UIScreen {
-    static var deviceCornerRadius: CGFloat {
-        main.value(forKey: "_displayCornerRadius") as? CGFloat ?? 0
-    }
+    /// A private-key KVC read, and read on every frame of the expand/collapse morph — it never
+    /// changes for a given device, so it's read once.
+    static let deviceCornerRadius: CGFloat = main.value(forKey: "_displayCornerRadius") as? CGFloat ?? 0
 
     static var hairlineWidth: CGFloat {
         1 / main.scale

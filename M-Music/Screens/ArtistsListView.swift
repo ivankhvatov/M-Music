@@ -46,12 +46,14 @@ struct ArtistsListView: View {
 
     @State private var searchText = ""
     @State private var artists: [ArtistID3] = []
-    /// Cached result of filtering/sorting `artists`, recomputed only by `updateDisplayedArtists()`
+    /// Cached result of filtering/sorting `artists`, recomputed only by `recompute()`
     /// rather than on every `body` evaluation — see `AlbumsListView.displayedAlbums`.
     @State private var displayedArtists: [ArtistID3] = []
     /// `artists` sorted by the current order, recomputed only when `artists` or the order
     /// changes — see `AlbumsListView.sortedAlbums`.
     @State private var sortedArtists: [ArtistID3] = []
+    /// Sorts/filters off the main actor — see `OffMainDeriver`.
+    @State private var deriver = OffMainDeriver()
     @State private var isLoading = false
     @State private var loadError: String?
     @State private var hasLoadedOnce = false
@@ -78,63 +80,92 @@ struct ArtistsListView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if isLoading {
-                    ProgressView()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let loadError {
-                    Text(loadError)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 16)
-                } else if displayedArtists.isEmpty {
-                    Text("No artists found.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    List {
-                        ForEach(displayedArtists) { artist in
-                            NavigationLink(destination: ArtistAlbumsView(artist: artist)) {
-                                ArtistRow(artist: artist)
-                            }
-                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                            .disabled(!isAvailable(artist))
+        Group {
+            if isLoading {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let loadError {
+                Text(loadError)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 16)
+            } else if displayedArtists.isEmpty {
+                Text("No artists found.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    ForEach(displayedArtists) { artist in
+                        NavigationLink(destination: LazyDestination { ArtistAlbumsView(artist: artist) }) {
+                            ArtistRow(artist: artist)
                         }
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        .disabled(!isAvailable(artist))
                     }
-                    .listStyle(.plain)
                 }
+                .listStyle(.plain)
             }
-            .refreshable { await performRefresh(force: true) }
-            .navigationTitle("Artists")
-            .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
-            .toolbar {
-                filterButton
-                sortButton
-            }
-            .task { await refresh() }
-            .onAppear {
-                // So "does this artist have a fully-downloaded album" reads correctly offline
-                // even before any live fetch has happened this session — guarded internally,
-                // cheap to call again.
-                Task(priority: .utility) { await LibraryCacheStatus.shared.preload() }
-            }
-            .onChange(of: searchText) { updateDisplayedArtists() }
-            .onChange(of: filterOptionStorage) { updateDisplayedArtists() }
-            .onChange(of: sortOrderStorage) { updateSortedArtists() }
-            .onChange(of: showUnavailableInLists) { updateDisplayedArtists() }
-            .onChange(of: networkMonitor.isOnline) { updateDisplayedArtists() }
-            .onChange(of: downloads.revision) { if offlineFilterActive { updateDisplayedArtists() } }
-            .onChange(of: libraryCacheStatus.revision) { if offlineFilterActive { updateDisplayedArtists() } }
         }
+        .refreshable { await performRefresh(force: true) }
+        .navigationTitle("Artists")
+        .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
+        .toolbar {
+            filterButton
+            sortButton
+        }
+        .task { await refresh() }
+        .onChange(of: searchText) { recompute(debounced: true) }
+        .onChange(of: filterOptionStorage) { recompute() }
+        .onChange(of: sortOrderStorage) { markSortStale() }
+        .onChange(of: showUnavailableInLists) { recompute() }
+        .onChange(of: networkMonitor.isOnline) { recompute() }
+        .onChange(of: downloads.revision) { if offlineFilterActive { recompute() } }
+        .onChange(of: libraryCacheStatus.revision) { if offlineFilterActive { recompute() } }
     }
 
-    private func updateSortedArtists() {
-        sortedArtists = artists.sortedByLocalizedKey(ascending: sortOrder.wrappedValue == .ascending) { $0.name.sortKey }
-        updateDisplayedArtists()
+    /// Everything the derivation needs, captured by value so it can run off the main actor.
+    private struct DerivationSpec: Sendable {
+        var ascending: Bool
+        var favoritesOnly: Bool
+        var search: String
+    }
+
+    /// The items or the sort changed: the next derivation has to sort again.
+    private func markSortStale() {
+        deriver.sortStale = true
+        recompute()
+    }
+
+    /// Re-derives `sortedArtists` (only if the items or sort changed) and `displayedArtists` off
+    /// the main actor and applies the newest result — see `OffMainDeriver`.
+    private func recompute(debounced: Bool = false) {
+        let items = artists
+        let alreadySorted = sortedArtists
+        let needsSort = deriver.sortStale
+        let spec = DerivationSpec(
+            ascending: sortOrder.wrappedValue == .ascending,
+            favoritesOnly: filterOption.wrappedValue == .favoritesOnly,
+            search: searchText
+        )
+        deriver.run(delay: debounced ? .milliseconds(200) : nil, {
+            let sorted = needsSort
+                ? items.sortedByLocalizedKey(ascending: spec.ascending) { $0.name.sortKey }
+                : alreadySorted
+            return (sorted: sorted, displayed: Self.filtered(sorted, spec))
+        }, apply: { result in
+            deriver.sortStale = false
+            sortedArtists = result.sorted
+            // The offline filter reads main-actor stores, and is a cheap lookup per artist.
+            displayedArtists = offlineFilterActive
+                ? result.displayed.filter {
+                    libraryCacheStatus.hasFullyDownloadedAlbum(artistId: $0.id.raw, downloads: downloads)
+                }
+                : result.displayed
+            isLoading = false
+        })
     }
 
     /// See `AlbumsListView.offlineFilterActive`.
@@ -142,25 +173,16 @@ struct ArtistsListView: View {
         !networkMonitor.isOnline && !showUnavailableInLists
     }
 
-    /// Filters the already-sorted `sortedArtists`, preserving its order.
-    private func updateDisplayedArtists() {
-        var result = sortedArtists
-
-        if filterOption.wrappedValue == .favoritesOnly {
+    /// Filters the already-sorted artists, preserving their order.
+    private nonisolated static func filtered(_ sorted: [ArtistID3], _ spec: DerivationSpec) -> [ArtistID3] {
+        var result = sorted
+        if spec.favoritesOnly {
             result = result.filter { $0.isStarred }
         }
-
-        if !searchText.isEmpty {
-            result = result.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+        if !spec.search.isEmpty {
+            result = result.filter { $0.name.localizedCaseInsensitiveContains(spec.search) }
         }
-
-        if offlineFilterActive {
-            result = result.filter {
-                libraryCacheStatus.hasFullyDownloadedAlbum(artistId: $0.id.raw, downloads: downloads)
-            }
-        }
-
-        displayedArtists = result
+        return result
     }
 
     @ToolbarContentBuilder
@@ -207,6 +229,7 @@ struct ArtistsListView: View {
             artists = []
             sortedArtists = []
             displayedArtists = []
+            deriver.cancel()
             hasLoadedOnce = false
             return
         }
@@ -223,29 +246,29 @@ struct ArtistsListView: View {
     /// `force` skips the "has the server library changed?" check, for pull-to-refresh.
     private func performRefresh(force: Bool = false) async {
         guard client.isConfigured else { return }
-        defer { isLoading = false }
+        // The spinner stays up until the first derivation lands, rather than flashing "No artists
+        // found." while the (now off-main) sort is still running.
+        defer { if !deriver.isPending { isLoading = false } }
         for await event in LibraryLoader.load(.allArtists(), shown: artists, force: force) {
             switch event {
             case .cached(let cached):
                 artists = cached
-                updateSortedArtists()
                 hasLoadedOnce = true
-                isLoading = false
+                markSortStale()
             case .fresh(let fetched):
                 loadError = nil
-                isLoading = false
                 hasLoadedOnce = true
                 artists = fetched
-                updateSortedArtists()
+                markSortStale()
             case .upToDate:
                 loadError = nil
-                isLoading = false
                 hasLoadedOnce = true
+                if !deriver.isPending { isLoading = false }
             case .failed(let error):
                 // Offline, or the request otherwise failed — keep showing whatever's already on
                 // screen (cache, or an earlier successful fetch); only surface an error if
                 // there's truly nothing to show.
-                isLoading = false
+                if !deriver.isPending { isLoading = false }
                 if artists.isEmpty {
                     loadError = error.localizedDescription
                 }
@@ -266,6 +289,11 @@ private struct ArtistRow: View {
     @State private var artworkURL: URL?
 
     private let rowArtworkSize: CGFloat = 48
+
+    init(artist: ArtistID3) {
+        self.artist = artist
+        _artworkURL = State(initialValue: SubsonicClient.shared.cachedCoverArtURL(forId: artist.coverArt ?? artist.id.raw))
+    }
 
     @ObservedObject private var downloads = DownloadStore.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
@@ -291,12 +319,11 @@ private struct ArtistRow: View {
                 .font(.body)
         }
         .dimmedIfUnavailable(networkMonitor.isOnline || downloads.hasDownloadedSong(byArtist: artist.name))
-        .task(id: artist.id) {
-            artworkURL = try? SubsonicClient.shared.coverArtURL(forId: artist.coverArt ?? artist.id.raw)
-        }
     }
 }
 
 #Preview {
-    ArtistsListView()
+    NavigationStack {
+        ArtistsListView()
+    }
 }

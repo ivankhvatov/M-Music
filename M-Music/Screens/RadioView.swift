@@ -86,7 +86,7 @@ struct RadioView: View {
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 32)
 
-            NavigationLink(destination: ServerSettingsView()) {
+            NavigationLink(destination: LazyDestination { ServerSettingsView() }) {
                 Text("Connect")
                     .fontWeight(.semibold)
                     .foregroundStyle(.white)

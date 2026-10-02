@@ -79,10 +79,11 @@ struct CompactChrome: View {
             // dropped for it in the meantime (see `PlayerManager`'s foreground republish) would
             // otherwise show — e.g. a play/pause button that doesn't match the player — and only
             // get corrected, visibly, inside the expand animation. Republish first, with
-            // animations off, so it's already right by the time it fades in.
+            // animations off, so it's already right by the time it fades in — but only when
+            // something has changed since the last expand (see `republishForExpandIfNeeded`).
             var instant = Transaction()
             instant.disablesAnimations = true
-            withTransaction(instant) { player.objectWillChange.send() }
+            withTransaction(instant) { player.republishForExpandIfNeeded() }
             withAnimation(.playerExpandAnimation) {
                 expanded = true
             }

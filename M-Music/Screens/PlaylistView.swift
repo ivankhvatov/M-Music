@@ -51,7 +51,7 @@ struct PlaylistView: View {
         self.zoomNamespace = zoomNamespace
         _backgroundColor = State(initialValue: Color(.systemBackground))
         _darkenedBackgroundColor = State(initialValue: Self.placeholderDarkenedBackground)
-        _artworkURL = State(initialValue: try? SubsonicClient.shared.coverArtURL(forId: playlist.coverArt ?? playlist.id.raw))
+        _artworkURL = State(initialValue: SubsonicClient.shared.cachedCoverArtURL(forId: playlist.coverArt ?? playlist.id.raw))
     }
 
     var body: some View {
@@ -403,14 +403,16 @@ struct PlaylistView: View {
     @ToolbarContentBuilder
     private var downloadButton: some ToolbarContent {
         ToolbarItem(placement: .topBarTrailing) {
+            // Once per evaluation, not once per use: it's a scan of every song in the playlist.
+            let isDownloaded = isPlaylistDownloaded
             Button {
-                if isPlaylistDownloaded {
+                if isDownloaded {
                     showingRemoveDownloadConfirmation = true
                 } else {
                     downloads.downloadAlbum(songs)
                 }
             } label: {
-                Image(systemName: isPlaylistDownloaded ? "checkmark" : "arrow.down")
+                Image(systemName: isDownloaded ? "checkmark" : "arrow.down")
                     .foregroundStyle(.primary)
             }
             .disabled(songs.isEmpty)

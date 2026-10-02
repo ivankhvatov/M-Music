@@ -80,34 +80,68 @@ actor LibraryCacheDatabase {
     /// per-id detail (`allAlbums`, `recentAlbums`, `allArtists`, `allPlaylists`, `allSongs`).
     static let wholeCatalogKey = "all"
 
+    /// Already-decoded entries, so reopening a screen doesn't re-decode the whole catalog. Every
+    /// open of Songs, Albums or Artists used to parse the full cached JSON again (tens of
+    /// thousands of `Child`s, ~28 `decodeIfPresent` calls each) on a background core — seconds of
+    /// CPU per open at a large library's size. An `NSCache` rather than a dictionary because a
+    /// decoded 50k-song list is tens of MB in an app that also plays audio in the background: it
+    /// evicts under memory pressure. Every write path below (`set`, `remove`, `clearAll`)
+    /// invalidates it, so a hit is always what the database holds.
+    private final class DecodedEntry {
+        let value: Any
+        init(_ value: Any) { self.value = value }
+    }
+
+    private static let decodedCache: NSCache<NSString, DecodedEntry> = {
+        let cache = NSCache<NSString, DecodedEntry>()
+        cache.totalCostLimit = 160 * 1024 * 1024
+        return cache
+    }()
+
+    private static func cacheKey(category: String, key: String) -> NSString {
+        "\(category)\u{1F}\(key)" as NSString
+    }
+
     nonisolated func set<T: Encodable>(_ value: T, category: String, key: String) async {
         guard let data = try? JSONEncoder().encode(value), let json = String(data: data, encoding: .utf8) else { return }
         let entry = CachedEntry(category: category, key: key, json: json, updatedAt: Date())
+        Self.decodedCache.removeObject(forKey: Self.cacheKey(category: category, key: key))
         try? await dbQueue.write { db in
             try entry.save(db)
         }
+        // Again after the write: a read that started before it could have re-filled the cache
+        // with the old value in between.
+        Self.decodedCache.removeObject(forKey: Self.cacheKey(category: category, key: key))
     }
 
     nonisolated func remove(category: String, key: String) async {
+        Self.decodedCache.removeObject(forKey: Self.cacheKey(category: category, key: key))
         try? await dbQueue.write { db in
             _ = try CachedEntry.filter(Column("category") == category && Column("key") == key).deleteAll(db)
         }
+        Self.decodedCache.removeObject(forKey: Self.cacheKey(category: category, key: key))
     }
 
     nonisolated func get<T: Decodable>(_ type: T.Type, category: String, key: String) async -> T? {
+        let cacheKey = Self.cacheKey(category: category, key: key)
+        if let cached = Self.decodedCache.object(forKey: cacheKey)?.value as? T { return cached }
         let json: String? = try? await dbQueue.read { db in
             try CachedEntry.filter(Column("category") == category && Column("key") == key).fetchOne(db)?.json
         }
         guard let json, let data = json.data(using: .utf8) else { return nil }
-        return try? JSONDecoder().decode(T.self, from: data)
+        guard let decoded = try? JSONDecoder().decode(T.self, from: data) else { return nil }
+        Self.decodedCache.setObject(DecodedEntry(decoded), forKey: cacheKey, cost: data.count * 3)
+        return decoded
     }
 
     /// Drops every cached entry — e.g. when switching to a different server, where none of this
     /// would apply to the new library.
     func clearAll() async {
+        Self.decodedCache.removeAllObjects()
         try? await dbQueue.write { db in
             _ = try CachedEntry.deleteAll(db)
         }
+        Self.decodedCache.removeAllObjects()
         // The tokens record "this list is synced as of scan X" — meaningless once the cached
         // list itself is gone.
         await LibraryRevalidation.shared.reset()

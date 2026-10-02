@@ -96,17 +96,19 @@ struct AlbumsListView: View {
     }
 
     @State private var albums: [AlbumID3] = []
-    /// Cached result of filtering/sorting `albums`, recomputed only by `updateDisplayedAlbums()`
+    /// Cached result of filtering/sorting `albums`, recomputed only by `recompute()`
     /// (see its call sites) rather than on every `body` evaluation — `body` reads it 2-3 times a
     /// pass, and re-filtering/re-sorting a whole library each time (plus again on every
     /// `DownloadStore`/`LibraryCacheStatus` publish) was a big part of the CPU cost of opening
     /// this screen. Same approach `SongsListView` already uses.
     @State private var displayedAlbums: [AlbumID3] = []
     /// `albums`, sorted by the current field/order — recomputed only when `albums` or the sort
-    /// changes (`updateSortedAlbums()`). Filtering (`updateDisplayedAlbums()`) then works on this
+    /// changes (`markSortStale()`). Filtering (`recompute()`) then works on this
     /// already-sorted array and preserves its order, so a search keystroke or a downloads publish
     /// never pays for re-sorting the whole library (an ICU collation per comparison).
     @State private var sortedAlbums: [AlbumID3] = []
+    /// Sorts/groups/filters off the main actor — see `OffMainDeriver`.
+    @State private var deriver = OffMainDeriver()
     @State private var isLoading = false
     @State private var loadError: String?
     @State private var hasLoadedOnce = false
@@ -122,63 +124,56 @@ struct AlbumsListView: View {
     ]
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if isLoading {
-                    ProgressView()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let loadError {
-                    Text(loadError)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 16)
-                } else if displayedAlbums.isEmpty {
-                    Text("No albums found.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    switch displayStyle {
-                    case .grid:
-                        ScrollView {
-                            albumsGrid
-                        }
-                    case .list:
-                        albumsList
+        Group {
+            if isLoading {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let loadError {
+                Text(loadError)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 16)
+            } else if displayedAlbums.isEmpty {
+                Text("No albums found.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                switch displayStyle {
+                case .grid:
+                    ScrollView {
+                        albumsGrid
                     }
+                case .list:
+                    albumsList
                 }
             }
-            .refreshable { await performRefresh(force: true) }
-            .navigationTitle("Albums")
-            .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
-            .toolbar {
-                filterButton
-                sortButton
-            }
-            .task { await refresh() }
-            .onAppear {
-                // So "is this album fully downloaded" reads correctly offline even before any
-                // live fetch has happened this session — guarded internally, cheap to call again.
-                Task(priority: .utility) { await LibraryCacheStatus.shared.preload() }
-            }
-            .onChange(of: searchText) { updateDisplayedAlbums() }
-            .onChange(of: filterOptionStorage) { updateDisplayedAlbums() }
-            .onChange(of: sortFieldStorage) { updateSortedAlbums() }
-            .onChange(of: sortOrderStorage) { updateSortedAlbums() }
-            .onChange(of: groupReleaseVersionsEnabled) { updateDisplayedAlbums() }
-            .onChange(of: showUnavailableInLists) { updateDisplayedAlbums() }
-            .onChange(of: networkMonitor.isOnline) { updateDisplayedAlbums() }
-            .onChange(of: downloads.revision) { if offlineFilterActive { updateDisplayedAlbums() } }
-            .onChange(of: libraryCacheStatus.revision) { if offlineFilterActive { updateDisplayedAlbums() } }
         }
+        .refreshable { await performRefresh(force: true) }
+        .navigationTitle("Albums")
+        .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
+        .toolbar {
+            filterButton
+            sortButton
+        }
+        .task { await refresh() }
+        .onChange(of: searchText) { recompute(debounced: true) }
+        .onChange(of: filterOptionStorage) { recompute() }
+        .onChange(of: sortFieldStorage) { markSortStale() }
+        .onChange(of: sortOrderStorage) { markSortStale() }
+        .onChange(of: groupReleaseVersionsEnabled) { recompute() }
+        .onChange(of: showUnavailableInLists) { recompute() }
+        .onChange(of: networkMonitor.isOnline) { recompute() }
+        .onChange(of: downloads.revision) { if offlineFilterActive { recompute() } }
+        .onChange(of: libraryCacheStatus.revision) { if offlineFilterActive { recompute() } }
     }
 
     private var albumsGrid: some View {
         LazyVGrid(columns: gridColumns, spacing: 16) {
             ForEach(displayedAlbums) { album in
-                NavigationLink(destination: AlbumView(album: album, zoomNamespace: albumZoomNamespace)) {
+                NavigationLink(destination: LazyDestination { AlbumView(album: album, zoomNamespace: albumZoomNamespace) }) {
                     AlbumCardView(album: album, zoomNamespace: albumZoomNamespace)
                 }
                 .buttonStyle(.plain)
@@ -192,7 +187,7 @@ struct AlbumsListView: View {
     private var albumsList: some View {
         List {
             ForEach(displayedAlbums) { album in
-                NavigationLink(destination: AlbumView(album: album, zoomNamespace: albumZoomNamespace)) {
+                NavigationLink(destination: LazyDestination { AlbumView(album: album, zoomNamespace: albumZoomNamespace) }) {
                     AlbumRow(album: album, zoomNamespace: albumZoomNamespace, displayScale: displayScale)
                 }
                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
@@ -209,27 +204,67 @@ struct AlbumsListView: View {
         networkMonitor.isOnline || downloads.hasDownloadedSong(inAlbum: album.id.raw)
     }
 
+    /// Everything the derivation needs, captured by value so it can run off the main actor.
+    private struct DerivationSpec: Sendable {
+        var field: AlbumSortField
+        var ascending: Bool
+        var favoritesOnly: Bool
+        var groupVersions: Bool
+        var search: String
+    }
+
+    /// The items or the sort changed: the next derivation has to sort again.
+    private func markSortStale() {
+        deriver.sortStale = true
+        recompute()
+    }
+
+    /// Re-derives `sortedAlbums` (only if the items or sort changed) and `displayedAlbums` off the
+    /// main actor and applies the newest result. The sort, release-version grouping and search
+    /// filter over a whole library used to run synchronously on the main actor, on open and again
+    /// on every search keystroke.
+    private func recompute(debounced: Bool = false) {
+        let items = albums
+        let alreadySorted = sortedAlbums
+        let needsSort = deriver.sortStale
+        let spec = DerivationSpec(
+            field: sortField.wrappedValue,
+            ascending: sortOrder.wrappedValue == .ascending,
+            favoritesOnly: filterOption.wrappedValue == .favoritesOnly,
+            groupVersions: groupReleaseVersionsEnabled,
+            search: searchText
+        )
+        deriver.run(delay: debounced ? .milliseconds(200) : nil, {
+            let sorted = needsSort ? Self.sorted(items, spec) : alreadySorted
+            return (sorted: sorted, displayed: Self.filtered(sorted, spec))
+        }, apply: { result in
+            deriver.sortStale = false
+            sortedAlbums = result.sorted
+            // The offline filter reads main-actor stores, and is a cheap lookup per album.
+            displayedAlbums = offlineFilterActive
+                ? result.displayed.filter {
+                    libraryCacheStatus.isAlbumFullyDownloaded(albumId: $0.id.raw, downloads: downloads)
+                }
+                : result.displayed
+            isLoading = false
+        })
+    }
+
     /// Sorts the whole library by the current field/order. `sortedByLocalizedKey` computes each
     /// title/artist key once rather than on both sides of every comparison.
-    private func sortAlbums(_ list: [AlbumID3]) -> [AlbumID3] {
-        let ascending = sortOrder.wrappedValue == .ascending
-        switch sortField.wrappedValue {
+    private nonisolated static func sorted(_ list: [AlbumID3], _ spec: DerivationSpec) -> [AlbumID3] {
+        switch spec.field {
         case .title:
-            return list.sortedByLocalizedKey(ascending: ascending) { $0.name.sortKey }
+            return list.sortedByLocalizedKey(ascending: spec.ascending) { $0.name.sortKey }
         case .artist:
-            return list.sortedByLocalizedKey(ascending: ascending) { ($0.artist ?? "").sortKey }
+            return list.sortedByLocalizedKey(ascending: spec.ascending) { ($0.artist ?? "").sortKey }
         case .year:
             return list.sorted { lhs, rhs in
                 let lhsYear = lhs.year ?? 0
                 let rhsYear = rhs.year ?? 0
-                return ascending ? lhsYear < rhsYear : lhsYear > rhsYear
+                return spec.ascending ? lhsYear < rhsYear : lhsYear > rhsYear
             }
         }
-    }
-
-    private func updateSortedAlbums() {
-        sortedAlbums = sortAlbums(albums)
-        updateDisplayedAlbums()
     }
 
     /// Whether the offline "hide what isn't downloaded" filter is currently in effect — the only
@@ -238,39 +273,32 @@ struct AlbumsListView: View {
         !networkMonitor.isOnline && !showUnavailableInLists
     }
 
-    /// Filters the already-sorted `sortedAlbums` — every step below preserves its order, except
+    /// Filters the already-sorted albums — every step below preserves its order, except
     /// grouping release versions, which can put a group's preferred version somewhere other than
     /// where its first member sat (only matters for non-title sorts, where members can differ in
     /// year/artist string), so those re-sort the (much smaller) grouped result.
-    private func updateDisplayedAlbums() {
-        var result = sortedAlbums
+    private nonisolated static func filtered(_ sorted: [AlbumID3], _ spec: DerivationSpec) -> [AlbumID3] {
+        var result = sorted
 
-        let isFavoritesOnly = filterOption.wrappedValue == .favoritesOnly
-        if isFavoritesOnly {
+        if spec.favoritesOnly {
             result = result.filter { $0.isStarred }
         }
 
-        if groupReleaseVersionsEnabled && !isFavoritesOnly {
+        if spec.groupVersions && !spec.favoritesOnly {
             result = result.groupedByPreferredVersion()
-            if sortField.wrappedValue != .title {
-                result = sortAlbums(result)
+            if spec.field != .title {
+                result = Self.sorted(result, spec)
             }
         }
 
-        if !searchText.isEmpty {
+        if !spec.search.isEmpty {
             result = result.filter {
-                $0.name.localizedCaseInsensitiveContains(searchText)
-                    || ($0.artist?.localizedCaseInsensitiveContains(searchText) ?? false)
+                $0.name.localizedCaseInsensitiveContains(spec.search)
+                    || ($0.artist?.localizedCaseInsensitiveContains(spec.search) ?? false)
             }
         }
 
-        if offlineFilterActive {
-            result = result.filter {
-                libraryCacheStatus.isAlbumFullyDownloaded(albumId: $0.id.raw, downloads: downloads)
-            }
-        }
-
-        displayedAlbums = result
+        return result
     }
 
     /// Stale-while-revalidate: shows cached albums immediately (no spinner) if any are cached,
@@ -283,6 +311,7 @@ struct AlbumsListView: View {
             albums = []
             sortedAlbums = []
             displayedAlbums = []
+            deriver.cancel()
             hasLoadedOnce = false
             return
         }
@@ -299,29 +328,29 @@ struct AlbumsListView: View {
     /// `force` skips the "has the server library changed?" check, for pull-to-refresh.
     private func performRefresh(force: Bool = false) async {
         guard client.isConfigured else { return }
-        defer { isLoading = false }
+        // The spinner stays up until the first derivation lands, rather than flashing "No albums
+        // found." while the (now off-main) sort is still running.
+        defer { if !deriver.isPending { isLoading = false } }
         for await event in LibraryLoader.load(.allAlbums(), shown: albums, force: force) {
             switch event {
             case .cached(let cached):
                 albums = cached
-                updateSortedAlbums()
                 hasLoadedOnce = true
-                isLoading = false
+                markSortStale()
             case .fresh(let fetched):
                 loadError = nil
-                isLoading = false
                 hasLoadedOnce = true
                 albums = fetched
-                updateSortedAlbums()
+                markSortStale()
             case .upToDate:
                 loadError = nil
-                isLoading = false
                 hasLoadedOnce = true
+                if !deriver.isPending { isLoading = false }
             case .failed(let error):
                 // Offline, or the request otherwise failed — keep showing whatever's already on
                 // screen (cache, or an earlier successful fetch); only surface an error if
                 // there's truly nothing to show.
-                isLoading = false
+                if !deriver.isPending { isLoading = false }
                 if albums.isEmpty {
                     loadError = error.localizedDescription
                 }
@@ -402,7 +431,7 @@ private struct AlbumRow: View {
         self.album = album
         self.zoomNamespace = zoomNamespace
         let pixelSize = Int(rowArtworkSize * displayScale)
-        _artworkURL = State(initialValue: try? SubsonicClient.shared.coverArtURL(forId: album.coverArt ?? album.id.raw, size: pixelSize))
+        _artworkURL = State(initialValue: SubsonicClient.shared.cachedCoverArtURL(forId: album.coverArt ?? album.id.raw, size: pixelSize))
     }
 
     var body: some View {
@@ -464,5 +493,7 @@ private struct AlbumRow: View {
 }
 
 #Preview {
-    AlbumsListView()
+    NavigationStack {
+        AlbumsListView()
+    }
 }

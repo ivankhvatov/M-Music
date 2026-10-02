@@ -188,7 +188,7 @@ struct LibraryView: View {
         } else {
             LazyVGrid(columns: gridColumns, spacing: 16) {
                 ForEach(recentAlbums) { album in
-                    NavigationLink(destination: AlbumView(album: album, zoomNamespace: albumZoomNamespace)) {
+                    NavigationLink(destination: LazyDestination { AlbumView(album: album, zoomNamespace: albumZoomNamespace) }) {
                         AlbumCardView(album: album, zoomNamespace: albumZoomNamespace)
                     }
                     .buttonStyle(.plain)
@@ -206,7 +206,7 @@ struct LibraryView: View {
         @ViewBuilder let destination: () -> Destination
 
         var body: some View {
-            NavigationLink(destination: destination) {
+            NavigationLink(destination: LazyDestination(build: destination)) {
                 HStack(spacing: 16) {
                     Image(systemName: icon)
                         .font(.title3)
@@ -243,26 +243,27 @@ struct LibraryView: View {
         private var settingsButton: some ToolbarContent {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    // Closure-based destinations: the `destination:` autoclosure form built all four
-                    // settings screens' structs (`PlaybackSettingsView` alone has ~17 `@AppStorage`
-                    // properties) every time this view's body ran; these only build on push.
+                    // `LazyDestination`: any `NavigationLink` initializer — the autoclosure form and
+                    // the `{ }` builder alike — builds its destination when the link is built, and
+                    // `PlaybackSettingsView` alone has ~17 `@AppStorage` properties; this only
+                    // builds the screen on push.
                     NavigationLink {
-                        ServerSettingsView()
+                        LazyDestination { ServerSettingsView() }
                     } label: {
                         Label("Server", systemImage: "server.rack")
                     }
                     NavigationLink {
-                        PlaybackSettingsView()
+                        LazyDestination { PlaybackSettingsView() }
                     } label: {
                         Label("Playback", systemImage: "play.circle")
                     }
                     NavigationLink {
-                        DownloadsSettingsView()
+                        LazyDestination { DownloadsSettingsView() }
                     } label: {
                         Label("Downloads", systemImage: "square.and.arrow.down")
                     }
                     NavigationLink {
-                        AppearanceSettingsView()
+                        LazyDestination { AppearanceSettingsView() }
                     } label: {
                         Label("Appearance", systemImage: "paintbrush")
                     }

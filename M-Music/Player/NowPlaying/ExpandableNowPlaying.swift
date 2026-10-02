@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 enum PlayerMatchedGeometry {
@@ -15,11 +16,19 @@ struct ExpandableNowPlaying: View {
     /// view starts taking over the screen, and only bring it back once this view has fully handed
     /// off to it, so the two are never both visible at once.
     @Binding var accessoryVisible: Bool
-    @ObservedObject private var player = PlayerManager.shared
+    /// The current cover, fed from a de-duplicated publisher (see `artworkPublisher`) rather than
+    /// by observing `PlayerManager` — this view reads nothing else from it, and observing the whole
+    /// object rebuilt the entire player (background, both chromes, artwork) on every unrelated
+    /// publish: play/pause, buffering, star, every step of a track change.
+    @State private var artworkURL: URL? = PlayerManager.shared.artworkURL
     @State private var offsetY: CGFloat = 0.0
-    @State private var windowProgress: CGFloat = 0.0
     @State private var progressTrackState: CGFloat = 0.0
-    @State private var expandProgress: CGFloat = 0.0
+    /// Which band the live expand progress is in. The progress itself changes every frame of the
+    /// morph (and every pixel of the drag-to-dismiss), but only three thresholds of it are ever
+    /// read — so this holds just the band, and is written only when the progress crosses into a
+    /// different one. Storing the raw value rebuilt this whole view (background, both chromes,
+    /// artwork) on every frame of every expand and collapse.
+    @State private var phase: ExpandPhase = .collapsed
     /// Drives the chrome crossfade below — kept separate from `expandProgress`, which also tracks
     /// the interactive drag-to-dismiss gesture pixel-by-pixel as the user's finger moves. Chrome
     /// should only start crossfading once a collapse is actually committed (released past the
@@ -54,6 +63,8 @@ struct ExpandableNowPlaying: View {
     @State private var colors: [Color] = [.gray]
     @Namespace private var animationNamespace
 
+    private static let artworkPublisher = PlayerManager.shared.$artworkURL.removeDuplicates()
+
     var body: some View {
         expandableNowPlaying
             .onAppear {
@@ -75,35 +86,47 @@ struct ExpandableNowPlaying: View {
                     expandNow()
                 } else {
                     compactMarqueeRestartToken &+= 1
+                    PlayerPresentation.shared.accessoryMarqueeRestartToken &+= 1
                 }
             }
-            .onPreferenceChange(NowPlayingExpandProgressPreferenceKey.self) { [$expandProgress] value in
-                guard expandProgress != value else { return }
-                $expandProgress.wrappedValue = value
+            .onPreferenceChange(NowPlayingExpandProgressPreferenceKey.self) { [$phase] value in
+                let new = ExpandPhase(progress: value)
+                guard $phase.wrappedValue != new else { return }
+                $phase.wrappedValue = new
             }
             .onChange(of: isFullyCollapsed) { _, isFullyCollapsed in
                 guard isFullyCollapsed else { return }
                 accessoryVisible = true
             }
-            .task(id: player.artworkURL) {
-                await updateColors()
+            .onReceive(Self.artworkPublisher) { url in
+                guard artworkURL != url else { return }
+                artworkURL = url
+            }
+            .task(id: artworkURL) {
+                await updateColors(for: artworkURL)
             }
     }
 }
 
 private extension ExpandableNowPlaying {
     var isFullyExpanded: Bool {
-        expandProgress >= 1
+        phase == .expanded
     }
 
     var isFullyCollapsed: Bool {
-        expandProgress.isZero
+        phase == .collapsed
     }
 
     /// Whether the chromes' marquees should be scrolling: whenever any of the player is on screen.
     /// (The chromes stay mounted while collapsed at opacity 0; this keeps their timelines paused.)
     var marqueesActive: Bool {
-        !isFullyCollapsed
+        phase != .collapsed
+    }
+
+    /// The mini player's own marquees: scrolling only while its chrome is actually visible — not
+    /// once the expanded player has taken over (they'd otherwise tick at display rate, hidden).
+    var compactMarqueesActive: Bool {
+        !expanded && phase != .collapsed
     }
 
     /// Gates *only* `NowPlayingBackground`'s material (glass vs. colorful fill) — deliberately
@@ -118,7 +141,7 @@ private extension ExpandableNowPlaying {
     /// constraint, so it alone stays showing the expanded/colorful look for most of the shrink and
     /// only swaps to real Liquid Glass in the final stretch.
     var showsExpandedMaterial: Bool {
-        isShapeExpanded || expandProgress > Const.collapseMorphThreshold
+        isShapeExpanded || phase == .partial || phase == .expanded
     }
 
     var expandableNowPlaying: some View {
@@ -150,7 +173,7 @@ private extension ExpandableNowPlaying {
                     .environment(\.playerButtonSymbolTransitions, expanded)
                     .opacity(chromeProgress)
                     .allowsHitTesting(expanded)
-                CompactChrome(expanded: $expanded, marqueesActive: marqueesActive, marqueeRestartToken: compactMarqueeRestartToken)
+                CompactChrome(expanded: $expanded, marqueesActive: compactMarqueesActive, marqueeRestartToken: compactMarqueeRestartToken)
                     .environment(\.playerButtonSymbolTransitions, !expanded)
                     .opacity(1 - chromeProgress)
                     .allowsHitTesting(!expanded)
@@ -231,8 +254,7 @@ private extension ExpandableNowPlaying {
         guard expanded, !showsQueue else { return }
         let translation = max(value.translation.height, 0)
         offsetY = translation
-        windowProgress = max(min(translation / viewSize.height, 1), 0)
-        stacked(progress: 1 - windowProgress, withAnimation: false)
+        stacked(progress: 1 - max(min(translation / viewSize.height, 1), 0), withAnimation: false)
     }
 
     func handleGestureEnd(value: PanGesture.Value, viewSize: CGSize) {
@@ -322,8 +344,8 @@ private extension ExpandableNowPlaying {
     /// Colours only need a coarse look at the artwork, so this reads a small decoded tier (the
     /// dominant-colour pass resamples to 40×40 anyway) and does the pixel work off the main
     /// actor; only the finished palette is assigned here, once.
-    func updateColors() async {
-        guard let url = player.artworkURL,
+    func updateColors(for url: URL?) async {
+        guard let url,
               let uiImage = await ImageCache.shared.load(url, maxPixelSize: ImageCache.colorSamplingMaxPixelSize)
         else {
             colors = [.gray]
@@ -384,6 +406,30 @@ extension Animation {
     static let playerExpandAnimationDuration: TimeInterval = 0.3
     static var playerExpandAnimation: Animation {
         .smooth(duration: playerExpandAnimationDuration, extraBounce: 0)
+    }
+}
+
+/// The bands of the live expand progress that anything reads — see `ExpandableNowPlaying.phase`.
+private enum ExpandPhase: Equatable {
+    /// Exactly 0: fully collapsed, the whole view hidden.
+    case collapsed
+    /// Above 0, up to `collapseMorphThreshold`: a collapse's last stretch, still showing glass.
+    case nearCollapsed
+    /// Above `collapseMorphThreshold`, below 1: mid-morph (or mid-drag), colorful material.
+    case partial
+    /// 1 or more: fully expanded.
+    case expanded
+
+    init(progress: CGFloat) {
+        if progress.isZero {
+            self = .collapsed
+        } else if progress >= 1 {
+            self = .expanded
+        } else if progress > ExpandableNowPlaying.Const.collapseMorphThreshold {
+            self = .partial
+        } else {
+            self = .nearCollapsed
+        }
     }
 }
 

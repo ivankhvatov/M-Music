@@ -40,55 +40,48 @@ struct PlaylistsListView: View {
     ]
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if isLoading {
-                    ProgressView()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let loadError {
-                    Text(loadError)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 16)
-                } else if displayedPlaylists.isEmpty {
-                    Text("No playlists found.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    switch displayStyle {
-                    case .grid:
-                        ScrollView {
-                            playlistsGrid
-                        }
-                    case .list:
-                        playlistsList
+        Group {
+            if isLoading {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let loadError {
+                Text(loadError)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 16)
+            } else if displayedPlaylists.isEmpty {
+                Text("No playlists found.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                switch displayStyle {
+                case .grid:
+                    ScrollView {
+                        playlistsGrid
                     }
+                case .list:
+                    playlistsList
                 }
             }
-            .refreshable { await performRefresh() }
-            .navigationTitle("Playlists")
-            .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
-            .task { await refresh() }
-            .onAppear {
-                // So playlists cached in an earlier session gray out correctly before any
-                // playlist is opened this session — guarded internally, cheap to call again.
-                Task(priority: .utility) { await LibraryCacheStatus.shared.preload() }
-            }
-            .onChange(of: searchText) { updateDisplayedPlaylists() }
-            .onChange(of: showUnavailableInLists) { updateDisplayedPlaylists() }
-            .onChange(of: networkMonitor.isOnline) { updateDisplayedPlaylists() }
-            .onChange(of: downloads.revision) { updateDisplayedPlaylists() }
-            .onChange(of: libraryCacheStatus.revision) { updateDisplayedPlaylists() }
         }
+        .refreshable { await performRefresh() }
+        .navigationTitle("Playlists")
+        .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
+        .task { await refresh() }
+        .onChange(of: searchText) { updateDisplayedPlaylists() }
+        .onChange(of: showUnavailableInLists) { updateDisplayedPlaylists() }
+        .onChange(of: networkMonitor.isOnline) { updateDisplayedPlaylists() }
+        .onChange(of: downloads.revision) { updateDisplayedPlaylists() }
+        .onChange(of: libraryCacheStatus.revision) { updateDisplayedPlaylists() }
     }
 
     private var playlistsGrid: some View {
         LazyVGrid(columns: gridColumns, spacing: 16) {
             ForEach(displayedPlaylists) { playlist in
-                NavigationLink(destination: PlaylistView(playlist: playlist, zoomNamespace: playlistZoomNamespace)) {
+                NavigationLink(destination: LazyDestination { PlaylistView(playlist: playlist, zoomNamespace: playlistZoomNamespace) }) {
                     PlaylistCardView(playlist: playlist, zoomNamespace: playlistZoomNamespace)
                 }
                 .buttonStyle(.plain)
@@ -102,7 +95,7 @@ struct PlaylistsListView: View {
     private var playlistsList: some View {
         List {
             ForEach(displayedPlaylists) { playlist in
-                NavigationLink(destination: PlaylistView(playlist: playlist, zoomNamespace: playlistZoomNamespace)) {
+                NavigationLink(destination: LazyDestination { PlaylistView(playlist: playlist, zoomNamespace: playlistZoomNamespace) }) {
                     PlaylistRow(playlist: playlist, zoomNamespace: playlistZoomNamespace, displayScale: displayScale)
                 }
                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
@@ -230,7 +223,7 @@ private struct PlaylistRow: View {
         self.playlist = playlist
         self.zoomNamespace = zoomNamespace
         let pixelSize = Int(rowArtworkSize * displayScale)
-        _artworkURL = State(initialValue: try? SubsonicClient.shared.coverArtURL(forId: playlist.coverArt ?? playlist.id.raw, size: pixelSize))
+        _artworkURL = State(initialValue: SubsonicClient.shared.cachedCoverArtURL(forId: playlist.coverArt ?? playlist.id.raw, size: pixelSize))
     }
 
     var body: some View {
@@ -299,5 +292,7 @@ private struct PlaylistRow: View {
 }
 
 #Preview {
-    PlaylistsListView()
+    NavigationStack {
+        PlaylistsListView()
+    }
 }

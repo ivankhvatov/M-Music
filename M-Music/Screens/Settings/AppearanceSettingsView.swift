@@ -31,54 +31,54 @@ struct AppearanceSettingsView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 10) {
-                List {
-                    Section {
-                        Toggle("Separate artist's release types", isOn: $separateReleaseTypesEnabled)
-                        Toggle("Group release versions", isOn: $groupReleaseVersionsEnabled)
-                        Picker("Display playlists as", selection: playlistsDisplayStyle) {
-                            ForEach(LibraryDisplayStyle.allCases, id: \.self) { style in
-                                Text(style.rawValue).tag(style)
-                            }
+        VStack(alignment: .leading, spacing: 10) {
+            List {
+                Section {
+                    Toggle("Separate artist's release types", isOn: $separateReleaseTypesEnabled)
+                    Toggle("Group release versions", isOn: $groupReleaseVersionsEnabled)
+                    Picker("Display playlists as", selection: playlistsDisplayStyle) {
+                        ForEach(LibraryDisplayStyle.allCases, id: \.self) { style in
+                            Text(style.rawValue).tag(style)
                         }
-                        .pickerStyle(.menu)
-                        Picker("Display albums as", selection: albumsDisplayStyle) {
-                            ForEach(LibraryDisplayStyle.allCases, id: \.self) { style in
-                                Text(style.rawValue).tag(style)
-                            }
+                    }
+                    .pickerStyle(.menu)
+                    Picker("Display albums as", selection: albumsDisplayStyle) {
+                        ForEach(LibraryDisplayStyle.allCases, id: \.self) { style in
+                            Text(style.rawValue).tag(style)
                         }
-                        .pickerStyle(.menu)
-                    } header: {
-                        Text("Library")
-                    } footer: {
-                        Text("Separate artist's release types shows an artist's albums, EPs, singles, and other release types as separate rows instead of one grid; artists with only one release type are unaffected. Group release versions collapses multiple versions of the same album (e.g. a Deluxe or Remastered edition) down to just the plain edition, or the one with the shortest version name if there's no plain edition — except when Albums is filtered to Favorite only.")
                     }
-                    Section {
-                        Toggle("Show audio info", isOn: $showAudioInfo)
-                    } header: {
-                        Text("Player")
-                    } footer: {
-                        Text("Shows the current playback source, codec, and bitrate (or bit depth/sample rate for a lossless codec) below the artist name in the expanded Now Playing view.")
-                    }
-                    Section {
-                        Toggle("Show unavailable in lists", isOn: $showUnavailableInLists)
-                        Toggle("Show unavailable in albums", isOn: $showUnavailableInAlbums)
-                        Toggle("Show unavailable in playlists", isOn: $showUnavailableInPlaylists)
-                    } header: {
-                        Text("Offline mode")
-                    } footer: {
-                        Text("When offline, controls whether content you haven't downloaded is shown dimmed (on) or hidden entirely (off): songs in Songs, fully-downloaded playlists/albums/artists in their list screens, and individual tracks inside an album or playlist.")
-                    }
+                    .pickerStyle(.menu)
+                } header: {
+                    Text("Library")
+                } footer: {
+                    Text("Separate artist's release types shows an artist's albums, EPs, singles, and other release types as separate rows instead of one grid; artists with only one release type are unaffected. Group release versions collapses multiple versions of the same album (e.g. a Deluxe or Remastered edition) down to just the plain edition, or the one with the shortest version name if there's no plain edition — except when Albums is filtered to Favorite only.")
                 }
-                .navigationTitle("Appearance")
+                Section {
+                    Toggle("Show audio info", isOn: $showAudioInfo)
+                } header: {
+                    Text("Player")
+                } footer: {
+                    Text("Shows the current playback source, codec, and bitrate (or bit depth/sample rate for a lossless codec) below the artist name in the expanded Now Playing view.")
+                }
+                Section {
+                    Toggle("Show unavailable in lists", isOn: $showUnavailableInLists)
+                    Toggle("Show unavailable in albums", isOn: $showUnavailableInAlbums)
+                    Toggle("Show unavailable in playlists", isOn: $showUnavailableInPlaylists)
+                } header: {
+                    Text("Offline mode")
+                } footer: {
+                    Text("When offline, controls whether content you haven't downloaded is shown dimmed (on) or hidden entirely (off): songs in Songs, fully-downloaded playlists/albums/artists in their list screens, and individual tracks inside an album or playlist.")
+                }
             }
-            .toolbar {
-            }
+            .navigationTitle("Appearance")
+        }
+        .toolbar {
         }
     }
 }
 
 #Preview {
-    AppearanceSettingsView()
+    NavigationStack {
+        AppearanceSettingsView()
+    }
 }

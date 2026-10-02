@@ -11,10 +11,16 @@ struct PlaylistCardView: View {
     let playlist: PlaylistSummary
     var zoomNamespace: Namespace.ID? = nil
 
-    /// Computed once per `playlist.id` and cached — see `AlbumCardView.artworkURL`'s doc comment
+    /// Resolved once per `playlist.id`, in `init` — see `AlbumCardView.artworkURL`'s doc comment
     /// for why: `coverArtURL` signs every call with a fresh random token, so recomputing it on
     /// every body evaluation would make `CachedAsyncImage` see a "new" URL each time.
     @State private var artworkURL: URL?
+
+    init(playlist: PlaylistSummary, zoomNamespace: Namespace.ID? = nil) {
+        self.playlist = playlist
+        self.zoomNamespace = zoomNamespace
+        _artworkURL = State(initialValue: SubsonicClient.shared.cachedCoverArtURL(forId: playlist.coverArt ?? playlist.id.raw))
+    }
 
     @ObservedObject private var downloads = DownloadStore.shared
     @ObservedObject private var libraryCacheStatus = LibraryCacheStatus.shared
@@ -35,9 +41,6 @@ struct PlaylistCardView: View {
                 .padding(.top, -3)
         }
         .dimmedIfUnavailable(isAvailable)
-        .task(id: playlist.id) {
-            artworkURL = try? SubsonicClient.shared.coverArtURL(forId: playlist.coverArt ?? playlist.id.raw)
-        }
     }
 
     /// Nothing is ever "unavailable" while online — only offline does whether this playlist has

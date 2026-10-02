@@ -241,7 +241,7 @@ final class ImageCache: @unchecked Sendable {
 
     // MARK: - Stable cache key
 
-    private func stableKey(for url: URL) -> String {
+    func stableKey(for url: URL) -> String {
         guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
             return url.absoluteString
         }

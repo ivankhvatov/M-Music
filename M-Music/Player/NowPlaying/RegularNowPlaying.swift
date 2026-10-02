@@ -74,6 +74,7 @@ struct RegularChrome: View {
                 ZStack(alignment: .top) {
                     if mountsQueueList || showsQueue {
                         PlayerQueueList()
+                            .equatable()
                             .frame(
                                 maxWidth: .infinity,
                                 minHeight: queueListHeight,
