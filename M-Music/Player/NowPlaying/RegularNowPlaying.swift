@@ -116,9 +116,35 @@ struct RegularChrome: View {
                 // taller, the layout doesn't.
                 .padding(.bottom, showsQueue ? -RegularNowPlayingLayout.scrubberBarInset : 0)
                 PlayerProgress(spacing: spacing)
-                PlayerControls(showsQueue: $showsQueue)
+                PlayerControls(showsQueue: queueButtonBinding)
             }
         }
+    }
+
+    /// What the controls' queue button toggles. Normally that's `showsQueue` itself; but if the
+    /// list hasn't been mounted yet (it's built shortly after the player first opens, and a first
+    /// tap can come before then or while it's still building), turning the queue on in that same
+    /// animated update would *insert* the list already at its final place — there's nothing for
+    /// its offset and fade to animate from, so the buttons, "Up next" header and rows just
+    /// appeared while the title and artwork moved. So it's mounted first, hidden and without
+    /// animation, and the animated toggle starts a beat later, once it exists.
+    private var queueButtonBinding: Binding<Bool> {
+        Binding(
+            get: { showsQueue },
+            set: { newValue in
+                guard newValue, !mountsQueueList else {
+                    showsQueue = newValue
+                    return
+                }
+                var instant = Transaction()
+                instant.disablesAnimations = true
+                withTransaction(instant) { mountsQueueList = true }
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(80))
+                    withAnimation(.playerQueueAnimation) { showsQueue = true }
+                }
+            }
+        )
     }
 
     private var grip: some View {
