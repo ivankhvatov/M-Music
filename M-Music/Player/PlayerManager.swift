@@ -430,8 +430,14 @@ final class PlayerManager: ObservableObject {
         let sourceIndex = base + source
         let destinationIndex = base + destination
         guard queue.indices.contains(sourceIndex), queue.indices.contains(destinationIndex) else { return }
-        let track = queue.remove(at: sourceIndex)
-        queue.insert(track, at: destinationIndex)
+        // One assignment to `queue`, not two separate mutations: each write to this `@Published`
+        // property fans out to every view holding `PlayerManager.shared` as an `@ObservedObject`
+        // (roughly a dozen, app-wide) — halving the publish count per swap halves that redundant
+        // re-render fan-out during a drag, where this gets called repeatedly.
+        var newQueue = queue
+        let track = newQueue.remove(at: sourceIndex)
+        newQueue.insert(track, at: destinationIndex)
+        queue = newQueue
         if source == 0 || destination == 0 {
             clearGaplessPreload()
             prepareNextItem()

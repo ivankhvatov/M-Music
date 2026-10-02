@@ -359,13 +359,6 @@ struct SongRow: View {
     var onReorderDragEnded: (() -> Void)?
 
     private let client = SubsonicClient.shared
-    /// Not `@ObservedObject`: `songMenu` only ever calls a method on it (`playNext`/
-    /// `addToQueue`), never reads a `@Published` property — observing it here would rebuild this
-    /// row's `Menu` on every playback tick even while it's open, which is what caused the menu to
-    /// visibly pulsate and occasionally drop taps. `SongNowPlayingOverlay` observes it instead,
-    /// scoped to just the artwork glyph.
-    private let player = PlayerManager.shared
-    @ObservedObject private var starStore = StarStore.shared
     @ObservedObject private var downloads = DownloadStore.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
@@ -374,6 +367,18 @@ struct SongRow: View {
     /// load task) on every one of this row's re-renders, even though it's the same image every
     /// time. Mirrors the fix already applied to `AlbumView`'s artwork URL.
     @State private var artworkURL: URL?
+
+    /// Caches a signed artwork URL by art id + pixel size, so repeatedly constructing a `SongRow`
+    /// for the *same* track — e.g. the queue list's dragged row, reconstructed on every gesture
+    /// callback while it tracks the finger — doesn't redo `coverArtURL`'s signing (a random salt
+    /// plus an MD5 hash, hex-formatted byte by byte) each time purely to throw the result away
+    /// via `@State`'s first-appearance-only semantics. Subsonic's salt+token scheme has no
+    /// server-side single-use/expiry tracking — the server just recomputes the hash from the
+    /// salt and password — so a cached URL keeps working for as long as the credentials do; this
+    /// is safe to reuse indefinitely within a session, not just across one render pass. Plain
+    /// `static var`, not an actor: `SongRow.init` only ever runs on the main thread (SwiftUI
+    /// constructs views on the main actor), so there's nothing concurrent to guard against.
+    private static var artworkURLCache: [String: URL] = [:]
 
     init(
         track: Child,
@@ -391,7 +396,14 @@ struct SongRow: View {
         self.onReorderDragEnded = onReorderDragEnded
         let artId = track.coverArt ?? track.albumId?.raw ?? track.id.raw
         let pixelSize = Int(rowArtworkSize * displayScale)
-        _artworkURL = State(initialValue: try? SubsonicClient.shared.coverArtURL(forId: artId, size: pixelSize))
+        let cacheKey = "\(artId)#\(pixelSize)"
+        if let cached = Self.artworkURLCache[cacheKey] {
+            _artworkURL = State(initialValue: cached)
+        } else {
+            let resolved = try? SubsonicClient.shared.coverArtURL(forId: artId, size: pixelSize)
+            if let resolved { Self.artworkURLCache[cacheKey] = resolved }
+            _artworkURL = State(initialValue: resolved)
+        }
     }
 
     var body: some View {
@@ -437,9 +449,7 @@ struct SongRow: View {
                         )
                     )
             } else {
-                DownloadStatusIndicator(state: downloads.state(for: track.id.raw))
-
-                songMenu
+                SongTrailingActions(track: track)
             }
         }
     }
@@ -472,6 +482,25 @@ struct SongRow: View {
             SongNowPlayingOverlay(trackId: track.id, rowArtworkSize: rowArtworkSize)
         }
         .frame(width: rowArtworkSize, height: rowArtworkSize)
+    }
+}
+
+/// The download status indicator + song menu shown at the trailing edge of a full (non-reorder-
+/// handle) `SongRow`. Split out so its `starStore` subscription — used only by the menu's
+/// favorite toggle — and this view's own `downloads` subscription don't exist at all when
+/// `SongRow` is in reorder-handle mode, where it's reconstructed on every drag gesture callback
+/// for the actively-dragged row. Mirrors `SongNowPlayingOverlay`: a leaf view scoped to exactly
+/// what it reads.
+private struct SongTrailingActions: View {
+    let track: Child
+
+    private let player = PlayerManager.shared
+    @ObservedObject private var starStore = StarStore.shared
+    @ObservedObject private var downloads = DownloadStore.shared
+
+    var body: some View {
+        DownloadStatusIndicator(state: downloads.state(for: track.id.raw))
+        songMenu
     }
 
     private var songMenu: some View {
