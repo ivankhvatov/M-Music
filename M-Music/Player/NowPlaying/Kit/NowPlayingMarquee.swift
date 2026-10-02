@@ -27,6 +27,11 @@ struct NowPlayingMarquee: View {
     /// Scroll speed, in points per second.
     var speed: CGFloat = 30
     var isActive = true
+    /// Caps how often the scroll is redrawn; `nil` redraws every display frame. The slow scroll
+    /// (30 pt/s) is indistinguishable at 30 Hz from 120 Hz, and the mini player's marquee runs
+    /// whenever its title is long, on every screen the app can show — so redrawing it at display
+    /// rate was a constant per-frame cost under every transition.
+    var frameInterval: TimeInterval?
     /// Changing this restarts the scroll from the beginning (the start position, then the usual
     /// pause) — for when the label is about to be shown again.
     var restartToken = 0
@@ -42,7 +47,7 @@ struct NowPlayingMarquee: View {
         let travel = metrics.width + gap
         let edge = overflows ? fade : 0
 
-        TimelineView(.animation(paused: !(overflows && isActive))) { context in
+        TimelineView(.animation(minimumInterval: frameInterval, paused: !(overflows && isActive))) { context in
             let offset = overflows ? scrollOffset(at: context.date, travel: travel) : 0
             Color.clear
                 .frame(maxWidth: .infinity)

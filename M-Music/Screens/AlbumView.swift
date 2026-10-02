@@ -112,27 +112,23 @@ struct AlbumView: View {
             }
             .padding(.horizontal, 16)
 
+            // The related section's background reaches 10000pt below it, so rubber-banding past
+            // the last carousel shows its color rather than `darkenedBackgroundColor`. It's an
+            // overflowing background — a negative padding on the *background* only — so it adds
+            // nothing to the layout and scrolling stops exactly where the content ends.
+            //
+            // This used to be a real `.padding(.bottom, 10000)` cancelled out by a -10000 bottom
+            // content margin that switched on once related albums had loaded. Those arrive a
+            // moment after the album opens, usually while the user is already scrolling, and
+            // adding the padding and the margin in the same update briefly left the scroll range
+            // negative: the scroll view clamped the offset and the list jumped back to the top.
             relatedAlbumsSection()
-                .padding(.bottom, 10000)
-                .background(darkenedRelatedSectionBackground)
+                .background {
+                    darkenedRelatedSectionBackground
+                        .padding(.bottom, -10000)
+                }
         }
         .background(darkenedBackgroundColor)
-        // No separate backdrop behind the list: every row already paints its own correct
-        // background (`darkenedBackgroundColor`/`darkenedRelatedSectionBackground`), tiling
-        // contiguously, so there's nothing left for a separate scroll-position-driven backdrop to
-        // paper over. The related section's trailing 1000pt `.padding` above exists only so that
-        // *background* extends well past its last carousel (covering rubber-band overscroll);
-        // it must not also extend how far the list can actually be scrolled, or the user could
-        // drag 1000pt past the real content into empty space. This negative bottom content
-        // margin cancels exactly that padding back out for scroll-extent purposes, while leaving
-        // it in place for layout/background purposes — so scrolling still physically stops right
-        // where the last carousel ends, verified directly (built a throwaway harness reproducing
-        // this exact padding-vs-margin shape and confirmed further swipes don't move it at all).
-        .contentMargins(
-            .bottom,
-            (otherVersions.isEmpty && moreByArtist.isEmpty) ? 0 : -10000,
-            for: .scrollContent
-        )
         .toolbar {
             downloadButton
             moreButton

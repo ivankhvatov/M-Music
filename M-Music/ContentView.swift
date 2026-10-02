@@ -57,6 +57,14 @@ struct MainView: View {
             .task {
                 try? await Task.sleep(for: .milliseconds(900))
                 PlayerPresentation.shared.overlayReady = true
+                // Once, at idle — not from each list screen's `.onAppear`, where the cache scans
+                // (and the publish that follows them, which re-renders every observing screen)
+                // landed in the middle of the push animation. `preload()` is guarded internally.
+                try? await Task.sleep(for: .milliseconds(1500))
+                await LibraryCacheStatus.shared.preload()
+                // First use of the image cache creates its directories synchronously; do it here
+                // rather than on the main thread when the first artwork view appears.
+                await Task.detached(priority: .utility) { _ = ImageCache.shared }.value
             }
     }
 

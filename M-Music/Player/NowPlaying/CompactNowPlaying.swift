@@ -27,6 +27,7 @@ struct CompactChrome: View {
                     font: .systemFont(ofSize: 13, weight: .semibold),
                     fade: 8,
                     isActive: marqueesActive,
+                    frameInterval: 1.0 / 30,
                     restartToken: marqueeRestartToken
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -35,6 +36,7 @@ struct CompactChrome: View {
                     font: .systemFont(ofSize: 12, weight: .regular),
                     fade: 8,
                     isActive: marqueesActive,
+                    frameInterval: 1.0 / 30,
                     restartToken: marqueeRestartToken
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)

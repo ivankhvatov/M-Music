@@ -307,6 +307,7 @@ private extension ExpandableNowPlaying {
         }
         stacked(progress: 1, withAnimation: true)
         accessoryVisible = false
+        PlaybackProgress.shared.syncNow()
     }
 
     func stacked(progress: CGFloat, withAnimation: Bool) {

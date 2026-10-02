@@ -5,6 +5,7 @@
 //  Created by Ivan on 02.09.2026.
 //
 
+import Combine
 import SwiftUI
 
 private enum SongFilterOption: LocalizedStringKey, CaseIterable {
@@ -66,9 +67,13 @@ struct SongsListView: View {
     /// filter+sort over the entire library on every playback tick. `SongRow` observes it instead,
     /// scoped to just the currently-visible rows.
     private let player = PlayerManager.shared
-    @ObservedObject private var starStore = StarStore.shared
-    @ObservedObject private var downloads = DownloadStore.shared
-    @ObservedObject private var networkMonitor = NetworkMonitor.shared
+    /// None of these three is `@ObservedObject`: observing them re-ran this whole body — a
+    /// `ForEach` over the entire library, identity-diffed on every pass — on every download
+    /// progress tick, connectivity change or star. The screen reacts through the `.onReceive`s
+    /// below, and the per-row `.disabled` lives in `SongListRow`, which only visible rows build.
+    private let starStore = StarStore.shared
+    private let downloads = DownloadStore.shared
+    private let networkMonitor = NetworkMonitor.shared
     @Environment(\.displayScale) private var displayScale
 
     @State private var searchText = ""
@@ -102,7 +107,7 @@ struct SongsListView: View {
     @State private var loadError: String?
     @State private var hasLoadedOnce = false
 
-    /// Cached result of filtering/sorting `songs`, recomputed only by `updateDisplayedSongs()`
+    /// Cached result of filtering/sorting `songs`, recomputed only by `recompute()`
     /// (see its call sites below) rather than on every `body` evaluation — this list can hold
     /// an entire library's worth of tracks, and re-filtering/re-sorting all of them on every
     /// access (there were 2-3 per `body` pass) was the dominant cause of this screen lagging.
@@ -111,64 +116,66 @@ struct SongsListView: View {
     /// changes — see `AlbumsListView.sortedAlbums`. For a library of thousands of tracks the sort
     /// is the expensive part; filtering (search, favorites, offline) preserves this order.
     @State private var sortedSongs: [Child] = []
+    /// Sorts/filters off the main actor — see `OffMainDeriver`.
+    @State private var deriver = OffMainDeriver()
 
     /// Point size artwork renders at in a row — the server is asked to downscale to this times
     /// `displayScale` rather than sending full-size cover art for a 44x44 thumbnail.
     private let rowArtworkSize: CGFloat = 44
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if isLoading {
-                    ProgressView()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let loadError {
-                    Text(loadError)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 16)
-                } else if displayedSongs.isEmpty {
-                    Text("No songs found.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    List {
-                        ForEach(displayedSongs) { track in
-                            Button {
-                                play(track)
-                            } label: {
-                                SongRow(track: track, rowArtworkSize: rowArtworkSize, displayScale: displayScale)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                            .disabled(!(networkMonitor.isOnline || downloads.isDownloaded(track.id.raw)))
-                        }
+        Group {
+            if isLoading {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let loadError {
+                Text(loadError)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 16)
+            } else if displayedSongs.isEmpty {
+                Text("No songs found.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    ForEach(displayedSongs) { track in
+                        SongListRow(
+                            track: track,
+                            rowArtworkSize: rowArtworkSize,
+                            displayScale: displayScale,
+                            onPlay: { play(track) }
+                        )
+                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                     }
-                    .listStyle(.plain)
                 }
+                .listStyle(.plain)
             }
-            .refreshable { await performRefresh(force: true) }
-            .navigationTitle("Songs")
-            .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
-            .toolbar {
-                filterButton
-                sortButton
-            }
-            .task { await refresh() }
-            .onChange(of: songs) { updateSortedSongs() }
-            .onChange(of: searchText) { updateDisplayedSongs() }
-            .onChange(of: filterOptionStorage) { updateDisplayedSongs() }
-            .onChange(of: sortFieldStorage) { updateSortedSongs() }
-            .onChange(of: sortOrderStorage) { updateSortedSongs() }
-            .onChange(of: starStore.overrides) { if filterOption.wrappedValue == .favoritesOnly { updateDisplayedSongs() } }
-            .onChange(of: showUnavailableInLists) { updateDisplayedSongs() }
-            .onChange(of: networkMonitor.isOnline) { updateDisplayedSongs() }
-            .onChange(of: downloads.revision) { if offlineFilterActive { updateDisplayedSongs() } }
         }
+        .refreshable { await performRefresh(force: true) }
+        .navigationTitle("Songs")
+        .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
+        .toolbar {
+            filterButton
+            sortButton
+        }
+        .task { await refresh() }
+        // A burst of keystrokes coalesces into one filter pass (the delay is inside `recompute`).
+        .onChange(of: searchText) { recompute(debounced: true) }
+        .onChange(of: filterOptionStorage) { recompute() }
+        .onChange(of: sortFieldStorage) { markSortStale() }
+        .onChange(of: sortOrderStorage) { markSortStale() }
+        // `@Published` publishes from `willSet`, so a handler that re-read the store would see the
+        // old value; stars are passed along from the payload, the rest are read after the fact.
+        .onReceive(starStore.$overrides.dropFirst()) { overrides in
+            if filterOption.wrappedValue == .favoritesOnly { recompute(starOverrides: overrides) }
+        }
+        .onChange(of: showUnavailableInLists) { recompute() }
+        .onReceive(networkMonitor.$isOnline.removeDuplicates().dropFirst()) { _ in recompute() }
+        .onReceive(downloads.$revision.dropFirst()) { _ in if offlineFilterActive { recompute() } }
     }
 
     /// `displayedSongs` itself while online; offline, only the ones actually downloaded — so
@@ -184,49 +191,84 @@ struct SongsListView: View {
         player.play(queue: queue, startAt: index)
     }
 
-    private func updateSortedSongs() {
-        // Read once, outside the sort: each read builds a `Binding` and scans `allCases`.
-        let ascending = sortOrder.wrappedValue == .ascending
-        switch sortField.wrappedValue {
+    /// Everything `sorted`/`filtered` need, captured by value so they can run off the main actor.
+    private struct DerivationSpec: Sendable {
+        var field: SongSortField
+        var ascending: Bool
+        var favoritesOnly: Bool
+        /// Only filled while the favorites filter is on (it's what `StarStore.isStarred` reads).
+        var starOverrides: [String: Bool]
+        var search: String
+    }
+
+    /// The items or the sort changed: the next derivation has to sort again.
+    private func markSortStale() {
+        deriver.sortStale = true
+        recompute()
+    }
+
+    /// Re-derives `sortedSongs` (only if the items or sort changed) and `displayedSongs` off the
+    /// main actor, and applies the newest result. Replaces the synchronous sort + filter over the
+    /// whole library that used to run on the main actor on open, and again per search keystroke.
+    private func recompute(debounced: Bool = false, starOverrides: [String: Bool]? = nil) {
+        let items = songs
+        let alreadySorted = sortedSongs
+        let needsSort = deriver.sortStale
+        let favoritesOnly = filterOption.wrappedValue == .favoritesOnly
+        let spec = DerivationSpec(
+            field: sortField.wrappedValue,
+            ascending: sortOrder.wrappedValue == .ascending,
+            favoritesOnly: favoritesOnly,
+            starOverrides: favoritesOnly ? (starOverrides ?? starStore.overrides) : [:],
+            search: searchText
+        )
+        deriver.run(delay: debounced ? .milliseconds(200) : nil, {
+            let sorted = needsSort ? Self.sorted(items, spec) : alreadySorted
+            return (sorted: sorted, displayed: Self.filtered(sorted, spec))
+        }, apply: { result in
+            deriver.sortStale = false
+            sortedSongs = result.sorted
+            // The offline filter reads main-actor stores, and is a cheap set lookup per item.
+            displayedSongs = offlineFilterActive
+                ? result.displayed.filter { downloads.isDownloaded($0.id.raw) }
+                : result.displayed
+            isLoading = false
+        })
+    }
+
+    private nonisolated static func sorted(_ songs: [Child], _ spec: DerivationSpec) -> [Child] {
+        switch spec.field {
         case .title:
-            sortedSongs = songs.sortedByLocalizedKey(ascending: ascending) { $0.title.sortKey }
+            return songs.sortedByLocalizedKey(ascending: spec.ascending) { $0.title.sortKey }
         case .artist:
-            sortedSongs = songs.sortedByLocalizedKey(ascending: ascending) { ($0.artist ?? "").sortKey }
+            return songs.sortedByLocalizedKey(ascending: spec.ascending) { ($0.artist ?? "").sortKey }
         case .year:
-            sortedSongs = songs.sorted { lhs, rhs in
+            return songs.sorted { lhs, rhs in
                 let lhsYear = lhs.year ?? 0
                 let rhsYear = rhs.year ?? 0
-                return ascending ? lhsYear < rhsYear : lhsYear > rhsYear
+                return spec.ascending ? lhsYear < rhsYear : lhsYear > rhsYear
             }
         }
-        updateDisplayedSongs()
+    }
+
+    /// Filters the already-sorted songs, preserving their order.
+    private nonisolated static func filtered(_ sorted: [Child], _ spec: DerivationSpec) -> [Child] {
+        var result = sorted
+        if spec.favoritesOnly {
+            result = result.filter { spec.starOverrides[$0.id.raw] ?? $0.isStarred }
+        }
+        if !spec.search.isEmpty {
+            result = result.filter {
+                $0.title.localizedCaseInsensitiveContains(spec.search)
+                    || ($0.artist?.localizedCaseInsensitiveContains(spec.search) ?? false)
+            }
+        }
+        return result
     }
 
     /// See `AlbumsListView.offlineFilterActive`.
     private var offlineFilterActive: Bool {
         !networkMonitor.isOnline && !showUnavailableInLists
-    }
-
-    /// Filters the already-sorted `sortedSongs`, preserving its order.
-    private func updateDisplayedSongs() {
-        var result = sortedSongs
-
-        if filterOption.wrappedValue == .favoritesOnly {
-            result = result.filter { starStore.isStarred($0) }
-        }
-
-        if !searchText.isEmpty {
-            result = result.filter {
-                $0.title.localizedCaseInsensitiveContains(searchText)
-                    || ($0.artist?.localizedCaseInsensitiveContains(searchText) ?? false)
-            }
-        }
-
-        if offlineFilterActive {
-            result = result.filter { downloads.isDownloaded($0.id.raw) }
-        }
-
-        displayedSongs = result
     }
 
     /// Stale-while-revalidate: shows cached songs immediately (no spinner) if any are cached,
@@ -237,6 +279,9 @@ struct SongsListView: View {
     private func refresh() async {
         guard client.isConfigured else {
             songs = []
+            sortedSongs = []
+            displayedSongs = []
+            deriver.cancel()
             hasLoadedOnce = false
             return
         }
@@ -252,27 +297,29 @@ struct SongsListView: View {
     /// `force` skips the "has the server library changed?" check, for pull-to-refresh.
     private func performRefresh(force: Bool = false) async {
         guard client.isConfigured else { return }
-        defer { isLoading = false }
+        // The spinner stays up until the first derivation lands, rather than flashing "No songs
+        // found." while the (now off-main) sort is still running.
+        defer { if !deriver.isPending { isLoading = false } }
         for await event in LibraryLoader.load(.allSongs(), shown: songs, force: force) {
             switch event {
             case .cached(let cached):
                 songs = cached
                 hasLoadedOnce = true
-                isLoading = false
+                markSortStale()
             case .fresh(let fetched):
                 loadError = nil
-                isLoading = false
                 hasLoadedOnce = true
                 songs = fetched
+                markSortStale()
             case .upToDate:
                 loadError = nil
-                isLoading = false
                 hasLoadedOnce = true
+                if !deriver.isPending { isLoading = false }
             case .failed(let error):
                 // Offline, or the request otherwise failed — keep showing whatever's already on
                 // screen (cache, or an earlier successful fetch); only surface an error if
                 // there's truly nothing to show.
-                isLoading = false
+                if !deriver.isPending { isLoading = false }
                 if songs.isEmpty {
                     loadError = error.localizedDescription
                 }
@@ -319,6 +366,28 @@ struct SongsListView: View {
                     .foregroundStyle(.primary)
             }
         }
+    }
+}
+
+/// One tappable row of the songs list. Owns the observation of download and network state needed to
+/// disable itself, so only the rows actually on screen react to it — the screen itself observes
+/// neither (see `SongsListView`).
+private struct SongListRow: View {
+    let track: Child
+    let rowArtworkSize: CGFloat
+    let displayScale: CGFloat
+    let onPlay: () -> Void
+
+    @ObservedObject private var downloads = DownloadStore.shared
+    @ObservedObject private var networkMonitor = NetworkMonitor.shared
+
+    var body: some View {
+        Button(action: onPlay) {
+            SongRow(track: track, rowArtworkSize: rowArtworkSize, displayScale: displayScale)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!(networkMonitor.isOnline || downloads.isDownloaded(track.id.raw)))
     }
 }
 
@@ -554,5 +623,7 @@ private struct SongTrailingActions: View {
 }
 
 #Preview {
-    SongsListView()
+    NavigationStack {
+        SongsListView()
+    }
 }
