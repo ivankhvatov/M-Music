@@ -50,7 +50,7 @@ struct NowPlayingBackground: View {
                 // dimmed down toward the Liquid Glass pill's own dark tone. Without this, a
                 // desaturated-but-still-bright gray would cross-fade into the pill as a visible
                 // lightening instead of reading as a continuation of the same surface.
-                .overlay(Color.gray.darkened(by: Const.collapseDarkenOpacity).opacity(1.0 - saturation))
+                .overlay(Color.gray.darkened(by: 0.4).opacity(1.0 - saturation))
                 // Exactly 0 opacity defeats the point of keeping this mounted while collapsed:
                 // Core Animation skips compositing a fully-transparent layer, so the Metal shader
                 // backing `ColorfulBackground` still never actually compiles until the first real
