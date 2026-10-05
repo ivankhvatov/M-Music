@@ -20,6 +20,12 @@ struct RegularChrome: View {
     /// appears, rather than when the queue is first toggled on, so building its rows doesn't
     /// stall the start of that animation.
     @State private var mountsQueueList = false
+    /// Whether the (mounted) queue list is held at zero height. Once the queue has been shown,
+    /// the list would otherwise stay at its full height — masked, transparent, and moved every
+    /// frame of every expand/collapse — for as long as the player lives, which is what made
+    /// those animations stutter from then on. Hidden at rest it's parked, exactly as it was
+    /// before the queue was ever opened, and only sized up as the queue is turned on.
+    @State private var parksQueueList = true
 
     var body: some View {
         VStack(spacing: 12) {
@@ -36,6 +42,16 @@ struct RegularChrome: View {
             guard marqueesActive, !mountsQueueList else { return }
             try? await Task.sleep(for: .milliseconds(800))
             mountsQueueList = true
+        }
+        // Parks the list again once it has finished leaving. Cancelled (the id changes) if the
+        // queue is turned back on in the meantime.
+        .task(id: showsQueue) {
+            guard !showsQueue, !parksQueueList else { return }
+            try? await Task.sleep(for: .seconds(Animation.playerQueueAnimationDuration + 0.15))
+            guard !Task.isCancelled else { return }
+            var instant = Transaction()
+            instant.disablesAnimations = true
+            withTransaction(instant) { parksQueueList = true }
         }
     }
 
@@ -77,8 +93,8 @@ struct RegularChrome: View {
                             .equatable()
                             .frame(
                                 maxWidth: .infinity,
-                                minHeight: queueListHeight,
-                                maxHeight: queueListHeight > 0 ? queueListHeight : .infinity,
+                                minHeight: listHeight,
+                                maxHeight: listHeight > 0 ? listHeight : .infinity,
                                 alignment: .top
                             )
                             // The title travels its layout move plus its own offset
@@ -121,24 +137,33 @@ struct RegularChrome: View {
         }
     }
 
+    /// The height the queue list is laid out at: its final height, or none while parked.
+    private var listHeight: CGFloat {
+        parksQueueList ? 0 : queueListHeight
+    }
+
     /// What the controls' queue button toggles. Normally that's `showsQueue` itself; but if the
     /// list hasn't been mounted yet (it's built shortly after the player first opens, and a first
-    /// tap can come before then or while it's still building), turning the queue on in that same
-    /// animated update would *insert* the list already at its final place — there's nothing for
-    /// its offset and fade to animate from, so the buttons, "Up next" header and rows just
-    /// appeared while the title and artwork moved. So it's mounted first, hidden and without
-    /// animation, and the animated toggle starts a beat later, once it exists.
+    /// tap can come before then or while it's still building), or is parked at zero height,
+    /// turning the queue on in that same animated update would *insert* it — or grow it — already
+    /// at its final place: there's nothing for its offset and fade to animate from, so the
+    /// buttons, "Up next" header and rows just appeared while the title and artwork moved. So
+    /// it's mounted and sized first, hidden and without animation, and the animated toggle starts
+    /// a beat later, once it's there.
     private var queueButtonBinding: Binding<Bool> {
         Binding(
             get: { showsQueue },
             set: { newValue in
-                guard newValue, !mountsQueueList else {
+                guard newValue, !mountsQueueList || parksQueueList else {
                     showsQueue = newValue
                     return
                 }
                 var instant = Transaction()
                 instant.disablesAnimations = true
-                withTransaction(instant) { mountsQueueList = true }
+                withTransaction(instant) {
+                    mountsQueueList = true
+                    parksQueueList = false
+                }
                 Task { @MainActor in
                     try? await Task.sleep(for: .milliseconds(80))
                     withAnimation(.playerQueueAnimation) { showsQueue = true }
