@@ -103,12 +103,22 @@ private struct SyncedLyricsView: View {
     @State private var isBrowsing = false
     /// A finger is on the lyrics, or they're still coasting from a flick.
     @State private var isUserScrolling = false
+    /// The line that was tapped while a break was showing, until the break's dots have shrunk away
+    /// and the lyrics move to it.
+    @State private var tappedLine: Int?
+
+    /// The height of the fade at the top of the view.
+    private static let topFade: CGFloat = 56
 
     /// How long the lyrics have to be left alone before they go back to following the song.
     private static let browsingTimeout: TimeInterval = 5
 
+    /// How much more room the current line has above and below it than lines have between each
+    /// other, so it stands a little apart from the previous and the following line.
+    private static let currentLineExtraSpacing: CGFloat = 8
+
     /// How much larger the current line is drawn.
-    private static let currentScale: CGFloat = 1.1
+    private static let currentScale: CGFloat = 1.16
     /// How long a finished break's dots take to grow from wherever their pulse has them to its
     /// largest size.
     private static let breakGrowDuration: TimeInterval = 1.0
@@ -173,17 +183,16 @@ private struct SyncedLyricsView: View {
                                 scale: Self.currentScale
                             )
                             .id(line.id)
+                            // The extra room is outside the `id`, so that scrolling to the line puts
+                            // its text at the top, not the gap above it.
+                            .padding(.vertical, distance == 0 ? Self.currentLineExtraSpacing : 0)
                             // The line is laid out narrower, so that scaled up it still ends where
                             // the others do instead of poking out past the right margin.
                             .padding(.trailing, unusedWidthWhenScaled)
                             // Tapping a line plays from it. The whole row takes the tap, not just
                             // the glyphs; a drag on it still scrolls.
                             .contentShape(.rect)
-                            .onTapGesture {
-                                // The view follows the song again, from the line that was tapped.
-                                isBrowsing = false
-                                PlayerManager.shared.seek(to: line.start)
-                            }
+                            .onTapGesture { tap(line) }
                         } else if line.id == current {
                             let next = nextStart(after: line)
                             // The dots fill up by the time they start to leave.
@@ -193,6 +202,7 @@ private struct SyncedLyricsView: View {
                                 ending: breakEnding?.index == line.id ? breakEnding : nil
                             )
                             .id(line.id)
+                            .padding(.vertical, Self.currentLineExtraSpacing)
                             .transition(.opacity)
                         }
                     }
@@ -202,10 +212,12 @@ private struct SyncedLyricsView: View {
                 .animation(.smooth(duration: 0.5), value: currentIndex)
             }
             .scrollIndicators(.hidden)
-            .contentMargins(.top, PlayerQueueList.FadeMask.topFade, for: .scrollContent)
+            // The lines rest below the fade, which is taller here than the queue's, so the
+            // previous line shows through it, softly, above the current one.
+            .contentMargins(.top, Self.topFade, for: .scrollContent)
             // Room to scroll the last line all the way to the top.
             .contentMargins(.bottom, max(panelHeight, PlayerQueueList.FadeMask.bottomFade), for: .scrollContent)
-            .mask { PlayerQueueList.TopFade() }
+            .mask { LyricsTopFade(height: Self.topFade) }
             // The user's own scrolling, as opposed to this view's: that's `.animating`.
             .onScrollPhaseChange { _, phase in
                 switch phase {
@@ -239,7 +251,7 @@ private struct SyncedLyricsView: View {
                 // fraction of a second so the line gets to the top at its own timestamp; these
                 // updates, twice a second, only catch what it doesn't: a seek, or the first
                 // position when the view appears.
-                if index == currentIndex + 1 { return }
+                if index == currentIndex + 1 || tappedLine != nil { return }
                 currentIndex = index
             }
             .task(id: currentIndex) { await advance() }
@@ -268,6 +280,35 @@ private struct SyncedLyricsView: View {
         }
     }
 
+    /// A tap on a line: plays from it, and the lyrics follow. A break that's showing has its dots
+    /// shrink away first, at once and from wherever the pulse has them, and then the lyrics move —
+    /// the break's own hand-over, which would otherwise do that, plays out its dots' grow too.
+    private func tap(_ line: SyncedLyricLine) {
+        // The view follows the song again, from the line that was tapped.
+        isBrowsing = false
+        PlayerManager.shared.seek(to: line.start)
+        scrollDurationOverride = nil
+        let current = min(currentIndex, lines.count - 1)
+        guard lines[current].isBreak, breakEnding?.index != current else {
+            tappedLine = nil
+            currentIndex = line.id
+            return
+        }
+        tappedLine = line.id
+        breakEnding = BreakEnding(
+            index: current,
+            since: Date(),
+            timings: BreakTimings(grow: 0, exit: Self.breakExitDuration, scroll: 0)
+        )
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(Self.breakExitDuration))
+            // Not if another tap has taken over in the meantime.
+            guard tappedLine == line.id else { return }
+            tappedLine = nil
+            currentIndex = line.id
+        }
+    }
+
     /// Moves on from the current line to the next one, when it's time: the scroll to a line starts
     /// early enough to end with the line at the top exactly at its timestamp. The wait follows the
     /// song's position as `clock` estimates it, so it holds through pauses and seeks (a seek that
@@ -290,7 +331,7 @@ private struct SyncedLyricsView: View {
         guard let timings = Self.breakTimings(available: next - clock.estimate()) else {
             // Too little of the break is left to animate (the lyrics were opened, or the song
             // sought, to near its end): just wait it out.
-            guard await waitUntil(next - 0.1) == .reached else { return }
+            guard await waitUntil(next - 0.1) == .reached, tappedLine == nil else { return }
             handOver(from: index, scrollDuration: nil)
             return
         }
@@ -298,13 +339,13 @@ private struct SyncedLyricsView: View {
         // on when it gets within `scroll` of it. Those are the song's times, not the clock's: if
         // it pauses or stalls while the dots are leaving, the lyrics wait with it.
         while true {
-            guard await waitUntil(next - timings.lead) == .reached else { return }
+            guard await waitUntil(next - timings.lead) == .reached, tappedLine == nil else { return }
             breakEnding = BreakEnding(index: index, since: Date(), timings: timings)
             try? await Task.sleep(for: .seconds(timings.grow + timings.exit))
             // Sought back to well before the end of the break: it has to start leaving again.
             switch await waitUntil(next - timings.scroll, abandonedBefore: next - timings.lead - 0.5) {
             case .reached:
-                handOver(from: index, scrollDuration: timings.scroll)
+                if tappedLine == nil { handOver(from: index, scrollDuration: timings.scroll) }
                 return
             case .cancelled:
                 return
@@ -412,7 +453,7 @@ private struct LyricLineView: View {
 
     /// Fainter with distance from the current line, down to a floor that keeps far lines legible.
     private static func opacity(forDistance distance: Int) -> Double {
-        max(0.14, 0.55 - 0.09 * Double(distance - 1))
+        max(0.14, 0.45 - 0.09 * Double(distance - 1))
     }
 
     private static func blur(forDistance distance: Int) -> CGFloat {
@@ -482,7 +523,10 @@ private struct LyricBreakDots: View {
         }
         let progress = min((elapsed - grow) / ending.timings.exit, 1)
         let eased = progress * progress
-        return (Self.pulseMaxScale + (0.01 - Self.pulseMaxScale) * CGFloat(eased), 1 - eased)
+        // Shrinks from the largest size, which the grow has just reached — or, with no grow, from
+        // wherever the pulse had the dots.
+        let from = grow > 0 ? Self.pulseMaxScale : pulseScale(after: ending.since.timeIntervalSince(appearedAt))
+        return (from + (0.01 - from) * CGFloat(eased), 1 - eased)
     }
 }
 
@@ -511,5 +555,19 @@ private final class PlaybackClock {
     @MainActor func estimate() -> TimeInterval {
         guard PlayerManager.shared.isPlaying else { return time }
         return time + min(Date().timeIntervalSince(updatedAt), Self.maxExtrapolation)
+    }
+}
+
+/// `PlayerQueueList.TopFade`, at a height of its own: fades out the top `height` points of what it
+/// masks.
+private struct LyricsTopFade: View {
+    let height: CGFloat
+
+    var body: some View {
+        VStack(spacing: 0) {
+            LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
+                .frame(height: height)
+            Rectangle()
+        }
     }
 }
