@@ -8,7 +8,6 @@ import SwiftUI
 /// this content vanish instantly on expand instead of fading out with the rest of the grow.
 struct CompactChrome: View {
     @ObservedObject private var player = PlayerManager.shared
-    @Binding var expanded: Bool
     /// Whether the title/artist marquees should be scrolling — false while this chrome is hidden,
     /// so an invisible copy does no per-frame work. See `NowPlayingMarquee`.
     var marqueesActive = true
@@ -86,9 +85,7 @@ struct CompactChrome: View {
             var instant = Transaction()
             instant.disablesAnimations = true
             withTransaction(instant) { player.republishForExpandIfNeeded() }
-            withAnimation(.playerExpandAnimation) {
-                expanded = true
-            }
+            PlayerPresentation.shared.expand()
         }
         .onGeometryChange(
             for: CGFloat.self,
@@ -175,7 +172,7 @@ struct CompactNowPlaying: View {
             if !hideArtworkOnExpanded || !expanded {
                 CompactArtwork(animationNamespace: animationNamespace)
             }
-            CompactChrome(expanded: $expanded, marqueesActive: marqueesActive, marqueeRestartToken: marqueeRestartToken)
+            CompactChrome(marqueesActive: marqueesActive, marqueeRestartToken: marqueeRestartToken)
         }
     }
 }

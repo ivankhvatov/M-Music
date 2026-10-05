@@ -31,6 +31,25 @@ final class PlayerPresentation {
     /// SwiftUI setup cost of its many view types — is built once the first frames are out of the
     /// way instead of inside them. Expanding earlier than that still works: `expanded` mounts it.
     var overlayReady = false
+
+    /// Starts `ExpandableNowPlaying`'s expand, registered by it while it's mounted. Calling it
+    /// directly from the tap, rather than leaving the overlay to notice `expanded` change, is
+    /// what keeps the expand from being lost: right after the app resumes, SwiftUI can skip the
+    /// overlay's update for that change, so its `onChange` never fires — the mini player (which
+    /// does update) drops its artwork because `expanded` is true, but the player never opens, and
+    /// since `expanded` is already true no later tap changes anything.
+    var expandHandler: (() -> Void)?
+    /// Which mounted `ExpandableNowPlaying` registered `expandHandler`, so one being torn down
+    /// doesn't clear the handler of the one that replaced it.
+    var expandHandlerOwner: UUID?
+
+    /// What tapping the mini player does.
+    func expand() {
+        withAnimation(.playerExpandAnimation) {
+            expanded = true
+        }
+        expandHandler?()
+    }
 }
 
 struct MainView: View {

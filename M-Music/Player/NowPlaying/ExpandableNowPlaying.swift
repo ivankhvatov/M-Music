@@ -60,6 +60,8 @@ struct ExpandableNowPlaying: View {
     /// Whether the expanded player is showing the up-next queue (toggled from its bottom row):
     /// the artwork shrinks to the top left and the title/artist move beside it, above the list.
     @State private var showsQueue = false
+    /// Identifies this mounted copy to `PlayerPresentation.expandHandlerOwner`.
+    @State private var instanceID = UUID()
     @State private var colors: [Color] = [.gray]
     @Namespace private var animationNamespace
 
@@ -78,8 +80,15 @@ struct ExpandableNowPlaying: View {
                 // the view renders at opacity 0 with hit-testing off (see `expandableNowPlaying`),
                 // i.e. invisible and untappable despite `expanded` being true — and the docked mini
                 // player's own artwork copy stays hidden too (`accessoryVisible` never flips).
+                PlayerPresentation.shared.expandHandler = expandNow
+                PlayerPresentation.shared.expandHandlerOwner = instanceID
                 guard expanded else { return }
                 expandNow()
+            }
+            .onDisappear {
+                guard PlayerPresentation.shared.expandHandlerOwner == instanceID else { return }
+                PlayerPresentation.shared.expandHandler = nil
+                PlayerPresentation.shared.expandHandlerOwner = nil
             }
             .onChange(of: expanded) {
                 if expanded {
@@ -173,7 +182,7 @@ private extension ExpandableNowPlaying {
                     .environment(\.playerButtonSymbolTransitions, expanded)
                     .opacity(chromeProgress)
                     .allowsHitTesting(expanded)
-                CompactChrome(expanded: $expanded, marqueesActive: compactMarqueesActive, marqueeRestartToken: compactMarqueeRestartToken)
+                CompactChrome(marqueesActive: compactMarqueesActive, marqueeRestartToken: compactMarqueeRestartToken)
                     .environment(\.playerButtonSymbolTransitions, !expanded)
                     .opacity(1 - chromeProgress)
                     .allowsHitTesting(!expanded)
@@ -303,6 +312,9 @@ private extension ExpandableNowPlaying {
     /// the pill actually grow via `.playerExpandAnimation` instead of the overlay's own insertion
     /// just fading the final, already-expanded frame into view.
     func expandNow() {
+        // Reached twice for one expand — from the tap (`PlayerPresentation.expand()`) and from
+        // `onChange(of: expanded)` — so the second is a no-op.
+        guard !isShapeExpanded else { return }
         marqueeRestartToken &+= 1
         backgroundSaturation = 1
         withAnimation(.playerExpandAnimation) {
