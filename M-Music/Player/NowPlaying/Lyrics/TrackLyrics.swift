@@ -89,13 +89,16 @@ enum LyricsLoader {
     private static let minBreakLength: TimeInterval = 1.5
 
     /// Sorts the lines by time, folds consecutive empty ones into a single break (dropping any too
-    /// short to show), and turns a long wait before the first sung line into a break of its own.
+    /// short to show, and any after the last sung line), and turns a long wait before the first sung
+    /// line into a break of its own.
     static func syncedLines(from timed: [(TimeInterval, String)]) -> [SyncedLyricLine]? {
         var lines: [(TimeInterval, String)] = []
         for item in timed.sorted(by: { $0.0 < $1.0 }) {
             if item.1.isEmpty, lines.last?.1.isEmpty == true { continue }
             lines.append(item)
         }
+        // Nothing after the last sung line: no break once the lyrics have ended.
+        while lines.last?.1.isEmpty == true { lines.removeLast() }
         // A break too short to show its dots, and hand over from them, isn't worth showing.
         lines = lines.enumerated().filter { index, line in
             guard line.1.isEmpty, lines.indices.contains(index + 1) else { return true }
