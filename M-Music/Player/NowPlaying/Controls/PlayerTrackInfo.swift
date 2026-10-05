@@ -6,7 +6,7 @@ import SwiftUI
 /// `RegularChrome` reserves its layout space accordingly (see `RegularChrome.lowerRegion`).
 struct PlayerTrackTitle: View {
     @ObservedObject private var player = PlayerManager.shared
-    var showsQueue = false
+    var isCompact = false
     /// Width of the screen this sits on, to work out how much room the shrunken text can take.
     var width: CGFloat
     /// Whether the title/artist marquees should be scrolling — false while this chrome is hidden,
@@ -45,27 +45,27 @@ struct PlayerTrackTitle: View {
                 Text(audioInfoLine)
                     .font(.caption)
                     .foregroundStyle(Color.transparentWhite.opacity(0.7))
-                    .frame(height: showsQueue ? 0 : audioInfoHeight, alignment: .top)
+                    .frame(height: isCompact ? 0 : audioInfoHeight, alignment: .top)
                     .clipped()
-                    .opacity(showsQueue ? 0 : 1)
-                    .padding(.top, showsQueue ? 0 : 4)
+                    .opacity(isCompact ? 0 : 1)
+                    .padding(.top, isCompact ? 0 : 4)
             }
         }
-        .scaleEffect(showsQueue ? Self.queueScale : 1, anchor: .leading)
+        .scaleEffect(isCompact ? Self.queueScale : 1, anchor: .leading)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.leading, NowPlayingLayout.cardPaddings + (showsQueue ? RegularNowPlayingLayout.queueTitleInset : 0))
+        .padding(.leading, NowPlayingLayout.cardPaddings + (isCompact ? RegularNowPlayingLayout.queueTitleInset : 0))
         // Scaling shrinks the text toward its leading edge, so the trailing padding gives back what
         // that leaves unused, and the text still reaches the same right edge.
-        .padding(.trailing, NowPlayingLayout.cardPaddings - (showsQueue ? unusedWidthWhenScaled : 0))
+        .padding(.trailing, NowPlayingLayout.cardPaddings - (isCompact ? unusedWidthWhenScaled : 0))
         // With the queue showing, the block is exactly as tall as the artwork it sits beside, its
         // text centered in that height, and shifted up onto the artwork's row.
-        .frame(minHeight: showsQueue ? RegularNowPlayingLayout.Const.queueArtworkSide : 0)
-        .offset(y: showsQueue ? -RegularNowPlayingLayout.queueTitleRise : 0)
+        .frame(minHeight: isCompact ? RegularNowPlayingLayout.Const.queueArtworkSide : 0)
+        .offset(y: isCompact ? -RegularNowPlayingLayout.queueTitleRise : 0)
         // Fades out over the first part of the move and back in over the rest, so the text
         // visibly travels between its two places instead of popping between them. Run by the
         // toggle itself (it only fires on a change, never on first appearance) for exactly as
         // long as the move.
-        .keyframeAnimator(initialValue: 1.0, trigger: showsQueue) { content, opacity in
+        .keyframeAnimator(initialValue: 1.0, trigger: isCompact) { content, opacity in
             content.opacity(opacity)
         } keyframes: { _ in
             let duration = Animation.playerQueueAnimationDuration

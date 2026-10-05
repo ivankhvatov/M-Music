@@ -57,9 +57,10 @@ struct ExpandableNowPlaying: View {
     /// instantly whenever an expand starts (so it's never mid-fade the next time it's needed) and
     /// animated down to 0 by `collapse()`.
     @State private var backgroundSaturation: CGFloat = 1
-    /// Whether the expanded player is showing the up-next queue (toggled from its bottom row):
-    /// the artwork shrinks to the top left and the title/artist move beside it, above the list.
-    @State private var showsQueue = false
+    /// What the expanded player shows in place of the big artwork (toggled from its bottom row):
+    /// with the up-next queue or the lyrics, the artwork shrinks to the top left and the
+    /// title/artist move beside it, above the panel.
+    @State private var panel: PlayerPanel = .artwork
     /// Identifies this mounted copy to `PlayerPresentation.expandHandlerOwner`.
     @State private var instanceID = UUID()
     @State private var colors: [Color] = [.gray]
@@ -178,7 +179,7 @@ private extension ExpandableNowPlaying {
                 // always mounted (unlike the artwork below): neither branch contains a
                 // `matchedGeometryEffect` descendant, so there's no risk of two simultaneous sources
                 // for the same id.
-                RegularChrome(size: size, colors: colors, onCollapse: collapse, marqueesActive: marqueesActive, marqueeRestartToken: marqueeRestartToken, showsQueue: $showsQueue)
+                RegularChrome(size: size, colors: colors, onCollapse: collapse, marqueesActive: marqueesActive, marqueeRestartToken: marqueeRestartToken, panel: $panel)
                     .environment(\.playerButtonSymbolTransitions, expanded)
                     .opacity(chromeProgress)
                     .allowsHitTesting(expanded)
@@ -214,7 +215,7 @@ private extension ExpandableNowPlaying {
                 //   never actually changing how the view looks at any point, so there's no opacity
                 //   or scale artifact layered on top of the geometry handoff.
                 if isShapeExpanded {
-                    RegularArtwork(size: size, animationNamespace: animationNamespace, showsQueue: showsQueue)
+                    RegularArtwork(size: size, animationNamespace: animationNamespace, isCompact: panel != .artwork)
                         .transition(.scale(scale: 1))
                 } else {
                     CompactArtwork(animationNamespace: animationNamespace)
@@ -242,9 +243,9 @@ private extension ExpandableNowPlaying {
                     onEnd: { handleGestureEnd(value: $0, viewSize: size) },
                     deferring: PanGesture.reorderHandleTag,
                     requiresVerticalMovement: true,
-                    // With the queue showing, a drag on its list belongs to the list; a drag
-                    // anywhere else still dismisses the player.
-                    ignoresScrollViewTouches: showsQueue
+                    // With the queue or lyrics showing, a drag on them belongs to their scroll
+                    // view; a drag anywhere else still dismisses the player.
+                    ignoresScrollViewTouches: panel != .artwork
                 )
             )
             .ignoresSafeArea()

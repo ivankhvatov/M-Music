@@ -5,33 +5,36 @@ import SwiftUI
 /// scrubber above them are `PlayerTrackInfo`, hosted by `RegularChrome`.
 struct PlayerControls: View {
     @ObservedObject private var player = PlayerManager.shared
-    /// Whether the queue is showing (toggled by the bottom row). Then the rows shrink to their
-    /// natural height, leaving the rest of the space to the queue list above.
-    @Binding var showsQueue: Bool
+    /// What the player shows in place of the big artwork (toggled by the bottom row). With the queue
+    /// or lyrics showing, the rows shrink to their natural height, leaving the rest of the space
+    /// to the panel above.
+    @Binding var panel: PlayerPanel
     /// The height of the gaps between the scrubber, the transport row and the bottom row as they
     /// are without the queue, where the two spacers share out whatever room is left. Measured then
     /// and held fixed while the queue shows — where the rows are otherwise pushed to their natural
-    /// height — so toggling the queue never changes the spacing between them.
+    /// height — so toggling the queue or lyrics never changes the spacing between them.
     @State private var restGap: CGFloat = 0
+
+    private var isCompact: Bool { panel != .artwork }
 
     var body: some View {
         // Fills whatever `RegularChrome` leaves below the track info; the two equal spacers make
         // the gaps above the transport row and between it and the bottom row the same size.
         VStack(spacing: 0) {
             Spacer(minLength: 0)
-                .frame(minHeight: showsQueue ? restGap : 0, maxHeight: showsQueue ? restGap : .infinity)
+                .frame(minHeight: isCompact ? restGap : 0, maxHeight: isCompact ? restGap : .infinity)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-                    if !showsQueue { restGap = height }
+                    if !isCompact { restGap = height }
                 }
             controlsRow
                 .padding(.horizontal, NowPlayingLayout.cardPaddings)
                 .padding(.bottom, 10)
             Spacer(minLength: 0)
-                .frame(minHeight: showsQueue ? restGap : 0, maxHeight: showsQueue ? restGap : .infinity)
-            PlayerBottomRow(showsQueue: $showsQueue)
+                .frame(minHeight: isCompact ? restGap : 0, maxHeight: isCompact ? restGap : .infinity)
+            PlayerBottomRow(panel: $panel)
                 .padding(.horizontal, NowPlayingLayout.cardPaddings + 18)
         }
-        .frame(maxHeight: showsQueue ? nil : .infinity)
+        .frame(maxHeight: isCompact ? nil : .infinity)
     }
 }
 

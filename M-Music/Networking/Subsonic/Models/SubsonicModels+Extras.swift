@@ -49,6 +49,27 @@ struct Lyrics: Decodable, Sendable {
 }
 extension Lyrics: SubsonicPayload { static let responseKey = "lyrics" }
 
+/// One set of lyrics for a song, from the OpenSubsonic `getLyricsBySongId` endpoint — synced
+/// (every line has a `start`) or plain, in one language.
+struct StructuredLyrics: Decodable, Sendable {
+    let lang: String?
+    let synced: Bool
+    /// Milliseconds to add to every line's `start`; positive means the lyrics come later.
+    let offset: Int?
+    let line: [Line]
+
+    struct Line: Decodable, Sendable {
+        /// Milliseconds from the start of the song; absent for plain lyrics.
+        let start: Int?
+        let value: String?
+    }
+}
+
+struct LyricsList: Decodable, Sendable {
+    let structuredLyrics: [StructuredLyrics]?
+}
+extension LyricsList: SubsonicPayload { static let responseKey = "lyricsList" }
+
 // MARK: - Bookmarks & play queue
 
 struct Bookmark: Decodable, Identifiable, Sendable {

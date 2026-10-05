@@ -48,6 +48,13 @@ extension SubsonicClient {
         return try await fetchData("getCoverArt", params)
     }
 
+    /// The song's lyrics by id (OpenSubsonic extension) — possibly several sets, synced and plain.
+    /// Servers without the extension answer with an error.
+    func getLyricsBySongId(id: String) async throws -> [StructuredLyrics] {
+        let list = try await send("getLyricsBySongId", [URLQueryItem(name: "id", value: id)], as: LyricsList.self)
+        return list?.structuredLyrics ?? []
+    }
+
     /// Looks up lyrics by artist/title tag match (not by song id). Either parameter may be omitted.
     func getLyrics(artist: String? = nil, title: String? = nil) async throws -> Lyrics {
         var params: [URLQueryItem] = []

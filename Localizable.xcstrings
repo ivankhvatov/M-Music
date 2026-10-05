@@ -1355,6 +1355,22 @@
         }
       }
     },
+    "Lyrics not available" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Songtext nicht verfügbar"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Текст песни недоступен"
+          }
+        }
+      }
+    },
     "Mode" : {
       "localizations" : {
         "de" : {

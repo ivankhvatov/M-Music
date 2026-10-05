@@ -1,33 +1,23 @@
 import SwiftUI
 
 /// The row below the transport buttons: lyrics and queue toggles flanking a "more" button.
-/// The queue toggle reveals the up-next list (see `RegularChrome`); lyrics and "more" don't do
-/// anything yet — lyrics just remembers whether it's on. The two toggles are mutually exclusive:
-/// turning either on turns the other off, so at most one of them is ever on.
+/// The queue and lyrics toggles each replace the big artwork with their panel (see
+/// `RegularChrome`); the two are mutually exclusive — `panel` can only be one of them — so turning
+/// either on turns the other off. "More" doesn't do anything yet.
 struct PlayerBottomRow: View {
-    @Binding var showsQueue: Bool
-    @State private var showsLyrics = false
+    @Binding var panel: PlayerPanel
 
     var body: some View {
         HStack {
-            PlayerBottomButton(symbol: "quote.bubble", isOn: showsLyrics, alignment: .leading) {
-                showsLyrics.toggle()
-                if showsLyrics, showsQueue {
-                    withAnimation(.playerQueueAnimation) { showsQueue = false }
-                }
+            PlayerBottomButton(symbol: "quote.bubble", isOn: panel == .lyrics, alignment: .leading) {
+                withAnimation(.playerQueueAnimation) { panel = panel == .lyrics ? .artwork : .lyrics }
             }
             Spacer(minLength: 0)
             PlayerBottomButton(symbol: "ellipsis", alignment: .center) {}
             Spacer(minLength: 0)
-            PlayerBottomButton(symbol: "list.bullet", isOn: showsQueue, alignment: .trailing) {
-                withAnimation(.playerQueueAnimation) { showsQueue.toggle() }
+            PlayerBottomButton(symbol: "list.bullet", isOn: panel == .queue, alignment: .trailing) {
+                withAnimation(.playerQueueAnimation) { panel = panel == .queue ? .artwork : .queue }
             }
-        }
-        // Watched rather than done in the queue button's action: turning the queue on can be
-        // deferred a beat (see `RegularChrome.queueButtonBinding`), so it isn't on yet when
-        // the button is tapped.
-        .onChange(of: showsQueue) {
-            if showsQueue { showsLyrics = false }
         }
     }
 }
