@@ -77,9 +77,11 @@ private struct PlainLyricsView: View {
 
 /// Lyrics with timing: the sung lines, the current one white and slightly larger and at the top
 /// of the view, the others fainter and blurrier the further they are from it. The view scrolls
-/// itself as the song plays. An empty line is an instrumental break, drawn as three dots — but
-/// only while it is the current line: it appears when the break begins and is gone again when the
-/// next line comes, so scrolling through the lyrics never shows one.
+/// itself as the song plays, and tapping a line seeks to it; while the user scrolls them it stops,
+/// and every line but the current one looks alike, until they've been left alone for a few
+/// seconds. An empty line is an instrumental break, drawn as three dots — but only while it is the current line: it appears when the break
+/// begins and is gone again when the next line comes, so scrolling through the lyrics never shows
+/// one.
 private struct SyncedLyricsView: View {
     let lines: [SyncedLyricLine]
     let width: CGFloat
@@ -95,6 +97,15 @@ private struct SyncedLyricsView: View {
     @State private var scrollDurationOverride: TimeInterval?
     /// The song's position, kept between the twice-a-second updates — see `PlaybackClock`.
     @State private var clock = PlaybackClock()
+    /// The user is looking around the lyrics (they scrolled them, and it hasn't been
+    /// `browsingTimeout` since they stopped): the view stops following the song and shows every
+    /// line but the current one alike, as the one after it looks.
+    @State private var isBrowsing = false
+    /// A finger is on the lyrics, or they're still coasting from a flick.
+    @State private var isUserScrolling = false
+
+    /// How long the lyrics have to be left alone before they go back to following the song.
+    private static let browsingTimeout: TimeInterval = 5
 
     /// How much larger the current line is drawn.
     private static let currentScale: CGFloat = 1.1
@@ -152,15 +163,27 @@ private struct SyncedLyricsView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     ForEach(lines) { line in
                         if !line.isBreak {
+                            let distance = Int(abs(Double(textBefore[line.id]) - currentPosition).rounded(.up))
                             LyricLineView(
                                 text: line.text,
-                                distance: Int(abs(Double(textBefore[line.id]) - currentPosition).rounded(.up)),
+                                // Browsing, every line but the current one looks like the next,
+                                // and none is blurred.
+                                distance: isBrowsing ? min(distance, 1) : distance,
+                                isBlurred: !isBrowsing,
                                 scale: Self.currentScale
                             )
                             .id(line.id)
                             // The line is laid out narrower, so that scaled up it still ends where
                             // the others do instead of poking out past the right margin.
                             .padding(.trailing, unusedWidthWhenScaled)
+                            // Tapping a line plays from it. The whole row takes the tap, not just
+                            // the glyphs; a drag on it still scrolls.
+                            .contentShape(.rect)
+                            .onTapGesture {
+                                // The view follows the song again, from the line that was tapped.
+                                isBrowsing = false
+                                PlayerManager.shared.seek(to: line.start)
+                            }
                         } else if line.id == current {
                             let next = nextStart(after: line)
                             // The dots fill up by the time they start to leave.
@@ -183,6 +206,31 @@ private struct SyncedLyricsView: View {
             // Room to scroll the last line all the way to the top.
             .contentMargins(.bottom, max(panelHeight, PlayerQueueList.FadeMask.bottomFade), for: .scrollContent)
             .mask { PlayerQueueList.TopFade() }
+            // The user's own scrolling, as opposed to this view's: that's `.animating`.
+            .onScrollPhaseChange { _, phase in
+                switch phase {
+                // Not `.tracking`, which is a finger that has touched the lyrics but hasn't moved
+                // them (yet) — a tap on a line starts out like that.
+                case .interacting, .decelerating:
+                    isBrowsing = true
+                    isUserScrolling = true
+                case .idle:
+                    isUserScrolling = false
+                case .tracking, .animating:
+                    break
+                @unknown default:
+                    break
+                }
+            }
+            // Once they've been left alone long enough, back to the current line. Restarts, or is
+            // cancelled, whenever the scrolling does.
+            .task(id: isUserScrolling) {
+                guard isBrowsing, !isUserScrolling else { return }
+                try? await Task.sleep(for: .seconds(Self.browsingTimeout))
+                guard !Task.isCancelled else { return }
+                isBrowsing = false
+                withAnimation(.smooth(duration: Self.scrollDuration)) { proxy.scrollTo(currentIndex, anchor: .top) }
+            }
             .onReceive(PlaybackProgress.shared.$currentTime) { time in
                 clock.update(time)
                 let index = index(at: time)
@@ -202,7 +250,9 @@ private struct SyncedLyricsView: View {
                 if lines[min(currentIndex, lines.count - 1)].isBreak { breakEnding = nil }
                 let duration = scrollDurationOverride ?? Self.scrollDuration
                 scrollDurationOverride = nil
-                if hasScrolledInitially {
+                if isBrowsing {
+                    // Leave the user's scrolling alone; the view catches up when they're done.
+                } else if hasScrolledInitially {
                     withAnimation(.smooth(duration: duration)) { proxy.scrollTo(currentIndex, anchor: .top) }
                 } else {
                     proxy.scrollTo(currentIndex, anchor: .top)
@@ -345,6 +395,8 @@ private struct LyricLineView: View {
     let text: String
     /// How many sung lines away from the current one this is; 0 for the current line.
     let distance: Int
+    /// Whether the lines further from the current one are blurred; off while the user scrolls.
+    let isBlurred: Bool
     let scale: CGFloat
 
     var body: some View {
@@ -353,8 +405,9 @@ private struct LyricLineView: View {
             .foregroundStyle(distance == 0 ? Color.white : Color.white.opacity(Self.opacity(forDistance: distance)))
             .frame(maxWidth: .infinity, alignment: .leading)
             .scaleEffect(distance == 0 ? scale : 1, anchor: .leading)
-            .blur(radius: Self.blur(forDistance: distance))
+            .blur(radius: isBlurred ? Self.blur(forDistance: distance) : 0)
             .animation(.smooth(duration: 0.5), value: distance)
+            .animation(.smooth(duration: 0.5), value: isBlurred)
     }
 
     /// Fainter with distance from the current line, down to a floor that keeps far lines legible.
