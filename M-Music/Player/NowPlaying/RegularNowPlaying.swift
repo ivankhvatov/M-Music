@@ -130,8 +130,7 @@ struct RegularChrome: View {
                 // toggle stutter.
                 ZStack(alignment: .top) {
                     if mountsQueueList || panel == .queue {
-                        PlayerQueueList()
-                            .equatable()
+                        PlatformHosted(content: PlayerQueueList())
                             .frame(
                                 maxWidth: .infinity,
                                 minHeight: listHeight,
