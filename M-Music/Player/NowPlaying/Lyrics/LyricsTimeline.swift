@@ -111,17 +111,36 @@ struct LyricsTimeline: Equatable, Sendable {
     var count: Int { lines.count }
 
     /// The break timings for a stretch of `available` seconds; `nil` if that's too little to
-    /// animate. A break shorter than the full sequence has the three steps squeezed together.
+    /// animate. A break shorter than the full sequence has its steps squeezed together. With too
+    /// little for the dots to grow and then shrink, they only shrink (`grow` is 0); and with too
+    /// little for that, there are no timings, and the dots are left out altogether.
     static func breakTimings(available: TimeInterval) -> BreakTimings? {
         let full = breakGrowDuration + breakExitDuration + scrollDuration
         let fraction = min(1, (available - breakMinDwell) / full)
-        guard fraction >= breakMinCompression else { return nil }
-        return BreakTimings(
-            grow: breakGrowDuration * fraction,
-            exit: breakExitDuration * fraction,
-            scroll: scrollDuration * fraction
-        )
+        if fraction >= breakMinCompression {
+            return BreakTimings(
+                grow: breakGrowDuration * fraction,
+                exit: breakExitDuration * fraction,
+                scroll: scrollDuration * fraction
+            )
+        }
+        let shrinkOnly = breakExitDuration + scrollDuration
+        let shrinkFraction = min(1, (available - breakMinDwell) / shrinkOnly)
+        guard shrinkFraction >= breakMinCompression else { return nil }
+        return BreakTimings(grow: 0, exit: breakExitDuration * shrinkFraction, scroll: scrollDuration * shrinkFraction)
     }
+
+    /// For a break whose dots are already showing when what's left of it has dropped below what
+    /// `breakTimings` will animate (some time has passed since it was decided to show them): the
+    /// dots still shrink away — however briefly — rather than just vanishing as the next line
+    /// moves in, which then runs late by whatever there wasn't room for.
+    static func hurriedTimings(available: TimeInterval) -> BreakTimings {
+        let fraction = min(1, max(available, 0) / (breakExitDuration + scrollDuration))
+        return BreakTimings(grow: 0, exit: max(breakExitDuration * fraction, breakMinHurriedExit), scroll: scrollDuration * fraction)
+    }
+
+    /// The shortest the dots' shrink is ever made.
+    private static let breakMinHurriedExit: TimeInterval = 0.12
 
     /// The last line that has started by `time`; before the first one, the first. A line counts as
     /// started when the scroll to it begins — that's when the lyrics move on to it, and if this

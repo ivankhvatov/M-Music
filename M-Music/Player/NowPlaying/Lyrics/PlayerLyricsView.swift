@@ -249,12 +249,19 @@ private struct SyncedLyricsView: View {
             }
         } else {
             let next = timeline.nextStart(after: line.id)
-            // The dots fill up by the time they start to leave.
-            LyricBreakDots(
-                start: line.start,
-                end: next.map { $0 - (LyricsTimeline.breakTimings(available: $0 - line.start)?.lead ?? 0) },
-                ending: model.breakEnding?.index == line.id ? model.breakEnding : nil
-            )
+            Group {
+                if model.dotlessBreak == line.id {
+                    // Their room, without them: the line after is about to move in.
+                    Color.clear.frame(maxWidth: .infinity, minHeight: LyricBreakDots.height)
+                } else {
+                    // The dots fill up by the time they start to leave.
+                    LyricBreakDots(
+                        start: line.start,
+                        end: next.map { $0 - (LyricsTimeline.breakTimings(available: $0 - line.start)?.lead ?? 0) },
+                        ending: model.breakEnding?.index == line.id ? model.breakEnding : nil
+                    )
+                }
+            }
             .id(line.id)
             .padding(.vertical, Self.currentLineExtraSpacing)
             .padding(.bottom, LyricsLayout.rowSpacing)
@@ -343,8 +350,11 @@ private struct LyricBreakDots: View {
             .scaleEffect(scale)
             .opacity(opacity)
         }
-        .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: Self.height, alignment: .leading)
     }
+
+    /// The room the dots take.
+    static let height: CGFloat = 34
 
     private func pulseScale(after elapsed: TimeInterval) -> CGFloat {
         let swell = (1 - cos(2 * .pi * elapsed / Self.pulsePeriod)) / 2

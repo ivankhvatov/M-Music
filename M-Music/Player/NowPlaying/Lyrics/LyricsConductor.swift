@@ -54,6 +54,12 @@ actor LyricsConductor {
 
     // What's in progress.
     private var breakEnding: BreakEnding?
+    /// How the current break's dots leave, worked out once when it became current (and again if
+    /// the song is sought within it) — `nil` for a break that draws no dots, and for no break.
+    /// The decision to draw them and the plan for them leaving are one, so dots that are drawn
+    /// are always seen to leave, never just faded out by the next line moving in.
+    private var breakPlan: BreakTimings?
+    private var hasDots = false
     private var tappedLine: Int?
     private var browsing = false
 
@@ -188,7 +194,10 @@ actor LyricsConductor {
         case .synced(let timeline):
             self.timeline = timeline
             current = timeline.index(at: estimate())
-            if timeline.lines[current].isBreak { await publishClock() }
+            if timeline.lines[current].isBreak {
+                await planBreak(at: current)
+                await publishClock()
+            }
             // Measured here, off the main actor, rather than by the views as they build.
             await model.showSynced(timeline, LyricsLayout(timeline: timeline, textWidth: textWidth), at: current)
             scheduleAdvance()
@@ -290,6 +299,7 @@ actor LyricsConductor {
             // A break that's current again starts afresh, whatever happened to it before.
             breakEnding = nil
             await model.setBreakEnding(nil)
+            await planBreak(at: index)
             await publishClock()
         }
         // Far from where it was (a seek) the lyrics jump, rather than run past all the lines between.
@@ -297,6 +307,21 @@ actor LyricsConductor {
         let scroll: LyricsModel.ScrollRequest.Mode = browsing ? .none : (far ? .jump : .animated(scrollDuration ?? LyricsTimeline.scrollDuration))
         await model.setCurrent(index, scroll: scroll)
         scheduleAdvance()
+    }
+
+    /// Decides, from what's left of the break at `index`, whether it draws dots and how they
+    /// leave: with too little left for them to so much as shrink away (the lyrics were opened, or
+    /// the song sought, to near its end) it draws none, rather than dots that show up just as the
+    /// next line moves in over them.
+    private func planBreak(at index: Int) async {
+        guard let timeline, timeline.lines.indices.contains(index + 1) else {
+            breakPlan = nil
+            hasDots = false
+            return
+        }
+        breakPlan = LyricsTimeline.breakTimings(available: timeline.lines[index + 1].start - estimate())
+        hasDots = breakPlan != nil
+        await model.setDotlessBreak(hasDots ? nil : index)
     }
 
     private func setBreakEnding(_ index: Int, _ timings: BreakTimings) async {
@@ -333,6 +358,22 @@ actor LyricsConductor {
             breakEnding = nil
             await model.setBreakEnding(nil)
         }
+        // The song may have been sought within the break (or paused and resumed in it), so what's
+        // left of it is worked out again — unless its dots have already begun to leave. A break
+        // that has dots keeps them, however little is left; one that has none gets them back only
+        // if the song was sought to where there's room again.
+        if isShowingBreak, breakEnding == nil, let next = timeline.nextStart(after: current) {
+            let available = next - estimate()
+            if let plan = LyricsTimeline.breakTimings(available: available) {
+                breakPlan = plan
+                if !hasDots {
+                    hasDots = true
+                    await model.setDotlessBreak(nil)
+                }
+            } else if hasDots {
+                breakPlan = LyricsTimeline.hurriedTimings(available: available)
+            }
+        }
         scheduleAdvance()
     }
 
@@ -354,9 +395,9 @@ actor LyricsConductor {
     /// scroll runs, so that it ends with the next line at the top exactly at its timestamp.
     private func leaveBreak(at index: Int, _ timeline: LyricsTimeline) async {
         let next = timeline.lines[index + 1].start
-        guard let timings = LyricsTimeline.breakTimings(available: next - estimate()) else {
-            // Too little of the break is left to animate (the lyrics were opened, or the song
-            // sought, to near its end): just wait it out.
+        guard let timings = breakPlan else {
+            // Too little of the break was left to draw its dots (the lyrics were opened, or the
+            // song sought, to near its end): just wait it out.
             guard await waitUntil(next - 0.1), tappedLine == nil else { return }
             await handOver(from: index, scrollDuration: nil, timeline)
             return

@@ -59,6 +59,10 @@ final class LyricsModel {
     /// When the current line became current.
     private(set) var currentSince = Date()
     private(set) var breakEnding: BreakEnding?
+    /// The break that draws no dots: when it became current there was too little of it left for
+    /// them to even shrink away, so they'd only have shown up as the next line moved in. It stays
+    /// set until another break becomes current, so that the row fading out doesn't bring them back.
+    private(set) var dotlessBreak: Int?
     /// The user is looking around the lyrics: every line but the current one looks alike.
     private(set) var isBrowsing = false
     private(set) var scrollRequest = ScrollRequest()
@@ -74,6 +78,7 @@ final class LyricsModel {
         if case .synced = phase {} else {
             currentIndex = 0
             breakEnding = nil
+            dotlessBreak = nil
             isBrowsing = false
         }
     }
@@ -135,6 +140,11 @@ final class LyricsModel {
     func setWindow(_ window: LyricsLayout.Window) {
         guard window != self.window else { return }
         self.window = window
+    }
+
+    func setDotlessBreak(_ index: Int?) {
+        guard dotlessBreak != index else { return }
+        dotlessBreak = index
     }
 
     func setBreakEnding(_ ending: BreakEnding?) {
