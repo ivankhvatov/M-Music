@@ -42,6 +42,12 @@ struct RegularChrome: View {
     /// just before the lyrics are turned on (see `panelBinding`), and removed again once they've
     /// left, so it isn't carried through every expand and collapse.
     @State private var mountsLyrics = false
+    /// While one panel is replaced by the other (see `panelBinding`): the panel that's being
+    /// switched to, which the buttons already show as on, and whether the panel content is faded
+    /// out for the swap.
+    @State private var pendingPanel: PlayerPanel?
+    @State private var hidesPanel = false
+    @State private var swapTask: Task<Void, Never>?
 
     /// With a panel showing, the artwork is small and beside the title instead of above it.
     private var isCompact: Bool { panel != .artwork }
@@ -121,7 +127,7 @@ struct RegularChrome: View {
                                 maxHeight: queueListMaxHeight,
                                 alignment: .top
                             )
-                            .panelPlacement(isShowing: panel == .queue)
+                            .panelPlacement(isShowing: panel == .queue, isFadedOut: hidesPanel)
                     }
                     if mountsLyrics || panel == .lyrics {
                         PlayerLyricsView(width: size.width, panelHeight: panelHeight)
@@ -131,7 +137,7 @@ struct RegularChrome: View {
                                 maxHeight: panelHeight > 0 ? panelHeight : .infinity,
                                 alignment: .top
                             )
-                            .panelPlacement(isShowing: panel == .lyrics)
+                            .panelPlacement(isShowing: panel == .lyrics, isFadedOut: hidesPanel)
                     }
                 }
                 // Full width even while empty, or the clip would grow out from the center as the
@@ -186,10 +192,22 @@ struct RegularChrome: View {
     /// and rows just appeared while the title and artwork moved. So it's mounted and sized first,
     /// hidden and without animation, and the animated change starts a beat later, once it's
     /// there.
+    ///
+    /// Going from one panel straight to the other isn't a move: the one showing fades out, and
+    /// then the other fades in, in the same place.
     private var panelBinding: Binding<PlayerPanel> {
         Binding(
-            get: { panel },
+            get: { pendingPanel ?? panel },
             set: { newValue in
+                swapTask?.cancel()
+                let current = pendingPanel ?? panel
+                if current != .artwork, newValue != .artwork, newValue != current {
+                    swapPanel(to: newValue)
+                    return
+                }
+                // Anything else cancels a swap that's under way.
+                pendingPanel = nil
+                hidesPanel = false
                 let needsPreparing = switch newValue {
                 case .queue: !mountsQueueList || parksQueueList
                 case .lyrics: !mountsLyrics
@@ -199,22 +217,52 @@ struct RegularChrome: View {
                     panel = newValue
                     return
                 }
-                var instant = Transaction()
-                instant.disablesAnimations = true
-                withTransaction(instant) {
-                    if newValue == .queue {
-                        mountsQueueList = true
-                        parksQueueList = false
-                    } else {
-                        mountsLyrics = true
-                    }
-                }
+                prepare(newValue)
                 Task { @MainActor in
                     try? await Task.sleep(for: .milliseconds(80))
                     withAnimation(.playerQueueAnimation) { panel = newValue }
                 }
             }
         )
+    }
+
+    /// Mounts and sizes `newValue`'s panel without animation, so it's there to be shown.
+    private func prepare(_ newValue: PlayerPanel) {
+        var instant = Transaction()
+        instant.disablesAnimations = true
+        withTransaction(instant) {
+            if newValue == .queue {
+                mountsQueueList = true
+                parksQueueList = false
+            } else if newValue == .lyrics {
+                mountsLyrics = true
+            }
+        }
+    }
+
+    /// Replaces the panel showing with the other: it fades out, the other is put in its place
+    /// (out of sight, and without animation), and fades in.
+    private func swapPanel(to newValue: PlayerPanel) {
+        prepare(newValue)
+        pendingPanel = newValue
+        let fadeOut = 0.15
+        let fadeIn = 0.2
+        swapTask = Task { @MainActor in
+            withAnimation(.easeOut(duration: fadeOut)) { hidesPanel = true }
+            // The rest of the fade; the other panel is being built meanwhile.
+            try? await Task.sleep(for: .seconds(fadeOut))
+            guard !Task.isCancelled else { return }
+            var instant = Transaction()
+            instant.disablesAnimations = true
+            withTransaction(instant) {
+                panel = newValue
+                pendingPanel = nil
+            }
+            // A frame or two, so the swap above is settled before the fade starts.
+            try? await Task.sleep(for: .milliseconds(30))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeIn(duration: fadeIn)) { hidesPanel = false }
+        }
     }
 
     private var grip: some View {
@@ -232,10 +280,13 @@ private extension View {
     /// layout move plus its own offset (`queueTitleRise`); the panel, hung from the title's layout
     /// position, gets that offset too, so the two cover the same distance in the same time. It
     /// fades along with the move, rather than only being cut off at the scrubber.
-    func panelPlacement(isShowing: Bool) -> some View {
+    ///
+    /// `isFadedOut` hides the panel where it sits, without moving it: how one panel gives way to
+    /// the other.
+    func panelPlacement(isShowing: Bool, isFadedOut: Bool = false) -> some View {
         offset(y: isShowing ? 0 : RegularNowPlayingLayout.queueTitleRise)
-            .opacity(isShowing ? 1 : 0)
-            .allowsHitTesting(isShowing)
+            .opacity(isShowing && !isFadedOut ? 1 : 0)
+            .allowsHitTesting(isShowing && !isFadedOut)
             .accessibilityHidden(!isShowing)
     }
 }
