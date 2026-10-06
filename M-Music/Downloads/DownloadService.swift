@@ -188,6 +188,7 @@ actor DownloadService {
             try? FileManager.default.removeItem(at: record.fileURL)
         }
         await DownloadDatabase.shared.delete(songId: songId)
+        await DownloadedLyrics.shared.delete(songId: songId)
         LocalDownloadIndex.shared.setEntry(songId: songId, entry: nil)
         continuation?.yield(Update(songId: songId, state: .none))
     }
@@ -208,6 +209,7 @@ actor DownloadService {
             try? FileManager.default.removeItem(at: record.fileURL)
         }
         await DownloadDatabase.shared.delete(songIds: records.map(\.songId))
+        await DownloadedLyrics.shared.deleteAll()
         LocalDownloadIndex.shared.replaceAll([:])
     }
 
@@ -283,6 +285,11 @@ actor DownloadService {
             // permanent cache. Coalesced with the rest of an album's downloads, and best-effort:
             // it never affects whether the download itself succeeded.
             Task { await DownloadedArtwork.shared.requestSync() }
+            // Likewise the lyrics, if asked for: the song plays whether or not they arrive.
+            if DownloadLyricsSettings.isEnabled {
+                let (songId, artist, title) = (job.songId, job.artist, job.title)
+                Task { await DownloadedLyrics.shared.download(songId: songId, artist: artist, title: title) }
+            }
             continuation?.yield(Update(songId: job.songId, state: .completed))
         } catch {
             continuation?.yield(Update(songId: job.songId, state: .failed(message: error.localizedDescription)))

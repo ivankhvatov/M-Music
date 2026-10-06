@@ -17,6 +17,7 @@ struct DownloadsSettingsView: View {
     @AppStorage(DownloadTranscodingSettings.Keys.prioritizeDownloads) private var prioritizeDownloads = true
     @AppStorage(DownloadConversionSettings.Keys.convertLosslessToALAC) private var convertLosslessToALAC = false
     @AppStorage(DownloadConversionSettings.Keys.convertOpusToCAF) private var convertOpusToCAF = false
+    @AppStorage(DownloadLyricsSettings.Keys.isEnabled) private var downloadLyrics = false
 
     /// Grouped and sorted in the background by `DownloadStore` (see `DownloadSnapshot`), not on
     /// every evaluation of `body`.
@@ -57,6 +58,14 @@ struct DownloadsSettingsView: View {
                 Text("Conversion")
             } footer: {
                 Text("Applies only to new downloads — songs already saved to this device keep whatever container they were downloaded in. Lossless downloads (FLAC, WAV, AIFF) are converted to Apple Lossless (ALAC); Opus downloads are repackaged into a .caf container. Both keep full audio quality — no lossy re-encoding is involved.")
+            }
+
+            Section {
+                Toggle("Download lyrics", isOn: $downloadLyrics)
+            } header: {
+                Text("Lyrics")
+            } footer: {
+                Text("Saves a song's lyrics along with it, and shows them from the device instead of fetching them from the server. Applies only to new downloads — songs already saved to this device keep fetching their lyrics from the server. Deleting a download deletes its lyrics too.")
             }
 
             Section {
