@@ -47,6 +47,10 @@ final class LyricsModel {
     }
 
     private(set) var phase: Phase = .idle
+    /// Which song's lyrics the synced view is showing, or waiting for: it's the same view from the
+    /// moment the lyrics start to load until they're replaced by another song's, so that it's there
+    /// to take part in the panel's coming in (see `PlayerLyricsView`).
+    private(set) var session = 0
     private(set) var currentIndex = 0
     /// The line whose room the layout makes: the current line's extra space above and below, or a
     /// break's dots. It's the current line, except while the user is browsing, when it stays where
@@ -74,7 +78,18 @@ final class LyricsModel {
     private static let changeAnimation = Animation.smooth(duration: 0.5)
 
     func setPhase(_ phase: Phase) {
-        self.phase = phase
+        switch (self.phase, phase) {
+        case (.loading, .loading):
+            self.phase = phase
+        case (.loading, _):
+            // Lyrics that arrive once the panel has started coming in.
+            withAnimation(.playerQueueAnimation) { self.phase = phase }
+        case (_, .loading):
+            session += 1
+            self.phase = phase
+        default:
+            self.phase = phase
+        }
         if case .synced = phase {} else {
             currentIndex = 0
             breakEnding = nil
@@ -86,7 +101,13 @@ final class LyricsModel {
     /// Shows synced lyrics, positioned at `index` — in one step, so the lines never show with a
     /// previous song's current line.
     func showSynced(_ timeline: LyricsTimeline, _ layout: LyricsLayout, at index: Int) {
-        phase = .synced(timeline, layout)
+        if case .loading = phase {
+            // The lyrics arrive in the view that has been waiting for them, fading in.
+            withAnimation(.playerQueueAnimation) { phase = .synced(timeline, layout) }
+        } else {
+            session += 1
+            phase = .synced(timeline, layout)
+        }
         currentIndex = index
         layoutIndex = index
         window = layout.initialWindow(around: index)

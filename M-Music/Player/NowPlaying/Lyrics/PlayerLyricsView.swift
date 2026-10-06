@@ -29,17 +29,11 @@ struct PlayerLyricsView: View {
         switch model.phase {
         case .idle:
             Color.clear
-        case .loading:
-            ProgressView()
-                .tint(Color.transparentWhite)
-                .padding(.top, 48)
-        case .synced(let timeline, let layout):
-            // Replaced, not updated, when the song changes: the scroll position and the current
-            // line belong to one song's lines.
-            SyncedLyricsView(timeline: timeline, layout: layout, width: width, panelHeight: panelHeight)
-                .id(timeline.identity)
+        case .loading, .synced:
+            synced
         case .plain(let text):
             PlainLyricsView(text: text)
+                .transition(Self.arrival)
         case .unavailable:
             Text("Lyrics not available")
                 .font(.body)
@@ -47,6 +41,45 @@ struct PlayerLyricsView: View {
                 .padding(.top, 48)
         }
     }
+
+    /// The synced lyrics' scroll view, which is there from when the lyrics start to load — empty,
+    /// with a spinner over it — and has them put in it when they arrive. Made only then, it would
+    /// miss the panel's move up and fade in, which began before it existed (a scroll view made in
+    /// the middle of an animation is simply put at its end state), and the lyrics would just
+    /// appear, uncovered by the artwork shrinking away. A different song's lyrics replace it, as
+    /// the scroll position and the current line belong to one song's lines.
+    @ViewBuilder
+    private var synced: some View {
+        let lyrics: (LyricsTimeline, LyricsLayout)? = if case .synced(let timeline, let layout) = model.phase { (timeline, layout) } else { nil }
+        ZStack(alignment: .top) {
+            SyncedLyricsView(
+                timeline: lyrics?.0 ?? Placeholder.timeline,
+                layout: lyrics?.1 ?? Placeholder.layout,
+                width: width,
+                panelHeight: panelHeight,
+                showsLines: lyrics != nil
+            )
+            .id(model.session)
+            if lyrics == nil {
+                ProgressView()
+                    .tint(Color.transparentWhite)
+                    .padding(.top, 48)
+            }
+        }
+    }
+
+    /// What the empty scroll view is given to hold while the lyrics load.
+    private enum Placeholder {
+        static let timeline = LyricsTimeline(timed: [(0, "…")])!
+        static let layout = LyricsLayout(timeline: timeline, textWidth: 300)
+    }
+
+    /// How plain lyrics that were still loading when the panel came in arrive: moving up and fading
+    /// in, like the panel itself. (Their scroll view is made only when they arrive — see `synced`
+    /// — so it can't take part in the panel's own move and fade.)
+    private static let arrival = AnyTransition
+        .offset(y: RegularNowPlayingLayout.queueTitleRise)
+        .combined(with: .opacity)
 }
 
 /// Lyrics without timing: plain text, scrolling.
@@ -85,6 +118,8 @@ private struct SyncedLyricsView: View {
     let layout: LyricsLayout
     let width: CGFloat
     let panelHeight: CGFloat
+    /// Off while the lyrics are still loading and the view is empty.
+    var showsLines = true
 
     private let model = LyricsModel.shared
 
@@ -127,6 +162,7 @@ private struct SyncedLyricsView: View {
                     Color.clear.frame(height: max(panelHeight, PlayerQueueList.FadeMask.bottomFade))
                 }
                 .padding(.horizontal, NowPlayingLayout.cardPaddings)
+                .opacity(showsLines ? 1 : 0)
             }
             .scrollIndicators(.hidden)
             // The lines rest below the fade, which is taller here than the queue's, so the
@@ -180,7 +216,9 @@ private struct SyncedLyricsView: View {
                 if let duration = request.duration {
                     withAnimation(.smooth(duration: duration)) { proxy.scrollTo(request.target, anchor: .top) }
                 } else {
-                    proxy.scrollTo(request.target, anchor: .top)
+                    // A turn later: the lyrics may have just been put in the view (see `synced`), and
+                    // their lines aren't in place yet.
+                    DispatchQueue.main.async { proxy.scrollTo(request.target, anchor: .top) }
                 }
             }
         }
