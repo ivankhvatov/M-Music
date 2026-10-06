@@ -317,6 +317,9 @@ private extension ExpandableNowPlaying {
         // `onChange(of: expanded)` — so the second is a no-op.
         guard !isShapeExpanded else { return }
         marqueeRestartToken &+= 1
+        // Starts following the playback for the lyrics, which also fetches the current song's, so
+        // they're there by the time the lyrics button is pressed.
+        _ = LyricsConductor.shared
         backgroundSaturation = 1
         withAnimation(.playerExpandAnimation) {
             isShapeExpanded = true
