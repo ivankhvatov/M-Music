@@ -120,6 +120,11 @@ private struct SyncedLyricsView: View {
                             row(line, current: current, layoutIndex: layoutIndex, browsing: browsing)
                         }
                     }
+                    // Room to scroll the last line all the way to the top. Content, not a scroll
+                    // margin: a bottom margin this tall, alongside the top one, made the scroll
+                    // view itself that much taller than the room it was given, over the scrubber
+                    // below — which then was hard to get a finger onto.
+                    Color.clear.frame(height: max(panelHeight, PlayerQueueList.FadeMask.bottomFade))
                 }
                 .padding(.horizontal, NowPlayingLayout.cardPaddings)
             }
@@ -127,8 +132,6 @@ private struct SyncedLyricsView: View {
             // The lines rest below the fade, which is taller here than the queue's, so the
             // previous line shows through it, softly, above the current one.
             .contentMargins(.top, Self.topFade, for: .scrollContent)
-            // Room to scroll the last line all the way to the top.
-            .contentMargins(.bottom, max(panelHeight, PlayerQueueList.FadeMask.bottomFade), for: .scrollContent)
             .mask { LyricsTopFade(height: Self.topFade) }
             // Which rows to build follows what's on screen as the user scrolls — once there's a screen
             // to speak of: the view is mounted while its panel is still growing out of nothing.
