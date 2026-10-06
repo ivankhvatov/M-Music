@@ -20,8 +20,8 @@ struct PlayerLyricsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .environment(\.colorScheme, .dark)
             // The conductor works only while the panel is up.
-            .onAppear { LyricsConductor.shared.send(.activate(true)) }
-            .onDisappear { LyricsConductor.shared.send(.activate(false)) }
+            .onAppear { LyricsConductor.shared.send(.activate(true, width: width)) }
+            .onDisappear { LyricsConductor.shared.send(.activate(false, width: width)) }
     }
 
     @ViewBuilder
@@ -33,10 +33,10 @@ struct PlayerLyricsView: View {
             ProgressView()
                 .tint(Color.transparentWhite)
                 .padding(.top, 48)
-        case .synced(let timeline):
+        case .synced(let timeline, let layout):
             // Replaced, not updated, when the song changes: the scroll position and the current
             // line belong to one song's lines.
-            SyncedLyricsView(timeline: timeline, width: width, panelHeight: panelHeight)
+            SyncedLyricsView(timeline: timeline, layout: layout, width: width, panelHeight: panelHeight)
                 .id(timeline.identity)
         case .plain(let text):
             PlainLyricsView(text: text)
@@ -76,8 +76,13 @@ private struct PlainLyricsView: View {
 /// empty line is an instrumental break, drawn as three dots — but only while it is the current
 /// line: it appears when the break begins and is gone again when the next line comes, so scrolling
 /// through the lyrics never shows one.
+///
+/// Every line has a slot of a height measured in advance (`LyricsLayout`), holding a real row if
+/// it's near what's on screen and an empty spacer otherwise, so the content's height is exact and
+/// constant however far the user scrolls.
 private struct SyncedLyricsView: View {
     let timeline: LyricsTimeline
+    let layout: LyricsLayout
     let width: CGFloat
     let panelHeight: CGFloat
 
@@ -86,12 +91,13 @@ private struct SyncedLyricsView: View {
     /// The height of the fade at the top of the view.
     private static let topFade: CGFloat = 56
 
+    /// Less tall than this (what's showing of it, margins included), the view is still growing into
+    /// its panel.
+    private static let minimumHeight: CGFloat = 100
+
     /// How much more room the current line has above and below it than lines have between each
     /// other, so it stands a little apart from the previous and the following line.
     private static let currentLineExtraSpacing: CGFloat = 8
-
-    /// How much larger the current line is drawn.
-    private static let currentScale: CGFloat = 1.16
 
     /// Lines further than this from the current one all look the same (the fade bottoms out and the
     /// blur tops out well before), so their views never have to change as it moves.
@@ -99,14 +105,20 @@ private struct SyncedLyricsView: View {
 
     var body: some View {
         let current = min(model.currentIndex, timeline.count - 1)
+        let layoutIndex = min(model.layoutIndex, timeline.count - 1)
         let browsing = model.isBrowsing
+        let window = model.window
         ScrollViewReader { proxy in
             ScrollView {
-                // Lazy, so only the lines on screen exist: building, measuring and animating all of
-                // a long song's lines was the bulk of what the lyrics cost.
-                LazyVStack(alignment: .leading, spacing: 20) {
-                    ForEach(timeline.lines) { line in
-                        row(line, current: current, browsing: browsing)
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(segments(layoutIndex: layoutIndex, window: window)) { segment in
+                        switch segment {
+                        case .spacer(_, let height):
+                            // Nothing to draw, but the room the lines it stands for take.
+                            Color.clear.frame(height: height)
+                        case .row(let line):
+                            row(line, current: current, layoutIndex: layoutIndex, browsing: browsing)
+                        }
                     }
                 }
                 .padding(.horizontal, NowPlayingLayout.cardPaddings)
@@ -118,10 +130,28 @@ private struct SyncedLyricsView: View {
             // Room to scroll the last line all the way to the top.
             .contentMargins(.bottom, max(panelHeight, PlayerQueueList.FadeMask.bottomFade), for: .scrollContent)
             .mask { LyricsTopFade(height: Self.topFade) }
+            // Which rows to build follows what's on screen as the user scrolls — once there's a screen
+            // to speak of: the view is mounted while its panel is still growing out of nothing.
+            .onScrollGeometryChange(for: LyricsLayout.Window?.self) { [layout] geometry in
+                geometry.visibleRect.height > Self.minimumHeight
+                    ? layout.window(top: geometry.visibleRect.minY, bottom: geometry.visibleRect.maxY)
+                    : nil
+            } action: { _, window in
+                // Only while the user's finger is moving them. The lyrics scrolling themselves
+                // build the rows they need before they start (see `LyricsModel`) — and rows
+                // coming and going under a scroll animation made it lurch.
+                if let window, model.isUserScrolling { model.setWindow(window) }
+            }
+            // To wherever the song already is, as soon as there's room to scroll in: a jump, not a
+            // glide from the top.
+            .onScrollGeometryChange(for: Bool.self) { $0.visibleRect.height > Self.minimumHeight } action: { _, isSized in
+                // A turn later: this runs inside the first layout, before the lines are in place.
+                if isSized { DispatchQueue.main.async { proxy.scrollTo(model.currentIndex, anchor: .top) } }
+            }
             // The user's own scrolling, as opposed to this view's (`.animating`) — not `.tracking`,
             // which is a finger that has touched the lyrics but hasn't moved them (yet): a tap on a
             // line starts out like that.
-            .onScrollPhaseChange { _, phase in
+            .onScrollPhaseChange { _, phase, context in
                 switch phase {
                 case .interacting, .decelerating:
                     LyricsConductor.shared.send(.scrollPhase(isUser: true))
@@ -131,6 +161,11 @@ private struct SyncedLyricsView: View {
                     break
                 @unknown default:
                     break
+                }
+                model.setUserScrolling(phase == .interacting || phase == .decelerating)
+                // When it stops, the window settles on where it stopped.
+                if phase == .idle {
+                    model.setWindow(layout.window(top: context.geometry.visibleRect.minY, bottom: context.geometry.visibleRect.maxY))
                 }
             }
             // The conductor says when and where to scroll.
@@ -142,40 +177,74 @@ private struct SyncedLyricsView: View {
                     proxy.scrollTo(request.target, anchor: .top)
                 }
             }
-            // To wherever the song already is, when the view comes up: a jump, not a glide from the
-            // top.
-            .onAppear { proxy.scrollTo(current, anchor: .top) }
         }
     }
 
+    /// What the stack is made of: a real row for each line near what's on screen — and for the
+    /// current line and its neighbours, which the layout and the scrolling need — and, for each run
+    /// of the others, one spacer of the height they add up to.
+    private enum Segment: Identifiable {
+        case spacer(start: Int, height: CGFloat)
+        case row(SyncedLyricLine)
+
+        var id: Int {
+            switch self {
+            case .spacer(let start, _): -1 - start
+            case .row(let line): line.id
+            }
+        }
+    }
+
+    private func segments(layoutIndex: Int, window: LyricsLayout.Window) -> [Segment] {
+        var result: [Segment] = []
+        var pending: CGFloat = 0
+        var pendingStart = 0
+        for line in timeline.lines {
+            if line.isBreak ? line.id == layoutIndex : (window.contains(line.id) || abs(line.id - layoutIndex) <= 1) {
+                if pending > 0 {
+                    result.append(.spacer(start: pendingStart, height: pending))
+                    pending = 0
+                }
+                result.append(.row(line))
+            } else if !line.isBreak {
+                if pending == 0 { pendingStart = line.id }
+                pending += layout.textHeights[line.id] + LyricsLayout.rowSpacing
+            }
+        }
+        if pending > 0 { result.append(.spacer(start: pendingStart, height: pending)) }
+        return result
+    }
+
     @ViewBuilder
-    private func row(_ line: SyncedLyricLine, current: Int, browsing: Bool) -> some View {
+    private func row(_ line: SyncedLyricLine, current: Int, layoutIndex: Int, browsing: Bool) -> some View {
         if !line.isBreak {
             let distance = timeline.distance(of: line.id, from: current)
             LyricLineView(
                 text: line.text,
-                // Browsing, every line but the current one looks like the next, and none is blurred.
+                // Browsing, every line but the current one looks like the next, and none is
+                // blurred.
                 distance: browsing ? min(distance, 1) : min(distance, Self.maxStyledDistance),
                 isBlurred: !browsing,
-                scale: Self.currentScale
+                scale: LyricsLayout.currentScale
             )
             .equatable()
+            // The height it was measured at, so the slot is exactly the size the layout made it.
+            .frame(height: layout.textHeights[line.id], alignment: .top)
             .id(line.id)
             // The extra room is outside the `id`, so that scrolling to the line puts its text at
             // the top, not the gap above it.
-            .padding(.vertical, distance == 0 ? Self.currentLineExtraSpacing : 0)
-            // The line is laid out narrower, so that scaled up it still ends where the others do
-            // instead of poking out past the right margin.
+            .padding(.vertical, line.id == layoutIndex ? Self.currentLineExtraSpacing : 0)
+            .padding(.bottom, LyricsLayout.rowSpacing)
             .padding(.trailing, unusedWidthWhenScaled)
-            // Tapping a line plays from it. The whole row takes the tap, not just the glyphs; a drag
-            // on it still scrolls. The conductor is told first, so it knows a tap is what moved the
-            // position.
+            // Tapping a line plays from it. The whole row takes the tap, not just the glyphs; a
+            // drag on it still scrolls. The conductor is told first, so it knows a tap is what
+            // moved the position.
             .contentShape(.rect)
             .onTapGesture {
-                LyricsConductor.shared.send(.tap(line.id))
+                LyricsConductor.shared.send(.tap(line.id, time: line.start))
                 PlayerManager.shared.seek(to: line.start)
             }
-        } else if line.id == current {
+        } else {
             let next = timeline.nextStart(after: line.id)
             // The dots fill up by the time they start to leave.
             LyricBreakDots(
@@ -185,12 +254,13 @@ private struct SyncedLyricsView: View {
             )
             .id(line.id)
             .padding(.vertical, Self.currentLineExtraSpacing)
+            .padding(.bottom, LyricsLayout.rowSpacing)
             .transition(.opacity)
         }
     }
 
     private var unusedWidthWhenScaled: CGFloat {
-        (width - NowPlayingLayout.cardPaddings * 2) * (1 - 1 / Self.currentScale)
+        (width - NowPlayingLayout.cardPaddings * 2) * (1 - 1 / LyricsLayout.currentScale)
     }
 }
 

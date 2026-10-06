@@ -18,12 +18,12 @@ actor LyricsConductor {
         /// The current track changed (`nil`: nothing, or radio). `prefetch`: the expanded player is
         /// up, so its lyrics will probably be asked for soon.
         case track(Child?, prefetch: Bool)
-        /// The lyrics panel came up or went away.
-        case activate(Bool)
+        /// The lyrics panel came up (`width` is the screen's) or went away.
+        case activate(Bool, width: CGFloat)
         /// The user's finger is on the lyrics, or they're coasting (`true`); they've stopped.
         case scrollPhase(isUser: Bool)
-        /// A line was tapped (and the song is being sought to it).
-        case tap(Int)
+        /// A line was tapped, and the song is being sought to `time`, its timestamp.
+        case tap(Int, time: TimeInterval)
     }
 
     @MainActor static let shared: LyricsConductor = {
@@ -42,6 +42,8 @@ actor LyricsConductor {
     private var trackID: String?
     private var currentTrack: Child?
     private var timeline: LyricsTimeline?
+    /// The width the lines' text is laid out in.
+    private var textWidth: CGFloat = 300
     private var current = 0
 
     // The playback clock: the position at the last update and when that was.
@@ -62,6 +64,8 @@ actor LyricsConductor {
 
     /// How long the lyrics have to be left alone before they go back to following the song.
     private static let browsingTimeout: TimeInterval = 5
+    /// How many lines away counts as a jump rather than a scroll.
+    private static let farJump = 6
     /// How far the position may be from where the clock had it before it counts as a seek.
     private static let seekThreshold: TimeInterval = 0.35
 
@@ -91,9 +95,9 @@ actor LyricsConductor {
             duration = value
             if isShowingBreak { await publishClock() }
         case .track(let track, let prefetch): await trackChanged(track, prefetch: prefetch)
-        case .activate(let isActive): await activate(isActive)
+        case .activate(let isActive, let width): await activate(isActive, width: width)
         case .scrollPhase(let isUser): await scrollPhase(isUser: isUser)
-        case .tap(let line): await tap(line)
+        case .tap(let line, let time): await tap(line, time: time)
         }
     }
 
@@ -145,7 +149,8 @@ actor LyricsConductor {
         }
     }
 
-    private func activate(_ isActive: Bool) async {
+    private func activate(_ isActive: Bool, width: CGFloat) async {
+        textWidth = LyricsLayout.textWidth(forViewWidth: width)
         guard active != isActive else { return }
         active = isActive
         if isActive {
@@ -184,8 +189,19 @@ actor LyricsConductor {
             self.timeline = timeline
             current = timeline.index(at: estimate())
             if timeline.lines[current].isBreak { await publishClock() }
-            await model.showSynced(timeline, at: current)
+            // Measured here, off the main actor, rather than by the views as they build.
+            await model.showSynced(timeline, LyricsLayout(timeline: timeline, textWidth: textWidth), at: current)
             scheduleAdvance()
+            // The panel is still sliding in; once it has settled, the rows the first frame left
+            // out — the ones a flick would want — are built, a row at a time, when nothing is
+            // moving.
+            Task {
+                try? await Task.sleep(for: .seconds(0.8))
+                while !Task.isCancelled, self.timeline == timeline {
+                    if await self.model.growWindowAroundCurrent() { break }
+                    try? await Task.sleep(for: .milliseconds(40))
+                }
+            }
         case .plain(let text):
             await model.setPhase(.plain(text))
         case .unavailable:
@@ -222,7 +238,14 @@ actor LyricsConductor {
     /// showing has its dots shrink away first, at once and from wherever the pulse has them, and
     /// then the lyrics move — the break's own hand-over, which would otherwise do that, plays out
     /// its dots' grow too.
-    private func tap(_ line: Int) async {
+    private func tap(_ line: Int, time: TimeInterval) async {
+        // The seek's own position update is queued behind this, so until it arrives the clock
+        // would still say wherever the song was — and anything scheduled from here (the line this
+        // makes current is followed by an `advance()`) would act on that, moving the lyrics back
+        // to the line that was current before the tap. The song is going to `time`: the clock
+        // goes there now.
+        anchorTime = time
+        anchorInstant = .now
         await stopBrowsing(scrollBack: false)
         guard active, let timeline else { return }
         let index = min(current, timeline.count - 1)
@@ -261,6 +284,7 @@ actor LyricsConductor {
 
     private func setCurrent(_ index: Int, scrollDuration: TimeInterval?) async {
         guard let timeline else { return }
+        let previous = current
         current = index
         if timeline.lines[index].isBreak {
             // A break that's current again starts afresh, whatever happened to it before.
@@ -268,7 +292,9 @@ actor LyricsConductor {
             await model.setBreakEnding(nil)
             await publishClock()
         }
-        let scroll: LyricsModel.ScrollRequest.Mode = browsing ? .none : .animated(scrollDuration ?? LyricsTimeline.scrollDuration)
+        // Far from where it was (a seek) the lyrics jump, rather than run past all the lines between.
+        let far = abs(index - previous) > Self.farJump
+        let scroll: LyricsModel.ScrollRequest.Mode = browsing ? .none : (far ? .jump : .animated(scrollDuration ?? LyricsTimeline.scrollDuration))
         await model.setCurrent(index, scroll: scroll)
         scheduleAdvance()
     }
@@ -348,6 +374,8 @@ actor LyricsConductor {
     /// Moves on from the line at `index`. Always to at least the line after it, whatever the clock
     /// says, and never to an earlier one.
     private func handOver(from index: Int, scrollDuration: TimeInterval?, _ timeline: LyricsTimeline) async {
+        // Not if something else moved the lyrics (or restarted the schedule) in the meantime.
+        guard !Task.isCancelled, current == index else { return }
         await setCurrent(max(index + 1, timeline.index(at: estimate())), scrollDuration: scrollDuration)
     }
 

@@ -14,7 +14,7 @@ final class LyricsModel {
         /// The panel isn't up.
         case idle
         case loading
-        case synced(LyricsTimeline)
+        case synced(LyricsTimeline, LyricsLayout)
         case plain(String)
         case unavailable
     }
@@ -48,6 +48,14 @@ final class LyricsModel {
 
     private(set) var phase: Phase = .idle
     private(set) var currentIndex = 0
+    /// The line whose room the layout makes: the current line's extra space above and below, or a
+    /// break's dots. It's the current line, except while the user is browsing, when it stays where
+    /// it was — otherwise every change of line would shift the lines under their finger.
+    private(set) var layoutIndex = 0
+    /// The lines that have rows built — see `LyricsLayout`.
+    private(set) var window = LyricsLayout.Window()
+    /// The user's finger is moving the lyrics, or they're coasting from a flick.
+    private(set) var isUserScrolling = false
     /// When the current line became current.
     private(set) var currentSince = Date()
     private(set) var breakEnding: BreakEnding?
@@ -72,9 +80,11 @@ final class LyricsModel {
 
     /// Shows synced lyrics, positioned at `index` — in one step, so the lines never show with a
     /// previous song's current line.
-    func showSynced(_ timeline: LyricsTimeline, at index: Int) {
-        phase = .synced(timeline)
+    func showSynced(_ timeline: LyricsTimeline, _ layout: LyricsLayout, at index: Int) {
+        phase = .synced(timeline, layout)
         currentIndex = index
+        layoutIndex = index
+        window = layout.initialWindow(around: index)
         currentSince = Date()
         breakEnding = nil
         scrollRequest = ScrollRequest(target: index, duration: nil, generation: scrollRequest.generation + 1)
@@ -84,16 +94,45 @@ final class LyricsModel {
         let now = Date()
         withAnimation(Self.changeAnimation) {
             currentIndex = index
+            if !isBrowsing { layoutIndex = index }
             currentSince = now
         }
         switch scroll {
         case .none:
             break
         case .jump:
+            // The rows around where it's going are built before it gets there.
+            if case .synced(_, let layout) = phase { window = layout.window(around: index) }
             scrollRequest = ScrollRequest(target: index, duration: nil, generation: scrollRequest.generation + 1)
         case .animated(let duration):
+            // The rows it'll pass, and the ones it's going to, are built before it starts.
+            if case .synced(_, let layout) = phase { window = window.union(layout.window(around: index)) }
             scrollRequest = ScrollRequest(target: index, duration: duration, generation: scrollRequest.generation + 1)
         }
+    }
+
+    func setUserScrolling(_ scrolling: Bool) {
+        guard isUserScrolling != scrolling else { return }
+        isUserScrolling = scrolling
+    }
+
+    /// Builds one more row at each end of the window, toward what's wanted around the current line —
+    /// the rows coming up left for later. One at a time, so that no frame has more than a row to
+    /// build. `true` once there's nothing left to add.
+    func growWindowAroundCurrent() -> Bool {
+        guard case .synced(_, let layout) = phase else { return true }
+        let wanted = layout.window(around: currentIndex)
+        var grown = window
+        if grown.start > wanted.start { grown.start -= 1 }
+        if grown.end < wanted.end { grown.end += 1 }
+        guard grown != window else { return true }
+        window = grown
+        return false
+    }
+
+    func setWindow(_ window: LyricsLayout.Window) {
+        guard window != self.window else { return }
+        self.window = window
     }
 
     func setBreakEnding(_ ending: BreakEnding?) {
@@ -101,10 +140,14 @@ final class LyricsModel {
     }
 
     func setBrowsing(_ browsing: Bool) {
-        withAnimation(Self.changeAnimation) { isBrowsing = browsing }
+        withAnimation(Self.changeAnimation) {
+            isBrowsing = browsing
+            if !browsing { layoutIndex = currentIndex }
+        }
     }
 
     func requestScroll(to index: Int, duration: TimeInterval) {
+        if case .synced(_, let layout) = phase { window = window.union(layout.window(around: index)) }
         scrollRequest = ScrollRequest(target: index, duration: duration, generation: scrollRequest.generation + 1)
     }
 
