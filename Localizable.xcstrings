@@ -981,6 +981,22 @@
         }
       }
     },
+    "Download lyrics" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Songtexte herunterladen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Загружать тексты песен"
+          }
+        }
+      }
+    },
     "Downloaded" : {
       "localizations" : {
         "ru" : {
@@ -1351,6 +1367,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Только без потерь"
+          }
+        }
+      }
+    },
+    "Lyrics" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Songtexte"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Тексты песен"
           }
         }
       }
@@ -1933,6 +1965,22 @@
         }
       }
     },
+    "Saves a song's lyrics along with it, and shows them from the device instead of fetching them from the server. Applies only to new downloads — songs already saved to this device keep fetching their lyrics from the server. Deleting a download deletes its lyrics too." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Speichert die Songtexte eines Titels zusammen mit dem Titel und zeigt sie vom Gerät an, statt sie vom Server abzurufen. Gilt nur für neue Downloads – bereits auf dem Gerät gespeicherte Titel rufen ihre Songtexte weiterhin vom Server ab. Beim Löschen eines Downloads werden auch seine Songtexte gelöscht."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сохраняет текст песни вместе с ней и показывает его с устройства, а не загружает с сервера. Применяется только к новым загрузкам — для песен, уже сохранённых на устройстве, тексты по-прежнему загружаются с сервера. При удалении загрузки удаляется и её текст."
+          }
+        }
+      }
+    },
     "Scrobble after" : {
       "localizations" : {
         "de" : {
@@ -2453,54 +2501,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Год"
-          }
-        }
-      }
-    },
-    "Download lyrics" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Songtexte herunterladen"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Скачивать тексты песен"
-          }
-        }
-      }
-    },
-    "Lyrics" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Songtexte"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Тексты песен"
-          }
-        }
-      }
-    },
-    "Saves a song's lyrics along with it, and shows them from the device instead of fetching them from the server. Applies only to new downloads — songs already saved to this device keep fetching their lyrics from the server. Deleting a download deletes its lyrics too." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Speichert die Songtexte eines Titels zusammen mit dem Titel und zeigt sie vom Gerät an, statt sie vom Server abzurufen. Gilt nur für neue Downloads – bereits auf dem Gerät gespeicherte Titel rufen ihre Songtexte weiterhin vom Server ab. Beim Löschen eines Downloads werden auch seine Songtexte gelöscht."
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Сохраняет текст песни вместе с ней и показывает его с устройства, а не загружает с сервера. Применяется только к новым загрузкам — для песен, уже сохранённых на устройстве, тексты по-прежнему загружаются с сервера. При удалении загрузки удаляется и её текст."
           }
         }
       }
