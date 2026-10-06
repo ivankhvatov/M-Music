@@ -118,7 +118,7 @@ struct RegularChrome: View {
                             .frame(
                                 maxWidth: .infinity,
                                 minHeight: listHeight,
-                                maxHeight: listHeight > 0 ? listHeight : .infinity,
+                                maxHeight: queueListMaxHeight,
                                 alignment: .top
                             )
                             .panelPlacement(isShowing: panel == .queue)
@@ -165,6 +165,16 @@ struct RegularChrome: View {
     /// The height the queue list is laid out at: its final height, or none while parked.
     private var listHeight: CGFloat {
         parksQueueList ? 0 : panelHeight
+    }
+
+    /// The most room the queue list is offered. While it's parked that's none, whatever else is
+    /// showing in the (then tall) panel area, such as the lyrics: offered the whole area, the
+    /// hidden list would be laid out at full height, and moved, every frame of every expand and
+    /// collapse. Not even while the panel's height is still unknown — the list would then be
+    /// resized to nothing as soon as it was, in the middle of the first toggle's animation.
+    private var queueListMaxHeight: CGFloat {
+        if parksQueueList { return 0 }
+        return listHeight > 0 ? listHeight : .infinity
     }
 
     /// What the controls' queue and lyrics buttons set. Normally that's `panel` itself; but if

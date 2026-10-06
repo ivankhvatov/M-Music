@@ -162,9 +162,12 @@ private struct SyncedLyricsView: View {
                 @unknown default:
                     break
                 }
+                let wasUserScrolling = model.isUserScrolling
                 model.setUserScrolling(phase == .interacting || phase == .decelerating)
-                // When it stops, the window settles on where it stopped.
-                if phase == .idle {
+                // When the user's scrolling stops, the window settles on where it stopped. Not when
+                // this view's own scroll does: swapping rows far above for a spacer then made the
+                // scroll view scroll on, past the line it had just arrived at.
+                if phase == .idle, wasUserScrolling {
                     model.setWindow(layout.window(top: context.geometry.visibleRect.minY, bottom: context.geometry.visibleRect.maxY))
                 }
             }

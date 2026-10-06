@@ -105,8 +105,10 @@ final class LyricsModel {
             if case .synced(_, let layout) = phase { window = layout.window(around: index) }
             scrollRequest = ScrollRequest(target: index, duration: nil, generation: scrollRequest.generation + 1)
         case .animated(let duration):
-            // The rows it'll pass, and the ones it's going to, are built before it starts.
-            if case .synced(_, let layout) = phase { window = window.union(layout.window(around: index)) }
+            // The rows around where it's going are built before it starts, and the ones the song
+            // has left behind are let go now — they can't be later, once it has arrived (see
+            // `SyncedLyricsView`).
+            if case .synced(_, let layout) = phase { window = layout.window(around: index) }
             scrollRequest = ScrollRequest(target: index, duration: duration, generation: scrollRequest.generation + 1)
         }
     }
