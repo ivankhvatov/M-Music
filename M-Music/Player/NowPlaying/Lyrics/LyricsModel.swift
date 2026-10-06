@@ -78,16 +78,16 @@ final class LyricsModel {
     private static let changeAnimation = Animation.smooth(duration: 0.5)
 
     func setPhase(_ phase: Phase) {
-        switch (self.phase, phase) {
-        case (.loading, .loading):
-            self.phase = phase
-        case (.loading, _):
-            // Lyrics that arrive once the panel has started coming in.
-            withAnimation(.playerQueueAnimation) { self.phase = phase }
-        case (_, .loading):
+        if case .loading = self.phase {
+            // What the lyrics turn out to be arrives in the view that has been waiting for them —
+            // the same one, whichever it is — fading in, once the panel has started coming in.
+            if case .loading = phase {
+                self.phase = phase
+            } else {
+                withAnimation(.playerQueueAnimation) { self.phase = phase }
+            }
+        } else {
             session += 1
-            self.phase = phase
-        default:
             self.phase = phase
         }
         if case .synced = phase {} else {
@@ -133,7 +133,7 @@ final class LyricsModel {
         case .animated(let duration):
             // The rows around where it's going are built before it starts, and the ones the song
             // has left behind are let go now — they can't be later, once it has arrived (see
-            // `SyncedLyricsView`).
+            // `LyricsScrollView`).
             if case .synced(_, let layout) = phase { window = layout.window(around: index) }
             scrollRequest = ScrollRequest(target: index, duration: duration, generation: scrollRequest.generation + 1)
         }

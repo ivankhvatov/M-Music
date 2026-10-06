@@ -8,7 +8,7 @@ import SwiftUI
 /// These views hold no state of their own and observe nothing but `LyricsModel`: what's current,
 /// when to scroll, what the dots do are all worked out by `LyricsConductor`, off the main actor.
 struct PlayerLyricsView: View {
-    /// Width of the screen this sits on — see `SyncedLyricsView`.
+    /// Width of the screen this sits on — see `LyricsScrollView`.
     var width: CGFloat
     /// The room the panel has, so synced lyrics can scroll their last line up to the top.
     var panelHeight: CGFloat
@@ -26,41 +26,33 @@ struct PlayerLyricsView: View {
 
     @ViewBuilder
     private var content: some View {
-        switch model.phase {
-        case .idle:
+        if case .idle = model.phase {
             Color.clear
-        case .loading, .synced:
-            synced
-        case .plain(let text):
-            PlainLyricsView(text: text)
-                .transition(Self.arrival)
-        case .unavailable:
-            Text("Lyrics not available")
-                .font(.body)
-                .foregroundStyle(Color.transparentWhite)
-                .padding(.top, 48)
+        } else {
+            scroll
         }
     }
 
-    /// The synced lyrics' scroll view, which is there from when the lyrics start to load — empty,
-    /// with a spinner over it — and has them put in it when they arrive. Made only then, it would
-    /// miss the panel's move up and fade in, which began before it existed (a scroll view made in
-    /// the middle of an animation is simply put at its end state), and the lyrics would just
-    /// appear, uncovered by the artwork shrinking away. A different song's lyrics replace it, as
-    /// the scroll position and the current line belong to one song's lines.
+    /// The lyrics' scroll view, whatever they turn out to be — synced lines, plain text or the
+    /// word that there are none — which is there from when they start to load (empty, with a
+    /// spinner over it), and has them put in it when they arrive. Made only then, it would miss
+    /// the panel's move up and fade in, which began before it existed (a scroll view made in the
+    /// middle of an animation is simply put at its end state), and the lyrics would just appear,
+    /// uncovered by the artwork shrinking away. A different song's lyrics replace it, as the scroll
+    /// position and the current line belong to one song's lines.
     @ViewBuilder
-    private var synced: some View {
-        let lyrics: (LyricsTimeline, LyricsLayout)? = if case .synced(let timeline, let layout) = model.phase { (timeline, layout) } else { nil }
+    private var scroll: some View {
+        let (kind, lyrics) = scrollContents
         ZStack(alignment: .top) {
-            SyncedLyricsView(
+            LyricsScrollView(
+                kind: kind,
                 timeline: lyrics?.0 ?? Placeholder.timeline,
                 layout: lyrics?.1 ?? Placeholder.layout,
                 width: width,
-                panelHeight: panelHeight,
-                showsLines: lyrics != nil
+                panelHeight: panelHeight
             )
             .id(model.session)
-            if lyrics == nil {
+            if case .loading = kind {
                 ProgressView()
                     .tint(Color.transparentWhite)
                     .padding(.top, 48)
@@ -68,41 +60,24 @@ struct PlayerLyricsView: View {
         }
     }
 
-    /// What the empty scroll view is given to hold while the lyrics load.
+    /// What the scroll view holds, from the phase the lyrics are in.
+    private var scrollContents: (LyricsScrollView.Kind, (LyricsTimeline, LyricsLayout)?) {
+        switch model.phase {
+        case .synced(let timeline, let layout): (.lines, (timeline, layout))
+        case .plain(let text): (.plain(text), nil)
+        case .unavailable: (.unavailable, nil)
+        case .idle, .loading: (.loading, nil)
+        }
+    }
+
+    /// What the scroll view is given to hold while there's nothing to show in it.
     private enum Placeholder {
         static let timeline = LyricsTimeline(timed: [(0, "…")])!
         static let layout = LyricsLayout(timeline: timeline, textWidth: 300)
     }
-
-    /// How plain lyrics that were still loading when the panel came in arrive: moving up and fading
-    /// in, like the panel itself. (Their scroll view is made only when they arrive — see `synced`
-    /// — so it can't take part in the panel's own move and fade.)
-    private static let arrival = AnyTransition
-        .offset(y: RegularNowPlayingLayout.queueTitleRise)
-        .combined(with: .opacity)
 }
 
-/// Lyrics without timing: plain text, scrolling.
-private struct PlainLyricsView: View {
-    let text: String
-
-    var body: some View {
-        ScrollView {
-            Text(text)
-                .font(.system(size: 20, weight: .semibold))
-                .lineSpacing(5)
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, NowPlayingLayout.cardPaddings)
-        }
-        .scrollIndicators(.hidden)
-        .contentMargins(.top, PlayerQueueList.FadeMask.topFade, for: .scrollContent)
-        .contentMargins(.bottom, PlayerQueueList.FadeMask.bottomFade, for: .scrollContent)
-        .mask { PlayerQueueList.TopFade() }
-    }
-}
-
-/// Lyrics with timing: the sung lines, the current one white and slightly larger and at the top of
+/// The lyrics' scroll view. Synced lyrics (the `.lines` kind) are the sung lines, the current one white and slightly larger and at the top of
 /// the view, the others fainter and blurrier the further they are from it. The view scrolls itself
 /// as the song plays, and tapping a line seeks to it; while the user scrolls them it stops, and
 /// every line but the current one looks alike, until they've been left alone for a few seconds. An
@@ -113,13 +88,30 @@ private struct PlainLyricsView: View {
 /// Every line has a slot of a height measured in advance (`LyricsLayout`), holding a real row if
 /// it's near what's on screen and an empty spacer otherwise, so the content's height is exact and
 /// constant however far the user scrolls.
-private struct SyncedLyricsView: View {
+private struct LyricsScrollView: View {
+    /// What the view holds. Plain lyrics are text, scrolling, with the same fades as the queue's
+    /// list; "Lyrics not available" sits at the top of the same kind of view. While they load
+    /// (`.loading`) it's empty.
+    enum Kind {
+        case loading
+        case lines
+        case plain(String)
+        case unavailable
+
+        /// Whether it's laid out like plain text, not like synced lines.
+        var isText: Bool {
+            switch self {
+            case .plain, .unavailable: true
+            case .loading, .lines: false
+            }
+        }
+    }
+
+    let kind: Kind
     let timeline: LyricsTimeline
     let layout: LyricsLayout
     let width: CGFloat
     let panelHeight: CGFloat
-    /// Off while the lyrics are still loading and the view is empty.
-    var showsLines = true
 
     private let model = LyricsModel.shared
 
@@ -138,6 +130,10 @@ private struct SyncedLyricsView: View {
     /// blur tops out well before), so their views never have to change as it moves.
     private static let maxStyledDistance = 6
 
+    private var isLoading: Bool {
+        if case .loading = kind { true } else { false }
+    }
+
     var body: some View {
         let current = min(model.currentIndex, timeline.count - 1)
         let layoutIndex = min(model.layoutIndex, timeline.count - 1)
@@ -146,29 +142,53 @@ private struct SyncedLyricsView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(segments(layoutIndex: layoutIndex, window: window)) { segment in
-                        switch segment {
-                        case .spacer(_, let height):
-                            // Nothing to draw, but the room the lines it stands for take.
-                            Color.clear.frame(height: height)
-                        case .row(let line):
-                            row(line, current: current, layoutIndex: layoutIndex, browsing: browsing)
+                    switch kind {
+                    case .plain(let text):
+                        Text(text)
+                            .font(.system(size: 20, weight: .semibold))
+                            .lineSpacing(5)
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .transition(.opacity)
+                    case .unavailable:
+                        Text("Lyrics not available")
+                            .font(.body)
+                            .foregroundStyle(Color.transparentWhite)
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 48)
+                            .transition(.opacity)
+                    case .loading, .lines:
+                        ForEach(segments(layoutIndex: layoutIndex, window: window)) { segment in
+                            switch segment {
+                            case .spacer(_, let height):
+                                // Nothing to draw, but the room the lines it stands for take.
+                                Color.clear.frame(height: height)
+                            case .row(let line):
+                                row(line, current: current, layoutIndex: layoutIndex, browsing: browsing)
+                            }
                         }
+                        // Room to scroll the last line all the way to the top. Content, not a scroll
+                        // margin: a bottom margin this tall, alongside the top one, made the scroll
+                        // view itself that much taller than the room it was given, over the scrubber
+                        // below — which then was hard to get a finger onto.
+                        Color.clear.frame(height: max(panelHeight, PlayerQueueList.FadeMask.bottomFade))
                     }
-                    // Room to scroll the last line all the way to the top. Content, not a scroll
-                    // margin: a bottom margin this tall, alongside the top one, made the scroll
-                    // view itself that much taller than the room it was given, over the scrubber
-                    // below — which then was hard to get a finger onto.
-                    Color.clear.frame(height: max(panelHeight, PlayerQueueList.FadeMask.bottomFade))
                 }
                 .padding(.horizontal, NowPlayingLayout.cardPaddings)
-                .opacity(showsLines ? 1 : 0)
+                .opacity(isLoading ? 0 : 1)
             }
             .scrollIndicators(.hidden)
             // The lines rest below the fade, which is taller here than the queue's, so the
-            // previous line shows through it, softly, above the current one.
-            .contentMargins(.top, Self.topFade, for: .scrollContent)
-            .mask { LyricsTopFade(height: Self.topFade) }
+            // previous line shows through it, softly, above the current one. Text has the queue's.
+            .contentMargins(.top, kind.isText ? PlayerQueueList.FadeMask.topFade : Self.topFade, for: .scrollContent)
+            .contentMargins(.bottom, kind.isText ? PlayerQueueList.FadeMask.bottomFade : 0, for: .scrollContent)
+            .mask {
+                if kind.isText {
+                    PlayerQueueList.TopFade()
+                } else {
+                    LyricsTopFade(height: Self.topFade)
+                }
+            }
             // Which rows to build follows what's on screen as the user scrolls — once there's a screen
             // to speak of: the view is mounted while its panel is still growing out of nothing.
             .onScrollGeometryChange(for: LyricsLayout.Window?.self) { [layout] geometry in
@@ -191,6 +211,7 @@ private struct SyncedLyricsView: View {
             // which is a finger that has touched the lyrics but hasn't moved them (yet): a tap on a
             // line starts out like that.
             .onScrollPhaseChange { _, phase, context in
+                guard case .lines = kind else { return }
                 switch phase {
                 case .interacting, .decelerating:
                     LyricsConductor.shared.send(.scrollPhase(isUser: true))
