@@ -183,6 +183,57 @@ final class PlayerManager: ObservableObject {
     /// when it actually changed rather than on every playback tick — and readable so views can
     /// cache anything derived from the queue against it instead of rebuilding on every publish.
     private(set) var queueVersion = 0
+
+    /// The current track moved in the queue — ahead, with a skip, the song ending, a tap on a queue
+    /// row; or back, with the previous button — as the queue list needs to know it, to show the
+    /// rows as they were while the ones that moved out fade away, or the ones that are back come
+    /// in (see `PlayerQueueList`). It's gone again a moment later; it only says that the queue
+    /// itself is as it was, bar the current track moving.
+    struct QueueAdvance: Equatable {
+        let id: Int
+        /// The `id` of the first advance of the run this carries on (see `moveCurrent`) — its own
+        /// if it's the first.
+        let chainID: Int
+        let fromIndex: Int
+        let toIndex: Int
+    }
+    @Published private(set) var queueAdvance: QueueAdvance?
+    private var queueAdvanceCount = 0
+    /// Whether the queue list has got past the first step of showing `queueAdvance` (see
+    /// `releaseQueueAdvance`).
+    private var queueAdvanceReleased = false
+
+    /// The queue list says it has moved on from `queueAdvance`'s first step — for a move ahead,
+    /// the rows that moved out have faded and the rest start to move up. Another move ahead after
+    /// that starts a new advance; before it, it carries on the one under way (see `moveCurrent`).
+    func releaseQueueAdvance(id: Int) {
+        if queueAdvance?.id == id { queueAdvanceReleased = true }
+    }
+
+    /// Moves the current track to `newIndex` in the queue, noting it in `queueAdvance`.
+    private func moveCurrent(to newIndex: Int) {
+        if let old = currentIndex, newIndex != old {
+            // Skipping on again before the rows of the last skip have faded carries on that
+            // advance, rather than starting another that cuts the first short: one fade for all
+            // the rows skipped, and one move up once the skipping pauses, however fast it goes.
+            var from = old
+            queueAdvanceCount += 1
+            var chain = queueAdvanceCount
+            if let active = queueAdvance, !queueAdvanceReleased, newIndex > old,
+               active.toIndex == old, active.fromIndex < active.toIndex {
+                from = active.fromIndex
+                chain = active.chainID
+            }
+            queueAdvanceReleased = false
+            let advance = QueueAdvance(id: queueAdvanceCount, chainID: chain, fromIndex: from, toIndex: newIndex)
+            queueAdvance = advance
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(1))
+                if self?.queueAdvance == advance { self?.queueAdvance = nil }
+            }
+        }
+        currentIndex = newIndex
+    }
     private var persistedQueueVersion = -1
     /// At launch only the current track is restored synchronously (the queue can be thousands of
     /// tracks); `queue` is a one-element placeholder until the full queue has been read off the
@@ -389,7 +440,7 @@ final class PlayerManager: ObservableObject {
             finishQueue()
             return
         }
-        self.currentIndex = nextIndex
+        moveCurrent(to: nextIndex)
         clearGaplessPreload()
         loadCurrentItem(autoplay: true)
     }
@@ -403,7 +454,7 @@ final class PlayerManager: ObservableObject {
         }
         let previousIndex = currentIndex - 1
         if queue.indices.contains(previousIndex) {
-            self.currentIndex = previousIndex
+            moveCurrent(to: previousIndex)
             clearGaplessPreload()
             loadCurrentItem(autoplay: true)
         } else {
@@ -466,6 +517,19 @@ final class PlayerManager: ObservableObject {
             prepareNextItem()
         }
         persistState()
+    }
+
+    /// Starts playing a track from the up-next portion of the queue — counted from zero directly
+    /// after `currentIndex` — skipping the ones before it: they, like the track that was playing,
+    /// become playback history (reachable via `previous()`), and the queue's order is untouched.
+    /// Used by the queue list's tap on a row.
+    func playUpcoming(atUpcomingIndex index: Int) {
+        guard let currentIndex else { return }
+        let queueIndex = currentIndex + 1 + index
+        guard queue.indices.contains(queueIndex) else { return }
+        moveCurrent(to: queueIndex)
+        clearGaplessPreload()
+        loadCurrentItem(autoplay: true)
     }
 
     /// Removes a track from the up-next portion of the queue — the part after the currently
@@ -771,7 +835,7 @@ final class PlayerManager: ObservableObject {
             finishQueue()
             return
         }
-        self.currentIndex = nextIndex
+        moveCurrent(to: nextIndex)
 
         if handedOffGapless, gaplessPreloadedIndex == nextIndex {
             gaplessPreloadedIndex = nil

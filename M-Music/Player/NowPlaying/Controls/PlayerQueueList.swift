@@ -55,6 +55,20 @@ struct PlayerQueueList: View, Equatable {
     /// (including the whole expanded player's own chrome) and persists to disk — is called once
     /// per drag instead of once per row boundary crossed. See `reorderDragChanged`'s doc comment.
     @State private var draftOrder: [Entry]?
+    /// The current track moving (see `player.queueAdvance`) changes the list in two steps, which
+    /// these two follow for the latest such move. Ahead — a skip, the song ending, a tap on a
+    /// row: the rows that moved out, the one that became current and any skipped before it, fade
+    /// where they are, held on screen as they were (`player` has already moved on, and its
+    /// `upcoming` no longer has them) — `fadingChainID`; then, `releasedAdvanceID`, the rest move up
+    /// to the top. Back — the previous button — it's the reverse: first the rows
+    /// move down (`releasedAdvanceID`), making room, and then the row that's back fades in
+    /// (`arrivedAdvanceID`).
+    ///
+    /// Skipping on again while the rows are still fading carries on the same fade (a run of
+    /// advances shares a `chainID`), and the rest move up once, when the skipping has paused.
+    @State private var fadingChainID: Int?
+    @State private var releasedAdvanceID: Int?
+    @State private var arrivedAdvanceID: Int?
     /// `player.currentIndex`/`player.queue.count` as of pickup — compared against their live
     /// values at drop to detect whether something other than this drag (auto-advance to the next
     /// track, another screen's queue mutation) changed the queue out from under the frozen
@@ -83,9 +97,11 @@ struct PlayerQueueList: View, Equatable {
                         rowArtworkSize: rowArtworkSize,
                         displayScale: displayScale,
                         isDragged: isDragged,
+                        isSkipped: index < hiddenCount,
                         offsetY: isDragged ? dragTranslation : (bumpOffsets[entry.id] ?? 0),
                         onReorderDragChanged: { reorderDragChanged($0, entry: entry, index: index) },
-                        onReorderDragEnded: { reorderDragEnded() }
+                        onReorderDragEnded: { reorderDragEnded() },
+                        onTap: { playEntry(entry) }
                     )
                     .equatable()
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
@@ -112,6 +128,26 @@ struct PlayerQueueList: View, Equatable {
         }
         .environment(\.colorScheme, .dark)
         .sensoryFeedback(.impact(weight: .medium), trigger: reorderTick)
+        .onChange(of: player.queueAdvance) { _, advance in
+            guard let advance else { return }
+            if advance.toIndex > advance.fromIndex {
+                // The rows that moved out fade, and then the rest move up.
+                fadingChainID = advance.chainID
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(220))
+                    withAnimation(.smooth(duration: 0.35)) { releasedAdvanceID = advance.id }
+                    player.releaseQueueAdvance(id: advance.id)
+                }
+            } else {
+                // The rows move down, and then the row that's back fades in.
+                withAnimation(.smooth(duration: 0.35)) { releasedAdvanceID = advance.id }
+                player.releaseQueueAdvance(id: advance.id)
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(350))
+                    arrivedAdvanceID = advance.id
+                }
+            }
+        }
     }
 
     /// Shared by the header row and every queue row: `List`'s own default insets don't match the
@@ -158,9 +194,11 @@ struct PlayerQueueList: View, Equatable {
         let rowArtworkSize: CGFloat
         let displayScale: CGFloat
         let isDragged: Bool
+        let isSkipped: Bool
         let offsetY: CGFloat
         let onReorderDragChanged: (PanGesture.Value) -> Void
         let onReorderDragEnded: () -> Void
+        let onTap: () -> Void
 
         var body: some View {
             SongRow(
@@ -169,7 +207,9 @@ struct PlayerQueueList: View, Equatable {
                 displayScale: displayScale,
                 showsReorderHandle: true,
                 onReorderDragChanged: onReorderDragChanged,
-                onReorderDragEnded: onReorderDragEnded
+                onReorderDragEnded: onReorderDragEnded,
+                onTap: onTap,
+                showsPlayingIndicator: false
             )
             .background {
                 RoundedRectangle(cornerRadius: 8)
@@ -180,6 +220,9 @@ struct PlayerQueueList: View, Equatable {
             .shadow(color: .black.opacity(isDragged ? 0.3 : 0), radius: 8, y: 4)
             .scaleEffect(isDragged ? 1.02 : 1)
             .offset(y: offsetY)
+            // Only ever changes on its own, in a tap's jump: the skipped rows fade out in place.
+            .opacity(isSkipped ? 0 : 1)
+            .animation(.easeOut(duration: 0.2), value: isSkipped)
             .zIndex(isDragged ? 1 : 0)
             // Leading, not trailing: deleting continues the row in the same direction it was
             // just swiped, instead of reversing into the delete button it came from.
@@ -197,10 +240,19 @@ struct PlayerQueueList: View, Equatable {
             lhs.entry.id == rhs.entry.id
                 && lhs.index == rhs.index
                 && lhs.isDragged == rhs.isDragged
+                && lhs.isSkipped == rhs.isSkipped
                 && lhs.offsetY == rhs.offsetY
                 && lhs.rowArtworkSize == rhs.rowArtworkSize
                 && lhs.displayScale == rhs.displayScale
         }
+    }
+
+    /// Plays `entry`, from a tap on its row. The tracks between the current one and it are
+    /// skipped, and leave the list like any track that's moved on (see `PlayerManager.playUpcoming`
+    /// and `heldAdvance`). Looks the entry's index up fresh, for the same reason as `deleteEntry`.
+    private func playEntry(_ entry: Entry) {
+        guard draggedEntryID == nil, let index = upcoming.firstIndex(where: { $0.id == entry.id }) else { return }
+        player.playUpcoming(atUpcomingIndex: index)
     }
 
     /// Removes `entry` from the queue — called from the row's swipe-to-delete action. Looks the
@@ -232,7 +284,7 @@ struct PlayerQueueList: View, Equatable {
     /// instead mutates `draftOrder`, a local copy, which is cheap and has no `@Published` side
     /// effects at all.
     private func reorderDragChanged(_ value: PanGesture.Value, entry: Entry, index: Int) {
-        guard rowHeight > 0 else { return }
+        guard rowHeight > 0, heldAdvance == nil else { return }
         if draggedEntryID != entry.id {
             withAnimation(.easeOut(duration: 0.15)) {
                 draggedEntryID = entry.id
@@ -463,7 +515,30 @@ struct PlayerQueueList: View, Equatable {
     /// `draftOrder` while a drag is in progress, so rows visually reorder in real time;
     /// `upcoming` otherwise.
     private var displayedUpcoming: [Entry] {
-        draftOrder ?? upcoming
+        draftOrder ?? heldRows ?? upcoming
+    }
+
+    /// The latest move of the current track ahead, until its rows have moved up too — not when a
+    /// drag has the list's order in hand, or when the queue has since changed under it.
+    private var heldAdvance: PlayerManager.QueueAdvance? {
+        guard draftOrder == nil, let advance = player.queueAdvance, advance.id != releasedAdvanceID,
+              advance.toIndex == player.currentIndex else { return nil }
+        return advance
+    }
+
+    /// The rows as they were before that move.
+    private var heldRows: [Entry]? {
+        heldAdvance.map { Self.buildUpcoming(queue: player.queue, currentIndex: $0.fromIndex) }
+    }
+
+    /// How many rows, from the top, are out of sight: fading out, going forward; or not yet faded
+    /// in, going back.
+    private var hiddenCount: Int {
+        guard draftOrder == nil, let advance = player.queueAdvance, advance.toIndex == player.currentIndex else { return 0 }
+        if advance.toIndex > advance.fromIndex {
+            return heldAdvance != nil && advance.chainID == fadingChainID ? advance.toIndex - advance.fromIndex : 0
+        }
+        return advance.id == releasedAdvanceID && advance.id != arrivedAdvanceID ? advance.fromIndex - advance.toIndex : 0
     }
 
     private struct Entry {

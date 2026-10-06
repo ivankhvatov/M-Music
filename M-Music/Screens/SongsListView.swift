@@ -461,6 +461,12 @@ struct SongRow: View {
     /// dragged-row state and does the actual reordering.
     var onReorderDragChanged: ((PanGesture.Value) -> Void)?
     var onReorderDragEnded: (() -> Void)?
+    /// What tapping the row (not its handle) does, if it does anything: the queue list's rows play
+    /// from there. Rows in the lists are tapped through their own button, and leave this unset.
+    var onTap: (() -> Void)?
+    /// Whether the artwork is darkened and gets the playing indicator while this is the track
+    /// that's playing. Not in the queue list, whose rows are what's still to play.
+    var showsPlayingIndicator = true
 
     private let client = SubsonicClient.shared
     @ObservedObject private var downloads = DownloadStore.shared
@@ -478,7 +484,9 @@ struct SongRow: View {
         displayScale: CGFloat,
         showsReorderHandle: Bool = false,
         onReorderDragChanged: ((PanGesture.Value) -> Void)? = nil,
-        onReorderDragEnded: (() -> Void)? = nil
+        onReorderDragEnded: (() -> Void)? = nil,
+        onTap: (() -> Void)? = nil,
+        showsPlayingIndicator: Bool = true
     ) {
         self.track = track
         self.rowArtworkSize = rowArtworkSize
@@ -486,6 +494,8 @@ struct SongRow: View {
         self.showsReorderHandle = showsReorderHandle
         self.onReorderDragChanged = onReorderDragChanged
         self.onReorderDragEnded = onReorderDragEnded
+        self.onTap = onTap
+        self.showsPlayingIndicator = showsPlayingIndicator
         _artworkURL = State(initialValue: ArtworkRequest.songRow(ArtworkRequest.artworkId(of: track), scale: displayScale).url)
     }
 
@@ -512,6 +522,10 @@ struct SongRow: View {
             // start one) regardless of this track's current download state. Nothing is ever
             // "unavailable" while online — everything can still stream.
             .dimmedIfUnavailable(networkMonitor.isOnline || downloads.isDownloaded(track.id.raw))
+            .modifier(TapIfAvailable(
+                isAvailable: networkMonitor.isOnline || downloads.isDownloaded(track.id.raw),
+                action: onTap
+            ))
 
             Spacer()
 
@@ -562,9 +576,29 @@ struct SongRow: View {
             }
             .frame(width: rowArtworkSize, height: rowArtworkSize)
 
-            SongNowPlayingOverlay(trackId: track.id, rowArtworkSize: rowArtworkSize)
+            if showsPlayingIndicator {
+                SongNowPlayingOverlay(trackId: track.id, rowArtworkSize: rowArtworkSize)
+            }
         }
         .frame(width: rowArtworkSize, height: rowArtworkSize)
+    }
+}
+
+/// Makes a row's content tappable when it has something to do — and, like the lists' rows, not
+/// when the song can't be played (offline, and not downloaded). Leaves the content as it is
+/// otherwise, so rows inside a button of their own keep getting their taps.
+private struct TapIfAvailable: ViewModifier {
+    let isAvailable: Bool
+    let action: (() -> Void)?
+
+    func body(content: Content) -> some View {
+        if let action {
+            content
+                .contentShape(.rect)
+                .onTapGesture { if isAvailable { action() } }
+        } else {
+            content
+        }
     }
 }
 
