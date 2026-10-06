@@ -48,6 +48,7 @@ struct RegularChrome: View {
     @State private var pendingPanel: PlayerPanel?
     @State private var hidesPanel = false
     @State private var swapTask: Task<Void, Never>?
+    @State private var releaseTask: Task<Void, Never>?
 
     /// With a panel showing, the artwork is small and beside the title instead of above it.
     private var isCompact: Bool { panel != .artwork }
@@ -68,17 +69,27 @@ struct RegularChrome: View {
             try? await Task.sleep(for: .milliseconds(800))
             mountsQueueList = true
         }
-        // Parks the queue list, and unmounts the lyrics, once they've finished leaving. Cancelled
-        // (the id changes) if either is turned back on in the meantime.
-        .task(id: panel) {
-            guard (panel != .queue && !parksQueueList) || (panel != .lyrics && mountsLyrics) else { return }
+        // Parks the queue list, and unmounts the lyrics, once they've finished leaving.
+        .onChange(of: panel) { scheduleRelease() }
+    }
+
+    /// Parks the queue list and unmounts the lyrics, whichever isn't what's showing, once they've
+    /// finished leaving. Held off by any new request for a panel (see `panelBinding`), and decided
+    /// by the panel being asked for, not only the one showing: a request that came in while this
+    /// was waiting has already got its panel ready — mounted, or unparked — and parking it again
+    /// from under that request left the queue as just its buttons, with no list.
+    private func scheduleRelease() {
+        releaseTask?.cancel()
+        guard (panel != .queue && !parksQueueList) || (panel != .lyrics && mountsLyrics) else { return }
+        releaseTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(Animation.playerQueueAnimationDuration + 0.15))
             guard !Task.isCancelled else { return }
+            let target = pendingPanel ?? panel
             var instant = Transaction()
             instant.disablesAnimations = true
             withTransaction(instant) {
-                if panel != .queue { parksQueueList = true }
-                if panel != .lyrics { mountsLyrics = false }
+                if target != .queue { parksQueueList = true }
+                if target != .lyrics { mountsLyrics = false }
             }
         }
     }
@@ -200,6 +211,9 @@ struct RegularChrome: View {
             get: { pendingPanel ?? panel },
             set: { newValue in
                 swapTask?.cancel()
+                // Whatever's waiting to park the queue or unmount the lyrics mustn't undo what
+                // this prepares; the panel changing (see `scheduleRelease`) sets it going again.
+                releaseTask?.cancel()
                 let current = pendingPanel ?? panel
                 if current != .artwork, newValue != .artwork, newValue != current {
                     swapPanel(to: newValue)
@@ -218,9 +232,14 @@ struct RegularChrome: View {
                     return
                 }
                 prepare(newValue)
-                Task { @MainActor in
+                pendingPanel = newValue
+                swapTask = Task { @MainActor in
                     try? await Task.sleep(for: .milliseconds(80))
-                    withAnimation(.playerQueueAnimation) { panel = newValue }
+                    guard !Task.isCancelled else { return }
+                    withAnimation(.playerQueueAnimation) {
+                        panel = newValue
+                        pendingPanel = nil
+                    }
                 }
             }
         )
