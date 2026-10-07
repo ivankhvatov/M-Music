@@ -132,6 +132,9 @@ struct ArtistAlbumsView: View {
     @State private var isLoading = false
     @State private var loadError: String?
     @State private var hasLoadedOnce = false
+    /// Keeps the content hidden on first open until the header picture and the first screenful of
+    /// album covers are in memory.
+    @State private var imageReadiness = ImageReadiness()
     @State private var isLoadingQueue = false
     @State private var isStarred: Bool
 
@@ -176,13 +179,21 @@ struct ArtistAlbumsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 16) {
-                artistHeader
-                actionButtons
-                albumsGrid
+            if imageReadiness.isReady {
+                VStack(spacing: 16) {
+                    artistHeader
+                    actionButtons
+                    albumsGrid
+                }
+                .padding(.top, 24)
+                .padding(.bottom, 16)
+            } else {
+                // Opened before the picture and the first covers were ready: hold the content
+                // back until they are (see `ImageReadiness`) rather than showing placeholders.
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 120)
             }
-            .padding(.top, 24)
-            .padding(.bottom, 16)
         }
         .toolbar {
             starButton
@@ -269,13 +280,17 @@ struct ArtistAlbumsView: View {
         } else if separateReleaseTypesEnabled && hasMultipleReleaseTypes {
             releaseTypeCarousels
         } else {
+            // Sorted once per evaluation, and shared with `warmAhead` rather than sorted again on
+            // every card that appears.
+            let ordered = sortedAlbums
             LazyVGrid(columns: gridColumns, spacing: 16) {
-                ForEach(sortedAlbums) { album in
+                ForEach(ordered) { album in
                     NavigationLink(destination: LazyDestination { AlbumView(album: album, zoomNamespace: albumZoomNamespace) }) {
                         AlbumCardView(album: album, zoomNamespace: albumZoomNamespace, subtitle: .year)
                     }
                     .buttonStyle(.plain)
                     .disabled(!isAvailable(album))
+                    .onAppear { warmAhead(after: album, in: ordered) }
                 }
             }
             .padding(.horizontal, 16)
@@ -338,11 +353,32 @@ struct ArtistAlbumsView: View {
                         }
                         .buttonStyle(.plain)
                         .disabled(!isAvailable(album))
+                        .onAppear { warmAhead(after: album, in: albums) }
                     }
                 }
                 .padding(.horizontal, 16)
             }
         }
+    }
+
+    /// What the screen needs on its first frame: the artist's picture and the covers at the top of
+    /// the grid, or the first few of each carousel.
+    private var firstScreenRequests: [ArtworkRequest] {
+        let shown = separateReleaseTypesEnabled && hasMultipleReleaseTypes
+            ? releaseTypeGroups.flatMap { $0.albums.prefix(4) }
+            : Array(sortedAlbums.prefix(ImageWarmer.gateLimit))
+        return [.artistHeader(artist.coverArt ?? artist.id.raw)]
+            + shown.map { .albumCard($0.coverArt ?? $0.id.raw) }
+    }
+
+    /// A card scrolled into view: warm the ones after it in its grid or carousel, so a fast
+    /// scroll finds them ready.
+    private func warmAhead(after album: AlbumID3, in ordered: [AlbumID3]) {
+        guard let index = ordered.firstIndex(where: { $0.id == album.id }) else { return }
+        let requests = ordered[(index + 1)...].prefix(ImageWarmer.scrollAheadCount)
+            .map { ArtworkRequest.albumCard($0.coverArt ?? $0.id.raw) }
+        guard !requests.isEmpty else { return }
+        Task { await ImageWarmer.shared.warmAhead(requests) }
     }
 
     /// Same expression `AlbumCardView` computes internally for its own dimming — this is the
@@ -418,6 +454,7 @@ struct ArtistAlbumsView: View {
         guard client.isConfigured else {
             albums = []
             hasLoadedOnce = false
+            imageReadiness.require(firstScreenRequests)
             return
         }
         if !hasLoadedOnce {
@@ -430,15 +467,18 @@ struct ArtistAlbumsView: View {
                 albums = cached
                 hasLoadedOnce = true
                 isLoading = false
+                imageReadiness.require(firstScreenRequests)
             case .fresh(let fetched):
                 loadError = nil
                 isLoading = false
                 hasLoadedOnce = true
                 albums = fetched
+                imageReadiness.require(firstScreenRequests)
             case .upToDate:
                 loadError = nil
                 isLoading = false
                 hasLoadedOnce = true
+                imageReadiness.require(firstScreenRequests)
             case .failed(let error):
                 // Offline, or the request otherwise failed — keep showing whatever's already on
                 // screen (cache, or an earlier successful fetch); only surface an error if
@@ -447,6 +487,7 @@ struct ArtistAlbumsView: View {
                 if albums.isEmpty {
                     loadError = error.localizedDescription
                 }
+                imageReadiness.require(firstScreenRequests)
             }
         }
     }
