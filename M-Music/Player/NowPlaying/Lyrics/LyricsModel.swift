@@ -70,6 +70,13 @@ final class LyricsModel {
     /// The user is looking around the lyrics: every line but the current one looks alike.
     private(set) var isBrowsing = false
     private(set) var scrollRequest = ScrollRequest()
+    /// Whether the scroll view shows what's in it. Off while the lyrics load; on once they're there
+    /// — for lyrics that arrive late, a moment after they were put in (see `reveal`).
+    private(set) var revealsContent = false
+    /// Whether the loading spinner is in the view. It stays a little past `revealsContent`, while
+    /// it fades, and goes then — its visibility is that opacity, not the view's removal, which
+    /// SwiftUI is not always sure to carry out.
+    private(set) var showsSpinner = false
     private(set) var clock = ClockAnchor()
 
     /// Everything the views animate on a change of the current line or of browsing — line fades,
@@ -78,17 +85,20 @@ final class LyricsModel {
     private static let changeAnimation = Animation.smooth(duration: 0.5)
 
     func setPhase(_ phase: Phase) {
-        if case .loading = self.phase {
-            // What the lyrics turn out to be arrives in the view that has been waiting for them —
-            // the same one, whichever it is — fading in, once the panel has started coming in.
-            if case .loading = phase {
-                self.phase = phase
-            } else {
-                withAnimation(.playerQueueAnimation) { self.phase = phase }
-            }
+        let wasLoading: Bool
+        if case .loading = self.phase { wasLoading = true } else { wasLoading = false }
+        let isShowing: Bool
+        switch phase {
+        case .idle, .loading: isShowing = false
+        case .synced, .plain, .unavailable: isShowing = true
+        }
+        if !wasLoading { session += 1 }
+        self.phase = phase
+        if wasLoading && isShowing {
+            reveal()
         } else {
-            session += 1
-            self.phase = phase
+            revealsContent = isShowing
+            showsSpinner = { if case .loading = phase { true } else { false } }()
         }
         if case .synced = phase {} else {
             currentIndex = 0
@@ -102,11 +112,14 @@ final class LyricsModel {
     /// previous song's current line.
     func showSynced(_ timeline: LyricsTimeline, _ layout: LyricsLayout, at index: Int) {
         if case .loading = phase {
-            // The lyrics arrive in the view that has been waiting for them, fading in.
-            withAnimation(.playerQueueAnimation) { phase = .synced(timeline, layout) }
+            // The lyrics arrive in the view that has been waiting for them.
+            phase = .synced(timeline, layout)
+            reveal()
         } else {
             session += 1
             phase = .synced(timeline, layout)
+            revealsContent = true
+            showsSpinner = false
         }
         currentIndex = index
         layoutIndex = index
@@ -136,6 +149,20 @@ final class LyricsModel {
             // `LyricsScrollView`).
             if case .synced(_, let layout) = phase { window = layout.window(around: index) }
             scrollRequest = ScrollRequest(target: index, duration: duration, generation: scrollRequest.generation + 1)
+        }
+    }
+
+    /// Fades in what lyrics that were still loading turned out to be, with the panel's animation —
+    /// in a turn of its own, after they've been put in the view. Animating that itself animated
+    /// their layout too (the room taken by the lines far from the current one, growing from
+    /// nothing), and the jump to the current line, made meanwhile, went by the half-grown layout
+    /// and stopped short: the lyrics were there, but out of sight until they were scrolled.
+    private func reveal() {
+        Task { @MainActor in
+            withAnimation(.playerQueueAnimation) { revealsContent = true }
+            // Once it has faded.
+            try? await Task.sleep(for: .seconds(Animation.playerQueueAnimationDuration + 0.1))
+            if revealsContent { showsSpinner = false }
         }
     }
 

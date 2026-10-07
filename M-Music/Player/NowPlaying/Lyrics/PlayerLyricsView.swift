@@ -52,10 +52,11 @@ struct PlayerLyricsView: View {
                 panelHeight: panelHeight
             )
             .id(model.session)
-            if case .loading = kind {
+            if model.showsSpinner {
                 ProgressView()
                     .tint(Color.transparentWhite)
                     .padding(.top, 48)
+                    .opacity(model.revealsContent ? 0 : 1)
             }
         }
     }
@@ -130,9 +131,6 @@ private struct LyricsScrollView: View {
     /// blur tops out well before), so their views never have to change as it moves.
     private static let maxStyledDistance = 6
 
-    private var isLoading: Bool {
-        if case .loading = kind { true } else { false }
-    }
 
     var body: some View {
         let current = min(model.currentIndex, timeline.count - 1)
@@ -149,14 +147,12 @@ private struct LyricsScrollView: View {
                             .lineSpacing(5)
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .transition(.opacity)
                     case .unavailable:
                         Text("Lyrics not available")
                             .font(.body)
                             .foregroundStyle(Color.transparentWhite)
                             .frame(maxWidth: .infinity)
                             .padding(.top, 48)
-                            .transition(.opacity)
                     case .loading, .lines:
                         ForEach(segments(layoutIndex: layoutIndex, window: window)) { segment in
                             switch segment {
@@ -175,7 +171,7 @@ private struct LyricsScrollView: View {
                     }
                 }
                 .padding(.horizontal, NowPlayingLayout.cardPaddings)
-                .opacity(isLoading ? 0 : 1)
+                .opacity(model.revealsContent ? 1 : 0)
             }
             .scrollIndicators(.hidden)
             // The lines rest below the fade, which is taller here than the queue's, so the
