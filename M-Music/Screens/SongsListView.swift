@@ -151,6 +151,10 @@ struct SongsListView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
+                    actionButtons
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        .listRowSeparator(.hidden)
+
                     ForEach(displayedSongs) { track in
                         SongListRow(
                             track: track,
@@ -199,6 +203,49 @@ struct SongsListView: View {
         let queue = playableSongs
         guard let index = queue.firstIndex(where: { $0.id == track.id }) else { return }
         player.play(queue: queue, startAt: index)
+    }
+
+    private func playAll() {
+        let queue = playableSongs
+        guard !queue.isEmpty else { return }
+        player.play(queue: queue, startAt: 0)
+    }
+
+    private func shuffleAll() {
+        let queue = playableSongs.shuffled()
+        guard !queue.isEmpty else { return }
+        player.play(queue: queue, startAt: 0)
+    }
+
+    /// Same look as `ArtistAlbumsView.actionButtons`: two capsules sharing the row's width. They
+    /// act on what's currently listed (after search, filter and sort), like tapping a row does.
+    private var actionButtons: some View {
+        HStack(spacing: 16) {
+            Button {
+                playAll()
+            } label: {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 48)
+                    .background(Color.gray.opacity(0.2))
+                    .clipShape(Capsule())
+            }
+
+            Button {
+                shuffleAll()
+            } label: {
+                Image(systemName: "shuffle")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 48)
+                    .background(Color.gray.opacity(0.2))
+                    .clipShape(Capsule())
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     /// Everything `sorted`/`filtered` need, captured by value so they can run off the main actor.
