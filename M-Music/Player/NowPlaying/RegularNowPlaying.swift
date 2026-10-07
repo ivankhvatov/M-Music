@@ -49,9 +49,6 @@ struct RegularChrome: View {
     @State private var hidesPanel = false
     @State private var swapTask: Task<Void, Never>?
     @State private var releaseTask: Task<Void, Never>?
-    /// How tall the title block's layout is without a panel and with one (see `queueHiddenOffset`).
-    @State private var titleHeightWithoutPanel: CGFloat = 0
-    @State private var titleHeightWithPanel: CGFloat = RegularNowPlayingLayout.Const.queueArtworkSide
 
     /// With a panel showing, the artwork is small and beside the title instead of above it.
     private var isCompact: Bool { panel != .artwork }
@@ -119,9 +116,6 @@ struct RegularChrome: View {
                     marqueesActive: marqueesActive,
                     marqueeRestartToken: marqueeRestartToken
                 )
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-                    if isCompact { titleHeightWithPanel = height } else { titleHeightWithoutPanel = height }
-                }
                 .padding(.bottom, isCompact ? -RegularNowPlayingLayout.queueTitleRise : spacing * 2)
                 // Pinned to the top of this frame, which is itself pinned to the title's bottom
                 // edge: the panel is carried up (and back down) rigidly with the title, at exactly
@@ -143,7 +137,7 @@ struct RegularChrome: View {
                                 maxHeight: queueListMaxHeight,
                                 alignment: .top
                             )
-                            .panelPlacement(isShowing: panel == .queue, isFadedOut: hidesPanel, hiddenOffset: queueHiddenOffset(spacing: spacing))
+                            .panelPlacement(isShowing: panel == .queue, isFadedOut: hidesPanel)
                     }
                     if mountsLyrics || panel == .lyrics {
                         PlayerLyricsView(width: size.width, panelHeight: panelHeight)
@@ -182,20 +176,6 @@ struct RegularChrome: View {
                 PlayerControls(panel: panelBinding)
             }
         }
-    }
-
-    /// How far below its place the queue sits while it's not showing — negative, above it, when the
-    /// panel is to be carried exactly as far as the title is.
-    ///
-    /// The title travels the layout move of its block plus its offset up (`queueTitleRise`); the
-    /// panel hangs from the title's block, below it, and travels *its* layout move plus its own
-    /// offset. The two layout moves differ — the title block is a different height with and
-    /// without a panel (the queue's compact title has the height of the artwork beside it, the
-    /// other its text's), and the panel hangs from it through a different gap — so the panel, with
-    /// the same offset as the title, travelled further, and so faster, in the same time. Its offset
-    /// is what makes up the difference, so that it covers exactly the title's distance.
-    private func queueHiddenOffset(spacing: CGFloat) -> CGFloat {
-        titleHeightWithPanel - titleHeightWithoutPanel - spacing * 2
     }
 
     /// The height the queue list is laid out at: its final height, or none while parked.
@@ -321,10 +301,8 @@ private extension View {
     ///
     /// `isFadedOut` hides the panel where it sits, without moving it: how one panel gives way to
     /// the other.
-    func panelPlacement(
-        isShowing: Bool, isFadedOut: Bool = false, hiddenOffset: CGFloat = RegularNowPlayingLayout.queueTitleRise
-    ) -> some View {
-        offset(y: isShowing ? 0 : hiddenOffset)
+    func panelPlacement(isShowing: Bool, isFadedOut: Bool = false) -> some View {
+        offset(y: isShowing ? 0 : RegularNowPlayingLayout.queueTitleRise)
             .opacity(isShowing && !isFadedOut ? 1 : 0)
             .allowsHitTesting(isShowing && !isFadedOut)
             .accessibilityHidden(!isShowing)
