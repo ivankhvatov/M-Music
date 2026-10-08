@@ -44,17 +44,23 @@ struct PlayerQueueList: View, Equatable {
     @State private var rowHeight: CGFloat = 0
     /// Bumped every time the drag commits a swap, purely to drive the haptic below.
     @State private var reorderTick = 0
-    /// A sibling row's own temporary offset while it's sliding into the slot the dragged row just
-    /// vacated — see the doc comment in `reorderDragChanged` on why this exists instead of
-    /// animating the swap's own data mutation.
+    /// How far each row the dragged one has passed is slid, to take the slot it left (or give up
+    /// the one it's taken) — the cells stay where they are until the drop; see `reorderDragChanged`.
     @State private var bumpOffsets: [String: CGFloat] = [:]
-    /// A local copy of `upcoming`, live-reordered as the drag crosses row boundaries. `nil` when
-    /// no drag is in progress, in which case the list falls back to `upcoming` directly. Decouples
-    /// the row order shown on screen from `player.queue` for the whole gesture, so
-    /// `player.moveQueueItem` — which publishes to every `@ObservedObject` holder app-wide
-    /// (including the whole expanded player's own chrome) and persists to disk — is called once
-    /// per drag instead of once per row boundary crossed. See `reorderDragChanged`'s doc comment.
+    /// A copy of `upcoming` as it was when the drag began, `nil` when no drag is in progress.
+    /// Decouples the drag from `player.queue` for the whole gesture, so `player.moveQueueItem` —
+    /// which publishes to every `@ObservedObject` holder app-wide (including the whole expanded
+    /// player's own chrome) and persists to disk — is called once per drag instead of once per row
+    /// boundary crossed. See `reorderDragChanged`'s doc comment.
     @State private var draftOrder: [Entry]?
+    /// Where each row last sat on screen, kept as it's reported (it's read once, when a drag
+    /// begins; nothing is drawn from it), and where this view's own origin is.
+    @State private var frames = FrameBox()
+    /// Where the dragged row started, for as long as it is drawn — see `draggedRow`.
+    @State private var dragStartFrame: CGRect?
+    /// The dragged row is lifted — its background, shadow and size. Starts a moment after the row
+    /// appears, so that the lifting is seen.
+    @State private var isLifted = false
     /// The current track moving (see `player.queueAdvance`) changes the list in two steps, which
     /// these two follow for the latest such move. Ahead — a skip, the song ending, a tap on a
     /// row: the rows that moved out, the one that became current and any skipped before it, fade
@@ -90,15 +96,15 @@ struct PlayerQueueList: View, Equatable {
                     .listRowSeparator(.hidden)
 
                 ForEach(Array(displayedUpcoming.enumerated()), id: \.element.id) { index, entry in
-                    let isDragged = draggedEntryID == entry.id
                     QueueRowView(
                         entry: entry,
                         index: index,
                         rowArtworkSize: rowArtworkSize,
                         displayScale: displayScale,
-                        isDragged: isDragged,
+                        isDragged: false,
+                        isHidden: draggedEntryID == entry.id,
                         isSkipped: index < hiddenCount,
-                        offsetY: isDragged ? dragTranslation : (bumpOffsets[entry.id] ?? 0),
+                        offsetY: bumpOffsets[entry.id] ?? 0,
                         onReorderDragChanged: { reorderDragChanged($0, entry: entry, index: index) },
                         onReorderDragEnded: { reorderDragEnded() },
                         onTap: { playEntry(entry) }
@@ -106,6 +112,9 @@ struct PlayerQueueList: View, Equatable {
                     .equatable()
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
                         if rowHeight == 0, height > 0 { rowHeight = height + rowSpacing }
+                    }
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+                        frames.rows[entry.id] = frame
                     }
                     .listRowInsets(rowInsets)
                     .listRowBackground(Color.clear)
@@ -127,6 +136,8 @@ struct PlayerQueueList: View, Equatable {
             .mask { TopFade() }
         }
         .environment(\.colorScheme, .dark)
+        .onGeometryChange(for: CGPoint.self) { $0.frame(in: .global).origin } action: { frames.origin = $0 }
+        .overlay(alignment: .topLeading) { draggedRow }
         .sensoryFeedback(.impact(weight: .medium), trigger: reorderTick)
         .onChange(of: player.queueAdvance) { _, advance in
             guard let advance else { return }
@@ -194,8 +205,13 @@ struct PlayerQueueList: View, Equatable {
         let rowArtworkSize: CGFloat
         let displayScale: CGFloat
         let isDragged: Bool
+        /// Takes its place in the list without showing: the row being dragged is drawn on top of
+        /// the list, not in it.
+        var isHidden = false
         let isSkipped: Bool
         let offsetY: CGFloat
+        /// Whether it comes and goes with the list's own transition — not the copy drawn over it.
+        var hasTransition = true
         let onReorderDragChanged: (PanGesture.Value) -> Void
         let onReorderDragEnded: () -> Void
         let onTap: () -> Void
@@ -221,12 +237,11 @@ struct PlayerQueueList: View, Equatable {
             .scaleEffect(isDragged ? 1.02 : 1)
             .offset(y: offsetY)
             // Only ever changes on its own, in a tap's jump: the skipped rows fade out in place.
-            .opacity(isSkipped ? 0 : 1)
+            .opacity(isSkipped || isHidden ? 0 : 1)
             .animation(.easeOut(duration: 0.2), value: isSkipped)
-            .zIndex(isDragged ? 1 : 0)
             // Leading, not trailing: deleting continues the row in the same direction it was
             // just swiped, instead of reversing into the delete button it came from.
-            .transition(.opacity.combined(with: .move(edge: .leading)))
+            .transition(hasTransition ? .opacity.combined(with: .move(edge: .leading)) : .identity)
         }
 
         /// Explicit, not synthesized — the two closures aren't `Equatable`, so Swift can't derive
@@ -240,6 +255,7 @@ struct PlayerQueueList: View, Equatable {
             lhs.entry.id == rhs.entry.id
                 && lhs.index == rhs.index
                 && lhs.isDragged == rhs.isDragged
+                && lhs.isHidden == rhs.isHidden
                 && lhs.isSkipped == rhs.isSkipped
                 && lhs.offsetY == rhs.offsetY
                 && lhs.rowArtworkSize == rhs.rowArtworkSize
@@ -265,9 +281,9 @@ struct PlayerQueueList: View, Equatable {
         }
     }
 
-    /// Called continuously while a handle is dragged. `index` is this entry's live position in
-    /// `draftOrder` — it moves as swaps commit locally, without touching `player.queue` at all
-    /// until the drag ends (see `reorderDragEnded`).
+    /// Called continuously while a handle is dragged. `index` is this entry's position in the list,
+    /// which stays as it was when the drag began — `player.queue` isn't touched until the drag
+    /// ends (see `reorderDragEnded`).
     ///
     /// This used to call `player.moveQueueItem` on every swap — once per row boundary crossed.
     /// For a drag that crosses many rows, that meant many `@Published` publishes (fanning out to
@@ -281,13 +297,18 @@ struct PlayerQueueList: View, Equatable {
     /// dragged element is always the same tracked identity, and removing/reinserting one element
     /// never reorders the others relative to each other — so the real commit now happens exactly
     /// once, in `reorderDragEnded`, regardless of how many rows the drag crosses. Every swap here
-    /// instead mutates `draftOrder`, a local copy, which is cheap and has no `@Published` side
+    /// instead only changes where the rows it passes are drawn, which has no `@Published` side
     /// effects at all.
     private func reorderDragChanged(_ value: PanGesture.Value, entry: Entry, index: Int) {
         guard rowHeight > 0, heldAdvance == nil else { return }
         if draggedEntryID != entry.id {
-            withAnimation(.easeOut(duration: 0.15)) {
+            // The list's row gives way to the dragged copy in the same frame, with nothing fading:
+            // the copy is identical to it at that moment, and only then lifts (see `draggedRow`).
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
                 draggedEntryID = entry.id
+                isLifted = false
             }
             // Snapshot once, at pickup — every subsequent callback mutates this local copy
             // directly instead of re-deriving from `player.queue`. Also snapshot what the *real*
@@ -296,74 +317,43 @@ struct PlayerQueueList: View, Equatable {
             // from under this frozen copy during the drag, and skip the final commit if so rather
             // than risk moving the wrong track.
             draftOrder = upcoming
+            dragStartFrame = frames.rows[entry.id]
             dragOriginIndex = index
             dragCurrentIndex = index
             dragOriginCurrentIndex = player.currentIndex
             dragSnapshotQueueCount = player.queue.count
         }
-        guard let dragOriginIndex, let dragCurrentIndex, var order = draftOrder else { return }
+        guard let dragOriginIndex, let dragCurrentIndex, let order = draftOrder else { return }
 
         let steps = (value.translation.height / rowHeight).rounded()
         let proposedIndex = min(max(dragOriginIndex + Int(steps), 0), order.count - 1)
 
         if proposedIndex != dragCurrentIndex {
-            // The dragged row's own motion is 100% `dragTranslation`, never animated by this
-            // commit — only ever written outside `withAnimation`, below — so it never has to
-            // agree frame-to-frame with anything else: there's nothing for it to fight. What
-            // needs to move smoothly here is only the *other* row(s) this swap displaces, and
-            // those get their own, separate, single-purpose animation instead of trying to make
-            // the swap's own data mutation animate correctly.
-            //
-            // Two things were tried first, and both fought `List` itself (a real
-            // `UICollectionView` underneath, unlike the old `LazyVStack` this replaced):
-            // committing the move on an animated transaction let `List`'s own cell-move animation
-            // run on a separate timeline from `dragTranslation`'s, which didn't agree frame to
-            // frame — the dragged row visibly jumped toward its old slot before snapping back.
-            // Animating *both* the move and `dragTranslation` together kept them closer, but
-            // `List`'s own move animation and a `withAnimation`-driven property are still two
-            // different interpolations of the same motion, and over several rapid swaps those
-            // small disagreements compounded into a visible shake.
-            //
-            // Committing the move with no animation at all (`disablesAnimations`) sidesteps
-            // `List`'s own animation entirely — the cell snaps straight to its correct slot, in
-            // the same frame `dragTranslation` compensates for it, so the dragged row never has
-            // anything to disagree with. That leaves the *displaced* row snapping too, which is
-            // what this makes up for: capture it by id before the commit, give it a one-off
-            // `@State` offset sized to exactly cancel its own jump (so it renders unmoved for one
-            // frame), then animate that back to 0 — one row, one self-contained SwiftUI
-            // animation, nothing else driving or racing it.
-            let displacedIDs = (min(dragCurrentIndex, proposedIndex) ... max(dragCurrentIndex, proposedIndex))
-                .filter { $0 != dragCurrentIndex }
-                .compactMap { order.indices.contains($0) ? order[$0].id : nil }
-            let bumpMagnitude: CGFloat = proposedIndex > dragCurrentIndex ? rowHeight : -rowHeight
-
-            let movedEntry = order.remove(at: dragCurrentIndex)
-            order.insert(movedEntry, at: proposedIndex)
-
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                draftOrder = order
-                for id in displacedIDs { bumpOffsets[id] = bumpMagnitude }
-            }
-            // `DispatchQueue.main.async`, not back-to-back in this same call: both writes above
-            // and below happen synchronously, before SwiftUI's next render pass even runs — two
-            // sequential writes to the same dictionary key in one run-loop tick collapse into the
-            // single net change SwiftUI actually observes (here, 0 to 0, since the jumped value
-            // never got rendered in between), so animating the second write animates nothing.
-            // Deferring it to the next tick lets the jumped frame actually render first, so the
-            // animation that follows has a real, observed "from" value to animate away from.
-            DispatchQueue.main.async {
-                withAnimation(.smooth(duration: 0.25)) {
-                    for id in displacedIDs { bumpOffsets[id] = 0 }
+            // The list itself isn't touched while the drag goes on: the rows the dragged one has
+            // passed are slid into place by an offset each — one animated value that SwiftUI
+            // carries on from wherever it is when the drag turns back, which moving their cells
+            // (and making up for it with an offset) couldn't do: the offset would have had to
+            // start from where the earlier slide had got to, which isn't known, and the row
+            // jumped. The move is made once, at the drop (`reorderDragEnded`).
+            var shifts: [String: CGFloat] = [:]
+            for (position, other) in order.enumerated() where other.id != order[dragOriginIndex].id {
+                if position > dragOriginIndex, position <= proposedIndex {
+                    shifts[other.id] = -rowHeight
+                } else if position < dragOriginIndex, position >= proposedIndex {
+                    shifts[other.id] = rowHeight
                 }
+            }
+            withAnimation(.smooth(duration: 0.25)) {
+                bumpOffsets = shifts
             }
 
             self.dragCurrentIndex = proposedIndex
             reorderTick += 1
         }
 
-        dragTranslation = value.translation.height - CGFloat(proposedIndex - dragOriginIndex) * rowHeight
+        // The dragged row is drawn apart from the list, so wherever the list puts the cell it
+        // leaves behind, the row itself follows the finger and nothing else.
+        dragTranslation = value.translation.height
     }
 
     private func reorderDragEnded() {
@@ -371,29 +361,65 @@ struct PlayerQueueList: View, Equatable {
         // if the queue wasn't touched by anything else while this drag's `draftOrder` was frozen;
         // otherwise `dragOriginIndex`/`dragCurrentIndex` could point at the wrong tracks entirely,
         // so skip the commit rather than risk silently moving the wrong one.
-        if let dragOriginIndex, let dragCurrentIndex, dragOriginIndex != dragCurrentIndex,
-           player.currentIndex == dragOriginCurrentIndex, player.queue.count == dragSnapshotQueueCount {
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
+        //
+        // The rows' offsets go back to nothing in the same step as the move puts them where those
+        // offsets have had them — so nothing seems to move.
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            if let dragOriginIndex, let dragCurrentIndex, dragOriginIndex != dragCurrentIndex,
+               player.currentIndex == dragOriginCurrentIndex, player.queue.count == dragSnapshotQueueCount {
                 player.moveQueueItem(fromUpcomingIndex: dragOriginIndex, toUpcomingIndex: dragCurrentIndex)
-                draftOrder = nil
             }
-        } else {
             draftOrder = nil
+            bumpOffsets = [:]
         }
+        // It settles into its slot — where the list already has its cell — and is then put back
+        // into the list in its place.
+        let slot = CGFloat((dragCurrentIndex ?? 0) - (dragOriginIndex ?? 0)) * rowHeight
         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-            dragTranslation = 0
+            dragTranslation = slot
+            isLifted = false
+        }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard draggedEntryID != nil, dragOriginIndex == nil else { return }
             draggedEntryID = nil
+            dragStartFrame = nil
+            dragTranslation = 0
         }
         dragOriginIndex = nil
         dragCurrentIndex = nil
         dragOriginCurrentIndex = nil
         dragSnapshotQueueCount = nil
-        // bumpOffsets not cleared here: any bump from the last swap may still be mid-animation
-        // toward 0, and clearing the dictionary outright would cut it off with an instant,
-        // visible jump to 0 instead of letting it finish settling on its own — entries that
-        // already reached 0 cost nothing left sitting in the dictionary.
+    }
+
+    /// The row being dragged, drawn over the list at the finger: where it started plus how far
+    /// it has been dragged. Left in the list, the row was moved by the list (its cell takes the
+    /// slot the row is dragged to) and by an offset made up of how far it was dragged less how far
+    /// the cell had gone, and the two never landed in the same frame — for one or two frames, at
+    /// the first swap of a fast drag, the row jumped back by most of a row's height.
+    @ViewBuilder
+    private var draggedRow: some View {
+        if let id = draggedEntryID, let start = dragStartFrame, let entry = displayedUpcoming.first(where: { $0.id == id }) {
+            QueueRowView(
+                entry: entry,
+                index: 0,
+                rowArtworkSize: rowArtworkSize,
+                displayScale: displayScale,
+                isDragged: isLifted,
+                isSkipped: false,
+                offsetY: 0,
+                hasTransition: false,
+                onReorderDragChanged: { _ in },
+                onReorderDragEnded: {},
+                onTap: {}
+            )
+            .frame(width: start.width, height: start.height)
+            .offset(x: start.minX - frames.origin.x, y: start.minY - frames.origin.y + dragTranslation)
+            .allowsHitTesting(false)
+            .onAppear { withAnimation(.easeOut(duration: 0.15)) { isLifted = true } }
+        }
     }
 
     /// The shuffle, repeat and non-stop buttons, sharing the row's width. They don't do anything yet.
@@ -545,4 +571,11 @@ struct PlayerQueueList: View, Equatable {
         let id: String
         let track: Child
     }
+}
+
+/// Positions reported by views, read when they're needed — held in a reference so that reporting
+/// one doesn't redraw anything.
+private final class FrameBox {
+    var rows: [String: CGRect] = [:]
+    var origin: CGPoint = .zero
 }
