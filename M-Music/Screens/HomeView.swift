@@ -8,14 +8,17 @@
 import SwiftUI
 
 struct HomeView: View {
+    @Bindable private var navigation = AppNavigation.shared
+
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigation.paths[AppNavigation.homeTab]) {
             VStack(alignment: .leading, spacing: 10) {
                 List {
                     
                 }
                 .navigationTitle("Home")
             }
+            .appRouteDestinations()
             .toolbar {
                 moreButton
                 settingsButton

@@ -82,6 +82,7 @@ struct ExpandableNowPlaying: View {
                 // i.e. invisible and untappable despite `expanded` being true — and the docked mini
                 // player's own artwork copy stays hidden too (`accessoryVisible` never flips).
                 PlayerPresentation.shared.expandHandler = expandNow
+                PlayerPresentation.shared.collapseHandler = collapse
                 PlayerPresentation.shared.expandHandlerOwner = instanceID
                 guard expanded else { return }
                 expandNow()
@@ -89,6 +90,7 @@ struct ExpandableNowPlaying: View {
             .onDisappear {
                 guard PlayerPresentation.shared.expandHandlerOwner == instanceID else { return }
                 PlayerPresentation.shared.expandHandler = nil
+                PlayerPresentation.shared.collapseHandler = nil
                 PlayerPresentation.shared.expandHandlerOwner = nil
             }
             .onChange(of: expanded) {

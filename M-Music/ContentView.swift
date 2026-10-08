@@ -42,6 +42,23 @@ final class PlayerPresentation {
     /// Which mounted `ExpandableNowPlaying` registered `expandHandler`, so one being torn down
     /// doesn't clear the handler of the one that replaced it.
     var expandHandlerOwner: UUID?
+    /// Starts `ExpandableNowPlaying`'s collapse, registered by it alongside `expandHandler`.
+    var collapseHandler: (() -> Void)?
+
+    /// Closes the full-screen player, as dragging it down or tapping its grip does.
+    func collapse() {
+        collapseHandler?()
+    }
+
+    /// Returns once a collapse has settled and the mini player has taken over (`accessoryVisible`),
+    /// or after two seconds at most.
+    func waitUntilCollapsed() async {
+        for _ in 0..<40 {
+            if !expanded && accessoryVisible { return }
+            try? await Task.sleep(for: .milliseconds(50))
+            if Task.isCancelled { return }
+        }
+    }
 
     /// What tapping the mini player does.
     func expand() {
@@ -53,7 +70,7 @@ final class PlayerPresentation {
 }
 
 struct MainView: View {
-    @State private var selectedTab : Int = 0
+    @Bindable private var navigation = AppNavigation.shared
 
     private static let hasNowPlayingPublisher = Publishers
         .CombineLatest(PlayerManager.shared.$currentIndex, PlayerManager.shared.$currentRadioStation)
@@ -119,7 +136,7 @@ struct MainView: View {
     }
 
     func TabBar() -> some View {
-        TabView(selection: $selectedTab) {
+        TabView(selection: $navigation.selectedTab) {
             Tab("Home", systemImage: "house.fill", value: 0) {
                 HomeView()
             }

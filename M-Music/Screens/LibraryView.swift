@@ -4,6 +4,8 @@ struct LibraryView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Namespace private var albumZoomNamespace
 
+    @Bindable private var navigation = AppNavigation.shared
+
     private let client = SubsonicClient.shared
 
     @State private var isConnected = SubsonicClient.shared.isConfigured
@@ -20,7 +22,7 @@ struct LibraryView: View {
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
     var body: some View {
-            NavigationStack {
+            NavigationStack(path: $navigation.paths[AppNavigation.libraryTab]) {
                 ScrollView {
                     if isConnected {
                         libraryContent
@@ -30,6 +32,7 @@ struct LibraryView: View {
                 }
                 .environment(\.colorScheme, colorScheme)
                 .navigationTitle("Library")
+                .appRouteDestinations()
                 .toolbar {
                     plusButton
                     settingsButton

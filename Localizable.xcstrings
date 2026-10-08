@@ -494,6 +494,16 @@
         }
       }
     },
+    "Album not available" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Альбом недоступен"
+          }
+        }
+      }
+    },
     "Albums" : {
       "localizations" : {
         "de" : {
@@ -612,6 +622,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Артист"
+          }
+        }
+      }
+    },
+    "Artist not available" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Артист недоступен"
           }
         }
       }
@@ -1213,6 +1233,26 @@
         }
       }
     },
+    "Go to album" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Перейти к альбому"
+          }
+        }
+      }
+    },
+    "Go to artist" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Перейти к артисту"
+          }
+        }
+      }
+    },
     "Grid" : {
       "localizations" : {
         "de" : {
@@ -1353,7 +1393,14 @@
       }
     },
     "Live Radio" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Радиостанция"
+          }
+        }
+      }
     },
     "Lossless only" : {
       "localizations" : {
@@ -1590,7 +1637,14 @@
       }
     },
     "No radio stations found." : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Радиостанции не найдены."
+          }
+        }
+      }
     },
     "No recently played albums yet." : {
       "localizations" : {

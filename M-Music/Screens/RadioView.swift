@@ -20,9 +20,10 @@ struct RadioView: View {
     @Environment(\.displayScale) private var displayScale
 
     private let client = SubsonicClient.shared
+    @Bindable private var navigation = AppNavigation.shared
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigation.paths[AppNavigation.radioTab]) {
             Group {
                 if !client.isConfigured {
                     disconnectedContent
@@ -46,6 +47,7 @@ struct RadioView: View {
                 }
             }
             .navigationTitle("Radio")
+            .appRouteDestinations()
             .toolbar {
                 editButton
                 settingsButton
