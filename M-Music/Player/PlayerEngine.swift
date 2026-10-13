@@ -48,7 +48,9 @@ final class PlayerEngine: ObservableObject {
     private var currentURL: URL?
     private var playbackToken = UUID()
     private var hasFailed = false
-    private var isSeeking = false
+    /// A seek has been asked for and hasn't landed yet. The position stands still meanwhile, however
+    /// the player says it's playing.
+    @Published private(set) var isSeeking = false
     private var gaplessNextItem: AVPlayerItem?
     private var gaplessNextURL: URL?
     private var gaplessPreloaded = false
@@ -299,6 +301,14 @@ final class PlayerEngine: ObservableObject {
         // no-op if the queue player already continued on its own, and fixes it if it didn't —
         // exactly mirroring what `loadAndPlay`/`resume()` already do for every other transition.
         player.play()
+    }
+
+    /// The position right now, rather than as of the last update, which comes twice a second; `nil`
+    /// while a seek is under way, or with nothing loaded.
+    var exactTime: TimeInterval? {
+        guard !isSeeking, player.currentItem != nil else { return nil }
+        let seconds = player.currentTime().seconds
+        return seconds.isFinite ? seconds : nil
     }
 
     func pause() {

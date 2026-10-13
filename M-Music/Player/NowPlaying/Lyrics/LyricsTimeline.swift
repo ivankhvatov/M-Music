@@ -25,6 +25,12 @@ struct BreakTimings: Equatable, Sendable {
 struct BreakEnding: Equatable, Sendable {
     let index: Int
     let since: Date
+    /// The song's time at which the dots began to leave, when it's the song's own progress that
+    /// moves them — so that they stop when it does. `nil` when they're sent away by a tap, which
+    /// they leave in their own time, playing or not.
+    let songTime: TimeInterval?
+    /// The song's time by which the dots' pulse is worked out, for the size they leave from.
+    let pulseTime: TimeInterval
     let timings: BreakTimings
 }
 

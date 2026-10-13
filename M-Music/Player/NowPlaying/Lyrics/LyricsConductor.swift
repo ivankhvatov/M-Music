@@ -17,7 +17,8 @@ actor LyricsConductor {
         case duration(TimeInterval)
         /// The current track changed (`nil`: nothing, or radio). `prefetch`: the expanded player is
         /// up, so its lyrics will probably be asked for soon.
-        case track(Child?, prefetch: Bool)
+        /// `position` is where the song is as the track is announced.
+        case track(Child?, prefetch: Bool, position: TimeInterval)
         /// The lyrics panel came up (`width` is the screen's) or went away.
         case activate(Bool, width: CGFloat)
         /// The user's finger is on the lyrics, or they're coasting (`true`); they've stopped.
@@ -54,6 +55,8 @@ actor LyricsConductor {
 
     // What's in progress.
     private var breakEnding: BreakEnding?
+    /// The clock as it was last handed to the views, which the next one is eased on from.
+    private var publishedClock: LyricsModel.ClockAnchor?
     /// How the current break's dots leave, worked out once when it became current (and again if
     /// the song is sought within it) — `nil` for a break that draws no dots, and for no break.
     /// The decision to draw them and the plan for them leaving are one, so dots that are drawn
@@ -100,7 +103,7 @@ actor LyricsConductor {
         case .duration(let value):
             duration = value
             if isShowingBreak { await publishClock() }
-        case .track(let track, let prefetch): await trackChanged(track, prefetch: prefetch)
+        case .track(let track, let prefetch, let position): await trackChanged(track, prefetch: prefetch, position: position)
         case .activate(let isActive, let width): await activate(isActive, width: width)
         case .scrollPhase(let isUser): await scrollPhase(isUser: isUser)
         case .tap(let line, let time): await tap(line, time: time)
@@ -137,8 +140,15 @@ actor LyricsConductor {
         await restartAdvance()
     }
 
-    private func trackChanged(_ track: Child?, prefetch: Bool) async {
+    private func trackChanged(_ track: Child?, prefetch: Bool, position: TimeInterval) async {
         guard track?.id.raw != trackID else { return }
+        // Where the song is, as the player has it: another song starts from its beginning, and
+        // until its own position arrives the clock would still say wherever the one before it had
+        // got to — which a song's lyrics, if they're already fetched, are put in by, and its first
+        // break's dots drawn by. The song the app was left on is where it was left.
+        anchorTime = position
+        anchorInstant = .now
+        publishedClock = nil
         trackID = track?.id.raw
         currentTrack = track
         cancelEverything()
@@ -200,6 +210,8 @@ actor LyricsConductor {
             }
             // Measured here, off the main actor, rather than by the views as they build.
             await model.showSynced(timeline, LyricsLayout(timeline: timeline, textWidth: textWidth), at: current)
+            // After the lyrics are put in, which clear the break's ending.
+            if timeline.lines[current].isBreak { await resumeBreakEnding(at: current, timeline) }
             scheduleAdvance()
             // The panel is still sliding in; once it has settled, the rows the first frame left
             // out — the ones a flick would want — are built, a row at a time, when nothing is
@@ -253,6 +265,7 @@ actor LyricsConductor {
         // makes current is followed by an `advance()`) would act on that, moving the lyrics back
         // to the line that was current before the tap. The song is going to `time`: the clock
         // goes there now.
+        let pulseTime = estimate()
         anchorTime = time
         anchorInstant = .now
         await stopBrowsing(scrollBack: false)
@@ -267,7 +280,9 @@ actor LyricsConductor {
         advanceTask?.cancel()
         await setBreakEnding(
             index,
-            BreakTimings(grow: 0, exit: LyricsTimeline.breakExitDuration, scroll: 0)
+            BreakTimings(grow: 0, exit: LyricsTimeline.breakExitDuration, scroll: 0),
+            followsSong: false,
+            pulseTime: pulseTime
         )
         tapTask?.cancel()
         tapTask = Task {
@@ -324,20 +339,63 @@ actor LyricsConductor {
         await model.setDotlessBreak(hasDots ? nil : index)
     }
 
-    private func setBreakEnding(_ index: Int, _ timings: BreakTimings) async {
-        let ending = BreakEnding(index: index, since: Date(), timings: timings)
+    /// Lyrics opened — or a restored song picked up — with the song in the middle of a break's
+    /// ending: the dots are where they would have been had they been showing all along, rather than
+    /// squeezed into what's left (which is for a song sought to there). Their leaving is a function
+    /// of the song's position, so it's as it was when the song was paused, between sessions too.
+    private func resumeBreakEnding(at index: Int, _ timeline: LyricsTimeline) async {
+        guard timeline.lines.indices.contains(index + 1),
+              let full = LyricsTimeline.breakTimings(available: timeline.lines[index + 1].start - timeline.lines[index].start)
+        else { return }
+        let begins = timeline.lines[index + 1].start - full.lead
+        guard estimate() >= begins else { return }
+        breakPlan = full
+        hasDots = true
+        await model.setDotlessBreak(nil)
+        let ending = BreakEnding(index: index, since: Date(), songTime: begins, pulseTime: begins, timings: full)
+        breakEnding = ending
+        await model.setBreakEnding(ending)
+    }
+
+    private func setBreakEnding(
+        _ index: Int, _ timings: BreakTimings, followsSong: Bool = true, pulseTime: TimeInterval? = nil
+    ) async {
+        let songTime = estimate()
+        let ending = BreakEnding(
+            index: index, since: Date(), songTime: followsSong ? songTime : nil,
+            pulseTime: pulseTime ?? songTime, timings: timings
+        )
         breakEnding = ending
         await model.setBreakEnding(ending)
     }
 
     private func publishClock() async {
         let elapsed = anchorInstant.duration(to: .now).seconds
-        await model.setClock(.init(
+        let now = Date()
+        var clock = LyricsModel.ClockAnchor(
             time: anchorTime,
-            wall: Date(timeIntervalSinceNow: -elapsed),
+            wall: now.addingTimeInterval(-elapsed),
             isPlaying: isPlaying,
             duration: duration
-        ))
+        )
+        // Where the clock on screen has the song, and where it's now been told it is: unless that
+        // is a seek, it goes from the one to the other gradually. Hopping would show: the dots
+        // draw from this clock, and a position that came in behind it (the song starting a moment
+        // after the clock had) moved them back and then forward again.
+        if let shown = publishedClock, shown.isPlaying, isPlaying {
+            let from = shown.estimate(at: now)
+            let correction = clock.estimate(at: now) - from
+            let slewLimit = LyricsModel.ClockAnchor.maxSlew
+            if abs(correction) >= 0.01, abs(correction) < LyricsModel.ClockAnchor.snapThreshold {
+                let span = abs(correction) / slewLimit
+                clock.time = from
+                clock.wall = now
+                clock.rate = 1 + correction / span
+                clock.span = span
+            }
+        }
+        publishedClock = clock
+        await model.setClock(clock)
     }
 
     // MARK: - Moving on
@@ -405,11 +463,24 @@ actor LyricsConductor {
         // The dots leave when the song gets within `lead` of the next line, and the lyrics move on
         // when it gets within `scroll` of it. Those are the song's times, not the wall clock's: if
         // it pauses or stalls while the dots are leaving, the lyrics wait with it.
-        guard await waitUntil(next - timings.lead), tappedLine == nil else { return }
-        await setBreakEnding(index, timings)
-        try? await Task.sleep(for: .seconds(timings.grow + timings.exit))
-        guard !Task.isCancelled, await waitUntil(next - timings.scroll) else { return }
-        if tappedLine == nil { await handOver(from: index, scrollDuration: timings.scroll, timeline) }
+        //
+        // The schedule starts again at every pause, resume and seek (`restartAdvance`), and the
+        // dots may be in the middle of leaving by then: they carry on, rather than being sent
+        // away again from the start.
+        let ending: BreakEnding
+        if let existing = breakEnding, existing.index == index, existing.songTime != nil {
+            ending = existing
+        } else {
+            guard await waitUntil(next - timings.lead), tappedLine == nil else { return }
+            await setBreakEnding(index, timings)
+            guard let started = breakEnding else { return }
+            ending = started
+        }
+        // Their grow and shrink are the song's time too.
+        guard await waitUntil((ending.songTime ?? estimate()) + ending.timings.grow + ending.timings.exit),
+              await waitUntil(next - ending.timings.scroll)
+        else { return }
+        if tappedLine == nil { await handOver(from: index, scrollDuration: ending.timings.scroll, timeline) }
     }
 
     /// Moves on from the line at `index`. Always to at least the line after it, whatever the clock
@@ -481,8 +552,10 @@ final class LyricsFeed {
             .removeDuplicates()
             .sink { continuation.yield(.duration($0)) }
             .store(in: &subscriptions)
-        player.$isPlaying
-            .removeDuplicates()
+        // Not `$isPlaying`, which is true from the moment Play is asked for, however long the song
+        // then takes to start: the lyrics' clock would run ahead of it, and be put back when the
+        // position arrives.
+        player.isAdvancingPublisher
             .sink { continuation.yield(.playing($0)) }
             .store(in: &subscriptions)
         Publishers.CombineLatest(player.$currentIndex, player.$queue)
@@ -490,11 +563,16 @@ final class LyricsFeed {
                 guard let index, queue.indices.contains(index) else { return nil }
                 return queue[index]
             }
+            // The track the changes come to, not each one on the way: restoring a queue sets the
+            // queue and then the index, and between them the track is another song.
+            .debounce(for: .milliseconds(1), scheduler: DispatchQueue.main)
             .removeDuplicates { $0?.id == $1?.id }
             .sink { track in
                 // While the expanded player is up, the lyrics will probably be asked for.
-                let expanded = MainActor.assumeIsolated { PlayerPresentation.shared.expanded }
-                continuation.yield(.track(track, prefetch: expanded))
+                let (expanded, position) = MainActor.assumeIsolated {
+                    (PlayerPresentation.shared.expanded, player.currentTime)
+                }
+                continuation.yield(.track(track, prefetch: expanded, position: position))
             }
             .store(in: &subscriptions)
     }

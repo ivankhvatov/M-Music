@@ -112,6 +112,19 @@ final class PlayerManager: ObservableObject {
 
     private let client: SubsonicClient
     private let engine = PlayerEngine()
+
+    /// Whether the song is advancing: playing as asked, and past loading, buffering, seeking and the
+    /// other waits between asking and hearing it. `isPlaying` is the request, and runs ahead of the
+    /// audio by however long those take — for anything following the song's position by carrying
+    /// it forward on the clock, the difference is a clock that runs ahead and then has to be put
+    /// back. (After a relaunch, Play loads the song and seeks to where it was left, which takes a
+    /// while; the player says it's playing meanwhile.)
+    var isAdvancingPublisher: AnyPublisher<Bool, Never> {
+        Publishers.CombineLatest3($isPlaying, engine.$isActuallyPlaying, engine.$isSeeking)
+            .map { $0 && $1 && !$2 }
+            .removeDuplicates()
+            .eraseToAnyPublisher()
+    }
     private var subscriptions: Set<AnyCancellable> = []
     private var backgroundObserver: NSObjectProtocol?
     private var foregroundObserver: NSObjectProtocol?
@@ -291,7 +304,11 @@ final class PlayerManager: ObservableObject {
         backgroundObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.persistState() }
+            Task { @MainActor in
+                guard let self else { return }
+                if self.isPlaying, let exact = self.engine.exactTime { self.currentTime = exact }
+                self.persistState()
+            }
         }
         // A change published just before the app left the foreground (a play/pause tap right
         // before going Home, a lock-screen toggle while suspended, ...) can have its SwiftUI update
@@ -324,6 +341,10 @@ final class PlayerManager: ObservableObject {
 
     private func subscribeToEngine() {
         engine.$currentTime
+            // Not the value it starts with, which `@Published` hands to a new subscriber at once:
+            // the engine hasn't played anything, and its 0 would replace the position restored
+            // from the last session.
+            .dropFirst()
             .sink { [weak self] time in self?.handleTimeUpdate(time) }
             .store(in: &subscriptions)
         engine.$duration
@@ -629,6 +650,9 @@ final class PlayerManager: ObservableObject {
 
     private func pause() {
         guard hasLoadedItem, isPlaying else { return }
+        // Where the song really is, not where it was at the last update: a pause is where it's
+        // picked up from — the lyrics' dots too — including after a relaunch.
+        if let exact = engine.exactTime { currentTime = exact }
         engine.pause()
         updateNowPlayingPlaybackState()
         persistState()

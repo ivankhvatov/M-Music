@@ -371,9 +371,11 @@ private struct LyricLineView: View, Equatable {
 /// from wherever the pulse has them to its largest size, and then shrink away to nothing as they
 /// fade out.
 ///
-/// Everything is a function of the `TimelineView`'s date and the model's clock anchor, so there's
-/// nothing to observe or keep: the pulse and the fill are drawn at ~20 fps (they're slow), and only
-/// the grow and shrink at the full rate.
+/// Everything is a function of the song's position — the model's clock anchor, carried forward by
+/// the `TimelineView`'s date while it plays — so there's nothing to observe or keep: the dots stop
+/// when the song is paused, carry on from exactly where they were when it resumes, and are as they
+/// were when a restored song is opened again. The pulse and the fill are drawn at ~20 fps (they're
+/// slow), and only the grow and shrink at the full rate.
 private struct LyricBreakDots: View {
     let start: TimeInterval
     /// When the dots should be full; `nil` for a break at the very end, which fill over the rest
@@ -392,11 +394,12 @@ private struct LyricBreakDots: View {
         TimelineView(.animation(minimumInterval: ending == nil ? 1.0 / 20 : nil)) { context in
             let date = context.date
             let clock = model.clock
+            let songTime = clock.estimate(at: date)
             // A break at the end runs for as long as the song has left; guard against a missing or
             // backwards duration.
             let finish = max(end ?? clock.duration, start + 1)
-            let fraction = min(max((clock.estimate(at: date) - start) / (finish - start), 0), 1)
-            let (scale, opacity) = scaleAndOpacity(at: date)
+            let fraction = min(max((songTime - start) / (finish - start), 0), 1)
+            let (scale, opacity) = scaleAndOpacity(at: date, songTime: songTime)
             HStack(spacing: 9) {
                 ForEach(0..<3, id: \.self) { index in
                     let fill = min(max(fraction * 3 - Double(index), 0), 1)
@@ -415,28 +418,28 @@ private struct LyricBreakDots: View {
     static let height: CGFloat = 34
 
     private func pulseScale(after elapsed: TimeInterval) -> CGFloat {
-        let swell = (1 - cos(2 * .pi * elapsed / Self.pulsePeriod)) / 2
+        let swell = (1 - cos(2 * .pi * max(elapsed, 0) / Self.pulsePeriod)) / 2
         return 1 + (Self.pulseMaxScale - 1) * CGFloat(swell)
     }
 
-    private func scaleAndOpacity(at date: Date) -> (CGFloat, Double) {
+    private func scaleAndOpacity(at date: Date, songTime: TimeInterval) -> (CGFloat, Double) {
         // The pulse starts when the break does, so the dots come in at their smallest.
-        let appearedAt = model.currentSince
-        guard let ending else { return (pulseScale(after: date.timeIntervalSince(appearedAt)), 1) }
-        let elapsed = date.timeIntervalSince(ending.since)
+        guard let ending else { return (pulseScale(after: songTime - start), 1) }
+        // Leaving, they follow the song too — unless a tap sent them away.
+        let elapsed = ending.songTime.map { max(songTime - $0, 0) } ?? date.timeIntervalSince(ending.since)
         let grow = ending.timings.grow
+        let leavingFrom = pulseScale(after: ending.pulseTime - start)
         if elapsed < grow {
             // Eased at both ends, from the pulse's size at the moment the break ended.
             let progress = elapsed / grow
             let eased = progress * progress * (3 - 2 * progress)
-            let from = pulseScale(after: ending.since.timeIntervalSince(appearedAt))
-            return (from + (Self.pulseMaxScale - from) * CGFloat(eased), 1)
+            return (leavingFrom + (Self.pulseMaxScale - leavingFrom) * CGFloat(eased), 1)
         }
         let progress = min((elapsed - grow) / ending.timings.exit, 1)
         let eased = progress * progress
         // Shrinks from the largest size, which the grow has just reached — or, with no grow, from
         // wherever the pulse had the dots.
-        let from = grow > 0 ? Self.pulseMaxScale : pulseScale(after: ending.since.timeIntervalSince(appearedAt))
+        let from = grow > 0 ? Self.pulseMaxScale : leavingFrom
         return (from + (0.01 - from) * CGFloat(eased), 1 - eased)
     }
 }

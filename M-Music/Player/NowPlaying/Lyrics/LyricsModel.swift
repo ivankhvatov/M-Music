@@ -30,19 +30,33 @@ final class LyricsModel {
 
     /// The song's position as of the last update, which the dots carry forward on their own —
     /// they draw it at the display's rate, which the 2 Hz updates can't.
+    ///
+    /// A correction doesn't make the clock jump: it's eased in, the clock running a little slower
+    /// or faster than the song for as long as it takes (`rate` for `span` seconds), so a position
+    /// that comes in behind or ahead of where the clock had it never moves what's drawn backwards
+    /// or in a hop.
     struct ClockAnchor: Equatable, Sendable {
         var time: TimeInterval = 0
         var wall = Date()
         var isPlaying = false
         var duration: TimeInterval = 0
+        /// How fast the clock runs for the first `span` seconds after `wall`; 1 afterwards.
+        var rate: Double = 1
+        var span: TimeInterval = 0
 
         /// A little over the updates' interval, to allow for one that's a bit late: anything
         /// longer means none are coming (a stall), and the position stays where the last left it.
         static let maxExtrapolation: TimeInterval = 0.75
+        /// How far from 1 the clock's rate goes to take in a correction.
+        static let maxSlew = 0.5
+        /// A correction of this much or more is a seek, and is followed at once.
+        static let snapThreshold: TimeInterval = 1.0
 
         func estimate(at date: Date) -> TimeInterval {
             guard isPlaying else { return time }
-            return time + min(max(date.timeIntervalSince(wall), 0), Self.maxExtrapolation)
+            let elapsed = min(max(date.timeIntervalSince(wall), 0), Self.maxExtrapolation)
+            let eased = min(elapsed, span)
+            return time + eased * rate + (elapsed - eased)
         }
     }
 
