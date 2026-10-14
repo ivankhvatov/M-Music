@@ -25,6 +25,9 @@ final class LyricsModel {
         var target = 0
         /// How long the scroll takes; `nil` for a jump.
         var duration: TimeInterval?
+        /// A jump made after the song was sought far from where it was, which has to wait for the
+        /// lines around the target to be laid out.
+        var settles = false
         var generation = 0
     }
 
@@ -156,7 +159,7 @@ final class LyricsModel {
         case .jump:
             // The rows around where it's going are built before it gets there.
             if case .synced(_, let layout) = phase { window = layout.window(around: index) }
-            scrollRequest = ScrollRequest(target: index, duration: nil, generation: scrollRequest.generation + 1)
+            scrollRequest = ScrollRequest(target: index, duration: nil, settles: true, generation: scrollRequest.generation + 1)
         case .animated(let duration):
             // The rows around where it's going are built before it starts, and the ones the song
             // has left behind are let go now — they can't be later, once it has arrived (see

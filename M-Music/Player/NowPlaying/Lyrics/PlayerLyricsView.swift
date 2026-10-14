@@ -232,6 +232,19 @@ private struct LyricsScrollView: View {
                 guard timeline.lines.indices.contains(request.target) else { return }
                 if let duration = request.duration {
                     withAnimation(.smooth(duration: duration)) { proxy.scrollTo(request.target, anchor: .top) }
+                } else if request.settles {
+                    // A seek far from where the lyrics were: the rows around the target were
+                    // swapped in for spacers just now, and aren't laid out until a moment later.
+                    // Scrolling to a line then lands where the layout before the swap had it — with
+                    // lines of different heights, far from the line (a jump back to the start from a
+                    // break scrolled on to a line some way down). So a moment later, and once more
+                    // in case that was early too.
+                    for delay in [0.05, 0.2] {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                            guard model.scrollRequest == request else { return }
+                            proxy.scrollTo(request.target, anchor: .top)
+                        }
+                    }
                 } else {
                     // A turn later: the lyrics may have just been put in the view (see `synced`), and
                     // their lines aren't in place yet.
