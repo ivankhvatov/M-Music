@@ -174,8 +174,20 @@ final class LyricsModel {
     /// their layout too (the room taken by the lines far from the current one, growing from
     /// nothing), and the jump to the current line, made meanwhile, went by the half-grown layout
     /// and stopped short: the lyrics were there, but out of sight until they were scrolled.
+    ///
+    /// And not in the very next turn either, but a few frames on: with the lines put in and the
+    /// fade started in one render, the text of plain lyrics (and the "not available" notice) was
+    /// at times never drawn — the view laid out at its full size and empty, however long it was
+    /// left — and showed only when the lyrics were closed and opened again. The fade starts once
+    /// the content has been drawn, at nothing.
     private func reveal() {
         Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(80))
+            // Closed, or replaced by another song's lyrics, in the meantime.
+            switch phase {
+            case .idle, .loading: return
+            case .synced, .plain, .unavailable: break
+            }
             withAnimation(.playerQueueAnimation) { revealsContent = true }
             // Once it has faded.
             try? await Task.sleep(for: .seconds(Animation.playerQueueAnimationDuration + 0.1))
