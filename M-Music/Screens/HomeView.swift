@@ -8,7 +8,7 @@
 import SwiftUI
 
 /// The albums behind each of the Home carousels, derived from the whole library in one pass.
-private struct HomeAlbumSections: Equatable, Sendable {
+struct HomeAlbumSections: Equatable, Sendable {
     var random: [AlbumID3] = []
     var latestReleases: [AlbumID3] = []
     var recentlyAdded: [AlbumID3] = []
@@ -100,6 +100,67 @@ private struct HomeAlbumCarousel: View {
     }
 }
 
+/// What Home needs on its first frame, and when its slower parts are worth repeating.
+enum HomeLoadingPolicy {
+    /// How many cards of each carousel are on the first screen, about.
+    static let cardsPerCarousel = 3
+
+    /// The images of the first few cards of each carousel, in the order the carousels are shown
+    /// (empty ones skipped), up to `limit` — what `ImageReadiness` waits for before Home shows.
+    static func firstScreenRequests(
+        carousels: [HomeCarouselKind],
+        albums: (HomeCarouselKind) -> [AlbumID3],
+        playlists: [PlaylistSummary],
+        perCarousel: Int = cardsPerCarousel,
+        limit: Int = ImageWarmer.gateLimit
+    ) -> [ArtworkRequest] {
+        var requests: [ArtworkRequest] = []
+        for kind in carousels {
+            if kind == .topPlaylists {
+                requests += playlists.prefix(perCarousel).map { .playlistCard($0.coverArt ?? $0.id.raw) }
+            } else {
+                requests += albums(kind).prefix(perCarousel).map { .albumCard($0.coverArt ?? $0.id.raw) }
+            }
+            if requests.count >= limit { break }
+        }
+        return Array(requests.prefix(limit))
+    }
+
+    /// The expensive requests — the starred artists and, above all, the per-playlist play counts —
+    /// aren't repeated every time the tab is visited again: only if they've never run, or not for
+    /// `interval`.
+    static func shouldRunExpensiveRefresh(last: Date?, now: Date = Date(), interval: TimeInterval = 300) -> Bool {
+        guard let last else { return true }
+        return now.timeIntervalSince(last) >= interval
+    }
+
+    /// Top playlists: the ones with any plays, most played first, at most `limit`.
+    static func rank(_ playlists: [PlaylistSummary], playCounts: [String: Int], limit: Int) -> [PlaylistSummary] {
+        Array(
+            playlists
+                .filter { (playCounts[$0.id.raw] ?? 0) > 0 }
+                .sorted { (playCounts[$0.id.raw] ?? 0) > (playCounts[$1.id.raw] ?? 0) }
+                .prefix(limit)
+        )
+    }
+
+    /// The part of the screen whose data decides what's on the first frame.
+    enum Part: Hashable { case library, recentlyPlayed, topPlaylists }
+
+    /// Which parts the first frame waits for, given the carousels that are switched on.
+    static func parts(for carousels: [HomeCarouselKind]) -> Set<Part> {
+        var parts: Set<Part> = []
+        for kind in carousels {
+            switch kind {
+            case .randomAlbums, .latestReleases, .recentlyAdded, .favoriteArtistAlbums: parts.insert(.library)
+            case .recentlyPlayed: parts.insert(.recentlyPlayed)
+            case .topPlaylists: parts.insert(.topPlaylists)
+            }
+        }
+        return parts
+    }
+}
+
 struct HomeView: View {
     @Bindable private var navigation = AppNavigation.shared
 
@@ -117,6 +178,14 @@ struct HomeView: View {
     @State private var topPlaylists: [PlaylistSummary] = []
     @State private var isLoading = false
     @State private var hasLoadedOnce = false
+    /// Keeps the carousels hidden on first open until the first cards' images are in memory.
+    @State private var imageReadiness = ImageReadiness()
+    /// Builds the library-derived carousels off the main actor — see `OffMainDeriver`.
+    @State private var deriver = OffMainDeriver()
+    /// The parts the first frame is still waiting for (see `settle`).
+    @State private var pendingParts: Set<HomeLoadingPolicy.Part> = []
+    /// When the expensive requests last ran — see `HomeLoadingPolicy.shouldRunExpensiveRefresh`.
+    @State private var lastExpensiveRefresh: Date?
     @AppStorage("library.groupReleaseVersions") private var groupReleaseVersionsEnabled = false
 
     @ObservedObject private var downloads = DownloadStore.shared
@@ -130,15 +199,22 @@ struct HomeView: View {
         HomeContentSettings.visible(order: carouselOrderStorage, disabled: disabledCarouselsStorage)
     }
 
+    private func albums(for kind: HomeCarouselKind) -> [AlbumID3] {
+        switch kind {
+        case .randomAlbums: sections.random
+        case .latestReleases: sections.latestReleases
+        case .recentlyAdded: sections.recentlyAdded
+        case .recentlyPlayed: recentlyPlayed
+        case .favoriteArtistAlbums: sections.favoriteArtists
+        case .topPlaylists: []
+        }
+    }
+
     @ViewBuilder
     private func carousel(for kind: HomeCarouselKind) -> some View {
         switch kind {
-        case .randomAlbums: albumCarousel(kind.title, albums: sections.random)
-        case .latestReleases: albumCarousel(kind.title, albums: sections.latestReleases)
-        case .recentlyAdded: albumCarousel(kind.title, albums: sections.recentlyAdded)
-        case .recentlyPlayed: albumCarousel(kind.title, albums: recentlyPlayed)
-        case .favoriteArtistAlbums: albumCarousel(kind.title, albums: sections.favoriteArtists)
         case .topPlaylists: playlistCarousel(kind.title, playlists: topPlaylists)
+        default: albumCarousel(kind.title, albums: albums(for: kind))
         }
     }
 
@@ -152,7 +228,9 @@ struct HomeView: View {
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 32)
                         .padding(.top, 120)
-                } else if isLoading {
+                } else if isLoading || !imageReadiness.isReady {
+                    // Also while the first cards' images aren't in memory yet: hold the carousels
+                    // back until they are (see `ImageReadiness`) rather than showing placeholders.
                     ProgressView()
                         .frame(maxWidth: .infinity)
                         .padding(.top, 120)
@@ -174,7 +252,7 @@ struct HomeView: View {
             }
             .task { await refresh() }
             .onChange(of: groupReleaseVersionsEnabled) {
-                Task { await rebuildSections(reshuffle: true) }
+                rebuildSections(reshuffle: true)
             }
         }
     }
@@ -196,9 +274,20 @@ struct HomeView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(!isAvailable(playlist))
+                    .onAppear { warmAhead(after: playlist, in: playlists) }
                 }
             }
         }
+    }
+
+    /// A card scrolled into view: warm the ones after it in its carousel, so a fast swipe finds
+    /// them ready.
+    private func warmAhead(after playlist: PlaylistSummary, in playlists: [PlaylistSummary]) {
+        guard let index = playlists.firstIndex(where: { $0.id == playlist.id }) else { return }
+        let requests = playlists[(index + 1)...].prefix(ImageWarmer.scrollAheadCount)
+            .map { ArtworkRequest.playlistCard($0.coverArt ?? $0.id.raw) }
+        guard !requests.isEmpty else { return }
+        Task { await ImageWarmer.shared.warmAhead(requests) }
     }
 
     /// Same carousel presentation as `ArtistAlbumsView.albumCarousel`.
@@ -225,67 +314,126 @@ struct HomeView: View {
         return songIds.contains { downloads.isDownloaded($0) }
     }
 
+    // MARK: First frame
+
+    private var firstScreenRequests: [ArtworkRequest] {
+        HomeLoadingPolicy.firstScreenRequests(
+            carousels: visibleCarousels,
+            albums: { albums(for: $0) },
+            playlists: topPlaylists
+        )
+    }
+
+    /// One of the parts the first frame waits for has its data (or has nothing to give). When the
+    /// last one does, the spinner goes and the images of the first cards are awaited instead.
+    /// Everything that arrives later fills its carousel in without holding anything back.
+    private func settle(_ part: HomeLoadingPolicy.Part) {
+        guard pendingParts.remove(part) != nil, pendingParts.isEmpty else { return }
+        isLoading = false
+        imageReadiness.require(firstScreenRequests)
+    }
+
+    /// Tells `ImageWarmer` which covers Home opens with, to decode them ahead of the next resume.
+    /// The random and favorite-artist picks change on every load, so only the carousels that stay
+    /// the same are remembered.
+    private func rememberFirstScreen() {
+        let stable = visibleCarousels.filter { $0 != .randomAlbums && $0 != .favoriteArtistAlbums }
+        let requests = HomeLoadingPolicy.firstScreenRequests(
+            carousels: stable, albums: { albums(for: $0) }, playlists: topPlaylists,
+            perCarousel: 4, limit: ImageWarmer.manifestLimit
+        )
+        Task { await ImageWarmer.shared.remember(.home, requests) }
+    }
+
     // MARK: Loading
 
     /// Runs from `.task` every time the tab becomes visible. Only the first load shows the
-    /// spinner; later runs refresh each section quietly. The four library-derived carousels share
-    /// one `allAlbums` load (cached, scan-gated), and the others load alongside it.
+    /// spinner — and only until the cached library, recently played and top playlists are in; the
+    /// network revalidation then updates the carousels in place. The four library-derived
+    /// carousels share one `allAlbums` load (cached, scan-gated), the others load alongside it,
+    /// and the expensive requests aren't repeated on every visit.
     private func refresh() async {
         isConnected = client.isConfigured
         guard isConnected else { return }
-        if !hasLoadedOnce { isLoading = true }
+        let runExpensive = HomeLoadingPolicy.shouldRunExpensiveRefresh(last: lastExpensiveRefresh)
+        if !hasLoadedOnce {
+            isLoading = true
+            pendingParts = HomeLoadingPolicy.parts(for: visibleCarousels)
+            if pendingParts.isEmpty { isLoading = false }
+        }
         defer {
+            // Whatever is still pending (offline with no cache, a failed load) must not keep the
+            // spinner up — except the library while its carousels are still being built: that
+            // build settles it itself, and the images to wait for aren't known before.
+            for part in pendingParts where !(part == .library && deriver.isPending) { settle(part) }
             isLoading = false
             hasLoadedOnce = true
+            if pendingParts.isEmpty, !deriver.isPending { imageReadiness.require(firstScreenRequests) }
+            rememberFirstScreen()
         }
 
-        async let starred: Void = loadStarredArtists()
+        async let starred: Void = loadStarredArtists(runExpensive: runExpensive)
         async let played: Void = loadRecentlyPlayed()
-        async let playlists: Void = loadTopPlaylists()
+        async let playlists: Void = loadTopPlaylists(runExpensive: runExpensive)
         await loadLibrary()
         _ = await (starred, played, playlists)
+        if runExpensive { lastExpensiveRefresh = Date() }
         // The favorite-artist carousel needs both the library and the starred set.
-        await rebuildSections(reshuffle: false)
+        rebuildSections(reshuffle: false)
     }
 
     private func loadLibrary() async {
+        var gotAlbums = false
         for await event in LibraryLoader.load(.allAlbums(), shown: allAlbums) {
             switch event {
             case .cached(let albums), .fresh(let albums):
+                gotAlbums = true
                 allAlbums = albums
-                await rebuildSections(reshuffle: true)
+                rebuildSections(reshuffle: true)
             case .upToDate, .failed:
                 break
             }
         }
+        // Nothing came of it (no cache, offline): the first frame must not wait for it.
+        if !gotAlbums { settle(.library) }
     }
 
     /// `reshuffle` re-rolls the random picks; otherwise they stay put so a quiet refresh (popping
-    /// back to Home) doesn't swap the cards under the user.
-    private func rebuildSections(reshuffle: Bool) async {
+    /// back to Home) doesn't swap the cards under the user. The sorting and shuffling of the whole
+    /// library run off the main actor, and only the newest request is applied (`OffMainDeriver`).
+    private func rebuildSections(reshuffle: Bool) {
         let albums = allAlbums
         let starredIds = starredArtistIds
         let groupVersions = groupReleaseVersionsEnabled
-        defer { favoritesBuiltFor = starredIds }
-        let built = await Task.detached(priority: .userInitiated) {
+        deriver.run({
             HomeAlbumSections.make(from: albums, starredArtistIds: starredIds, groupVersions: groupVersions)
-        }.value
-        if reshuffle || sections.random.isEmpty {
-            sections = built
-        } else {
-            sections.latestReleases = built.latestReleases
-            sections.recentlyAdded = built.recentlyAdded
-            // Random like "Random albums": only re-rolled when the starred artists change.
-            if starredIds != favoritesBuiltFor || sections.favoriteArtists.isEmpty {
-                sections.favoriteArtists = built.favoriteArtists
+        }, apply: { built in
+            var next = sections
+            if reshuffle || sections.random.isEmpty {
+                next = built
+            } else {
+                next.latestReleases = built.latestReleases
+                next.recentlyAdded = built.recentlyAdded
+                // Random like "Random albums": only re-rolled when the starred artists change.
+                if starredIds != favoritesBuiltFor || sections.favoriteArtists.isEmpty {
+                    next.favoriteArtists = built.favoriteArtists
+                }
             }
-        }
+            favoritesBuiltFor = starredIds
+            // Only a change re-renders the carousels.
+            if next != sections { sections = next }
+            // Whichever build is applied last settles the library part, so a build superseded
+            // by a newer one never leaves it pending.
+            settle(.library)
+            rememberFirstScreen()
+        })
     }
 
-    private func loadStarredArtists() async {
-        guard visibleCarousels.contains(.favoriteArtistAlbums) else { return }
+    private func loadStarredArtists(runExpensive: Bool) async {
+        guard runExpensive, visibleCarousels.contains(.favoriteArtistAlbums) else { return }
         guard let starred = try? await client.getStarred2() else { return }
-        starredArtistIds = Set((starred.artist ?? []).map { $0.id.raw })
+        let ids = Set((starred.artist ?? []).map { $0.id.raw })
+        if ids != starredArtistIds { starredArtistIds = ids }
     }
 
     private func loadRecentlyPlayed() async {
@@ -293,17 +441,28 @@ struct HomeView: View {
         for await event in LibraryLoader.load(.recentAlbums(), shown: recentlyPlayed) {
             switch event {
             case .cached(let albums), .fresh(let albums):
-                recentlyPlayed = albums
+                if albums != recentlyPlayed { recentlyPlayed = albums }
+                settle(.recentlyPlayed)
             case .upToDate, .failed:
                 break
             }
         }
+        settle(.recentlyPlayed)
     }
 
+    /// The top playlists show at once from the last ranking (kept in the library cache), then the
+    /// ranking is recomputed — unless it ran recently — and replaces it only if it changed.
+    ///
     /// Subsonic exposes no play count for playlists, so a playlist's count is the sum of its
-    /// songs' play counts, fetched per playlist.
-    private func loadTopPlaylists() async {
+    /// songs' play counts, fetched per playlist — a few at a time, not all at once.
+    private func loadTopPlaylists(runExpensive: Bool) async {
         guard visibleCarousels.contains(.topPlaylists) else { return }
+        if topPlaylists.isEmpty, let remembered = await Self.rememberedTopPlaylists() {
+            topPlaylists = remembered
+        }
+        settle(.topPlaylists)
+        guard runExpensive else { return }
+
         var playlists: [PlaylistSummary] = []
         for await event in LibraryLoader.load(.allPlaylists(), shown: nil) {
             switch event {
@@ -313,24 +472,34 @@ struct HomeView: View {
                 break
             }
         }
-        guard !playlists.isEmpty else { return }
+        guard !playlists.isEmpty, !Task.isCancelled else { return }
         let client = client
-        let counts = await withTaskGroup(of: (String, Int).self) { group -> [String: Int] in
-            for playlist in playlists {
-                group.addTask {
-                    let songs = (try? await client.getPlaylist(id: playlist.id.raw))?.entry ?? []
-                    return (playlist.id.raw, songs.reduce(0) { $0 + ($1.playCount ?? 0) })
-                }
-            }
-            var result: [String: Int] = [:]
-            for await (id, count) in group { result[id] = count }
-            return result
+        let counts = await BoundedConcurrency.map(playlists, limit: Self.playlistFetchLimit) { playlist -> (String, Int) in
+            let songs = (try? await client.getPlaylist(id: playlist.id.raw))?.entry ?? []
+            return (playlist.id.raw, songs.reduce(0) { $0 + ($1.playCount ?? 0) })
         }
-        topPlaylists = playlists
-            .filter { (counts[$0.id.raw] ?? 0) > 0 }
-            .sorted { (counts[$0.id.raw] ?? 0) > (counts[$1.id.raw] ?? 0) }
-            .prefix(HomeAlbumSections.carouselLimit)
-            .map { $0 }
+        guard !Task.isCancelled else { return }
+        let ranked = HomeLoadingPolicy.rank(
+            playlists, playCounts: Dictionary(counts, uniquingKeysWith: { first, _ in first }),
+            limit: HomeAlbumSections.carouselLimit
+        )
+        if ranked != topPlaylists { topPlaylists = ranked }
+        let ids = ranked.map(\.id.raw)
+        await LibraryCacheDatabase.shared.set(ids, category: Self.rankingCategory, key: Self.rankingKey)
+    }
+
+    private static let playlistFetchLimit = 6
+    private static let rankingCategory = "home"
+    private static let rankingKey = "topPlaylists"
+
+    /// The last ranking, resolved against the cached playlists.
+    private static func rememberedTopPlaylists() async -> [PlaylistSummary]? {
+        guard let ids = await LibraryCacheDatabase.shared.get([String].self, category: rankingCategory, key: rankingKey),
+              !ids.isEmpty,
+              let cached = await LibraryCacheDatabase.shared.cachedAllPlaylists() else { return nil }
+        let byId = Dictionary(cached.map { ($0.id.raw, $0) }, uniquingKeysWith: { first, _ in first })
+        let resolved = ids.compactMap { byId[$0] }
+        return resolved.isEmpty ? nil : resolved
     }
 
     @ToolbarContentBuilder

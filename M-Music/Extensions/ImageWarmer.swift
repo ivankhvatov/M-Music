@@ -27,7 +27,7 @@ actor ImageWarmer {
 
     /// A screen that records what it shows first.
     enum Screen: String, CaseIterable, Sendable {
-        case library, albums, playlists, artists, songs
+        case home, library, albums, playlists, artists, songs
     }
 
     /// How many of a screen's first requests are remembered (and warmed): a screenful and a bit.
