@@ -93,7 +93,7 @@ struct Child: Codable, Identifiable, Hashable, Sendable {
         isDir = try c.decodeIfPresent(Bool.self, forKey: .isDir) ?? false
         title = try c.decode(String.self, forKey: .title)
         album = try c.decodeIfPresent(String.self, forKey: .album)
-        artist = try c.decodeIfPresent(String.self, forKey: .artist)
+        artist = try c.decodeIfPresent(String.self, forKey: .artist)?.commaSeparatedArtists
         track = try c.decodeIfPresent(Int.self, forKey: .track)
         year = try c.decodeIfPresent(Int.self, forKey: .year)
         genre = try c.decodeIfPresent(String.self, forKey: .genre)
@@ -134,7 +134,7 @@ struct Child: Codable, Identifiable, Hashable, Sendable {
         self.isDir = false
         self.title = title
         self.album = album
-        self.artist = artist
+        self.artist = artist?.commaSeparatedArtists
         self.track = track
         self.year = year
         self.genre = genre
@@ -355,7 +355,7 @@ struct AlbumID3: Decodable, Identifiable, Hashable, Sendable {
     ) {
         self.id = id
         self.name = name
-        self.artist = artist
+        self.artist = artist?.commaSeparatedArtists
         self.artistId = artistId
         self.coverArt = coverArt
         self.songCount = songCount
@@ -375,7 +375,7 @@ struct AlbumID3: Decodable, Identifiable, Hashable, Sendable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(FlexibleID.self, forKey: .id)
-        artist = try c.decodeIfPresent(String.self, forKey: .artist)
+        artist = try c.decodeIfPresent(String.self, forKey: .artist)?.commaSeparatedArtists
         artistId = try c.decodeIfPresent(FlexibleID.self, forKey: .artistId)
         coverArt = try c.decodeIfPresent(String.self, forKey: .coverArt)
         songCount = try c.decode(Int.self, forKey: .songCount)
@@ -451,7 +451,7 @@ struct AlbumWithSongsID3: Codable, Equatable, Sendable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(FlexibleID.self, forKey: .id)
-        artist = try c.decodeIfPresent(String.self, forKey: .artist)
+        artist = try c.decodeIfPresent(String.self, forKey: .artist)?.commaSeparatedArtists
         artistId = try c.decodeIfPresent(FlexibleID.self, forKey: .artistId)
         coverArt = try c.decodeIfPresent(String.self, forKey: .coverArt)
         songCount = try c.decode(Int.self, forKey: .songCount)
@@ -626,3 +626,13 @@ struct SimilarSongs2: Decodable, Sendable {
     let song: [Child]?
 }
 extension SimilarSongs2: SubsonicPayload { static let responseKey = "similarSongs2" }
+
+extension String {
+    /// Navidrome builds the `artist` of a song or album with several artists by joining their names
+    /// with " • " (its artist joiner). Shown as-is that reads like a list of separate details, so
+    /// the models turn it into a comma-separated list the moment they're created or decoded —
+    /// including from the cache, the download records and the saved queue.
+    var commaSeparatedArtists: String {
+        replacingOccurrences(of: " • ", with: ", ")
+    }
+}
