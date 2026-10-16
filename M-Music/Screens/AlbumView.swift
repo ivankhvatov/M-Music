@@ -427,8 +427,18 @@ struct AlbumView: View {
     private var trackCountAndDuration: String {
         let totalMinutes = album.duration / 60
         let songsText = String(localized: "\(album.songCount) songs")
-        let minutesText = String(localized: "\(totalMinutes) minutes")
-        return "\(songsText), \(minutesText)"
+        let durationText: String
+        if totalMinutes >= 60 {
+            let hours = totalMinutes / 60
+            let remainingMinutes = totalMinutes % 60
+            let hoursText = String(localized: "\(hours) hours")
+            durationText = remainingMinutes == 0
+                ? hoursText
+                : "\(hoursText) \(String(localized: "\(remainingMinutes) minutes"))"
+        } else {
+            durationText = String(localized: "\(totalMinutes) minutes")
+        }
+        return "\(songsText), \(durationText)"
     }
 
     private var recordLabelText: String? {
