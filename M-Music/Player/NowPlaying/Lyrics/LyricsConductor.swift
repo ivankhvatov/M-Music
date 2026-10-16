@@ -273,7 +273,7 @@ actor LyricsConductor {
         let index = min(current, timeline.count - 1)
         guard timeline.lines[index].isBreak, breakEnding?.index != index else {
             tappedLine = nil
-            await setCurrent(line, scrollDuration: LyricsTimeline.scrollDuration)
+            await setCurrent(line, scrollDuration: LyricsTimeline.scrollDuration, glides: true)
             return
         }
         tappedLine = line
@@ -296,7 +296,7 @@ actor LyricsConductor {
     private func finishTap(_ line: Int) async {
         guard tappedLine == line else { return }
         tappedLine = nil
-        await setCurrent(line, scrollDuration: LyricsTimeline.scrollDuration)
+        await setCurrent(line, scrollDuration: LyricsTimeline.scrollDuration, glides: true)
     }
 
     // MARK: - The current line
@@ -306,7 +306,10 @@ actor LyricsConductor {
         return timeline.lines[current].isBreak
     }
 
-    private func setCurrent(_ index: Int, scrollDuration: TimeInterval?) async {
+    /// `glides` makes the lyrics scroll to the line however far it is, instead of jumping there as
+    /// they do for a seek to somewhere far off: a line that was tapped is on screen, so the scroll
+    /// is a short one.
+    private func setCurrent(_ index: Int, scrollDuration: TimeInterval?, glides: Bool = false) async {
         guard let timeline else { return }
         let previous = current
         current = index
@@ -318,7 +321,7 @@ actor LyricsConductor {
             await publishClock()
         }
         // Far from where it was (a seek) the lyrics jump, rather than run past all the lines between.
-        let far = abs(index - previous) > Self.farJump
+        let far = !glides && abs(index - previous) > Self.farJump
         let scroll: LyricsModel.ScrollRequest.Mode = browsing ? .none : (far ? .jump : .animated(scrollDuration ?? LyricsTimeline.scrollDuration))
         await model.setCurrent(index, scroll: scroll)
         scheduleAdvance()
