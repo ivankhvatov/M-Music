@@ -17,6 +17,29 @@ struct AppearanceSettingsView: View {
     @AppStorage(OfflineModeSettings.Keys.showUnavailableInAlbums) private var showUnavailableInAlbums = true
     @AppStorage(OfflineModeSettings.Keys.showUnavailableInPlaylists) private var showUnavailableInPlaylists = true
 
+    @AppStorage(HomeContentSettings.Keys.order) private var homeOrderStorage = ""
+    @AppStorage(HomeContentSettings.Keys.disabled) private var homeDisabledStorage = ""
+    @State private var isHomeContentExpanded = false
+
+    private var homeOrder: [HomeCarouselKind] { HomeContentSettings.order(from: homeOrderStorage) }
+
+    private func homeCarouselEnabled(_ kind: HomeCarouselKind) -> Binding<Bool> {
+        Binding(
+            get: { !HomeContentSettings.disabled(from: homeDisabledStorage).contains(kind) },
+            set: { isOn in
+                var off = HomeContentSettings.disabled(from: homeDisabledStorage)
+                if isOn { off.remove(kind) } else { off.insert(kind) }
+                homeDisabledStorage = HomeContentSettings.encode(HomeCarouselKind.allCases.filter(off.contains))
+            }
+        )
+    }
+
+    private func moveHomeCarousels(from source: IndexSet, to destination: Int) {
+        var order = homeOrder
+        order.move(fromOffsets: source, toOffset: destination)
+        homeOrderStorage = HomeContentSettings.encode(order)
+    }
+
     private var playlistsDisplayStyle: Binding<LibraryDisplayStyle> {
         Binding(
             get: { LibraryDisplayStyle(storageKey: playlistsDisplayStyleStorage) },
@@ -52,6 +75,20 @@ struct AppearanceSettingsView: View {
                     Text("Library")
                 } footer: {
                     Text("Separate artist's release types shows an artist's albums, EPs, singles, and other release types as separate rows instead of one grid; artists with only one release type are unaffected. Group release versions collapses multiple versions of the same album (e.g. a Deluxe or Remastered edition) down to just the plain edition, or the one with the shortest version name if there's no plain edition — except when Albums is filtered to Favorite only.")
+                }
+                Section {
+                    DisclosureGroup("Home page content", isExpanded: $isHomeContentExpanded) {
+                        // Edit mode on just these rows shows the drag handles for reordering.
+                        ForEach(homeOrder) { kind in
+                            Toggle(kind.title, isOn: homeCarouselEnabled(kind))
+                        }
+                        .onMove(perform: moveHomeCarousels)
+                        .environment(\.editMode, .constant(.active))
+                    }
+                } header: {
+                    Text("Home")
+                } footer: {
+                    Text("Choose which carousels the Home page shows and drag to reorder them.")
                 }
                 Section {
                     Toggle("Show audio info", isOn: $showAudioInfo)

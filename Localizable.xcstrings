@@ -1,12 +1,8 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "-%@" : {
-
-    },
-    "%lld" : {
-
-    },
+    "-%@" : {},
+    "%lld" : {},
     "%lld dB" : {
       "localizations" : {
         "de" : {
@@ -269,9 +265,7 @@
         }
       }
     },
-    "%lld%%" : {
-
-    },
+    "%lld%%" : {},
     "1 day" : {
       "localizations" : {
         "de" : {
@@ -591,7 +585,20 @@
       }
     },
     "Albums from favorite artists" : {
-
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alben deiner Lieblingskünstler"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Альбомы любимых исполнителей"
+          }
+        }
+      }
     },
     "All" : {
       "localizations" : {
@@ -808,6 +815,22 @@
         }
       }
     },
+    "Choose which carousels the Home page shows and drag to reorder them." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wähle, welche Karussells die Startseite zeigt, und ziehe sie, um die Reihenfolge zu ändern."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Выберите, какие карусели показывать на главной странице, и перетащите их, чтобы изменить порядок."
+          }
+        }
+      }
+    },
     "Choosing Never deletes every cached song now. From then on, the upcoming track is cached only while it's in the queue." : {
       "localizations" : {
         "ru" : {
@@ -860,6 +883,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Добавьте ваш сервер Navidrome, чтобы начать"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verbinde dich mit deinem Navidrome-Server, um loszulegen"
           }
         }
       }
@@ -1368,6 +1397,22 @@
         }
       }
     },
+    "Home page content" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inhalt der Startseite"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Содержимое главной страницы"
+          }
+        }
+      }
+    },
     "https://music.example.com" : {
       "localizations" : {
         "de" : {
@@ -1405,7 +1450,20 @@
       }
     },
     "Latest releases" : {
-
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neueste Veröffentlichungen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Новые релизы"
+          }
+        }
+      }
     },
     "Library" : {
       "localizations" : {
@@ -1455,9 +1513,7 @@
         }
       }
     },
-    "LIVE" : {
-
-    },
+    "LIVE" : {},
     "Live albums" : {
       "localizations" : {
         "ru" : {
@@ -1992,10 +2048,36 @@
       }
     },
     "Random albums" : {
-
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zufällige Alben"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Случайные альбомы"
+          }
+        }
+      }
     },
     "Recently added" : {
-
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zuletzt hinzugefügt"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Недавно добавленные"
+          }
+        }
+      }
     },
     "Recently played" : {
       "localizations" : {
@@ -2350,7 +2432,20 @@
       }
     },
     "Top playlists" : {
-
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Top-Playlists"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Популярные плейлисты"
+          }
+        }
+      }
     },
     "Total size" : {
       "localizations" : {

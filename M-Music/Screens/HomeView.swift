@@ -123,6 +123,25 @@ struct HomeView: View {
     @ObservedObject private var libraryCacheStatus = LibraryCacheStatus.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
+    @AppStorage(HomeContentSettings.Keys.order) private var carouselOrderStorage = ""
+    @AppStorage(HomeContentSettings.Keys.disabled) private var disabledCarouselsStorage = ""
+
+    private var visibleCarousels: [HomeCarouselKind] {
+        HomeContentSettings.visible(order: carouselOrderStorage, disabled: disabledCarouselsStorage)
+    }
+
+    @ViewBuilder
+    private func carousel(for kind: HomeCarouselKind) -> some View {
+        switch kind {
+        case .randomAlbums: albumCarousel(kind.title, albums: sections.random)
+        case .latestReleases: albumCarousel(kind.title, albums: sections.latestReleases)
+        case .recentlyAdded: albumCarousel(kind.title, albums: sections.recentlyAdded)
+        case .recentlyPlayed: albumCarousel(kind.title, albums: recentlyPlayed)
+        case .favoriteArtistAlbums: albumCarousel(kind.title, albums: sections.favoriteArtists)
+        case .topPlaylists: playlistCarousel(kind.title, playlists: topPlaylists)
+        }
+    }
+
     var body: some View {
         NavigationStack(path: $navigation.paths[AppNavigation.homeTab]) {
             ScrollView {
@@ -139,12 +158,9 @@ struct HomeView: View {
                         .padding(.top, 120)
                 } else {
                     VStack(alignment: .leading, spacing: 24) {
-                        albumCarousel("Random albums", albums: sections.random)
-                        albumCarousel("Latest releases", albums: sections.latestReleases)
-                        albumCarousel("Recently added", albums: sections.recentlyAdded)
-                        albumCarousel("Recently played", albums: recentlyPlayed)
-                        albumCarousel("Albums from favorite artists", albums: sections.favoriteArtists)
-                        playlistCarousel("Top playlists", playlists: topPlaylists)
+                        ForEach(visibleCarousels) { kind in
+                            carousel(for: kind)
+                        }
                     }
                     .padding(.top, 8)
                     .padding(.bottom, 16)
@@ -267,11 +283,13 @@ struct HomeView: View {
     }
 
     private func loadStarredArtists() async {
+        guard visibleCarousels.contains(.favoriteArtistAlbums) else { return }
         guard let starred = try? await client.getStarred2() else { return }
         starredArtistIds = Set((starred.artist ?? []).map { $0.id.raw })
     }
 
     private func loadRecentlyPlayed() async {
+        guard visibleCarousels.contains(.recentlyPlayed) else { return }
         for await event in LibraryLoader.load(.recentAlbums(), shown: recentlyPlayed) {
             switch event {
             case .cached(let albums), .fresh(let albums):
@@ -285,6 +303,7 @@ struct HomeView: View {
     /// Subsonic exposes no play count for playlists, so a playlist's count is the sum of its
     /// songs' play counts, fetched per playlist.
     private func loadTopPlaylists() async {
+        guard visibleCarousels.contains(.topPlaylists) else { return }
         var playlists: [PlaylistSummary] = []
         for await event in LibraryLoader.load(.allPlaylists(), shown: nil) {
             switch event {
