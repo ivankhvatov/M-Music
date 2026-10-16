@@ -136,6 +136,8 @@ struct ArtistAlbumsView: View {
     /// album covers are in memory.
     @State private var imageReadiness = ImageReadiness()
     @State private var isLoadingQueue = false
+    /// The last tapped carousel card, drawn above its neighbors during the zoom transition.
+    @State private var raisedCarouselAlbum: FlexibleID?
     @State private var isStarred: Bool
 
     @ObservedObject private var downloads = DownloadStore.shared
@@ -352,12 +354,17 @@ struct ArtistAlbumsView: View {
                                 .frame(width: 160)
                         }
                         .buttonStyle(.plain)
+                        .simultaneousGesture(TapGesture().onEnded { raisedCarouselAlbum = album.id })
+                        .zIndex(raisedCarouselAlbum == album.id ? 1 : 0)
                         .disabled(!isAvailable(album))
                         .onAppear { warmAhead(after: album, in: albums) }
                     }
                 }
                 .padding(.horizontal, 16)
             }
+                // The zoom transition's source is a card inside this scroll view; with clipping on,
+                // the artwork is cut off at the scroll view's bounds while it flies in and out.
+                .scrollClipDisabled()
         }
     }
 

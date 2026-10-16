@@ -58,6 +58,8 @@ struct AlbumView: View {
     @State private var showingRemoveDownloadConfirmation = false
     @State private var showingRefreshDownloadedConfirmation = false
     @State private var isRefreshing = false
+    /// The last tapped related-album card, drawn above its neighbors during the zoom transition.
+    @State private var raisedCarouselAlbum: FlexibleID?
 
     /// `init` runs for every `AlbumView(...)` a parent constructs — including one per card in the
     /// related-album carousels, on every parent re-render — and these two go through `UIColor`'s
@@ -288,10 +290,15 @@ struct AlbumView: View {
                                 .frame(width: 160)
                         }
                         .buttonStyle(.plain)
+                        .simultaneousGesture(TapGesture().onEnded { raisedCarouselAlbum = relatedAlbum.id })
+                        .zIndex(raisedCarouselAlbum == relatedAlbum.id ? 1 : 0)
                     }
                 }
                 .padding(.horizontal, 16)
             }
+                // The zoom transition's source is a card inside this scroll view; with clipping on,
+                // the artwork is cut off at the scroll view's bounds while it flies in and out.
+                .scrollClipDisabled()
         }
     }
 

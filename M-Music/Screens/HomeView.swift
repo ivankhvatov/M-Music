@@ -48,6 +48,58 @@ private struct HomeAlbumSections: Equatable, Sendable {
     }
 }
 
+/// One album carousel. Each carousel owns its zoom namespace: the same album can appear in
+/// several carousels at once, and a namespace shared between them would make the album screen
+/// zoom out of whichever card is highest on screen instead of the one that was tapped.
+private struct HomeAlbumCarousel: View {
+    let title: LocalizedStringKey
+    let albums: [AlbumID3]
+
+    @Namespace private var zoomNamespace
+    /// The last tapped card, drawn above its neighbors so the zoom transition isn't covered by them.
+    @State private var raisedAlbum: FlexibleID?
+    @ObservedObject private var downloads = DownloadStore.shared
+    @ObservedObject private var networkMonitor = NetworkMonitor.shared
+
+    var body: some View {
+        if !albums.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(title)
+                    .font(.system(size: 20, weight: .bold))
+                    .padding(.horizontal, 16)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(alignment: .top, spacing: 16) {
+                        ForEach(albums) { album in
+                            NavigationLink(destination: LazyDestination { AlbumView(album: album, zoomNamespace: zoomNamespace) }) {
+                                AlbumCardView(album: album, zoomNamespace: zoomNamespace)
+                                    .frame(width: 160)
+                            }
+                            .buttonStyle(.plain)
+                            .simultaneousGesture(TapGesture().onEnded { raisedAlbum = album.id })
+                            .zIndex(raisedAlbum == album.id ? 1 : 0)
+                            .disabled(!(networkMonitor.isOnline || downloads.hasDownloadedSong(inAlbum: album.id.raw)))
+                            .onAppear { warmAhead(after: album) }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                }
+                // The zoom transition's source is a card inside this scroll view; with clipping on,
+                // the artwork is cut off at the scroll view's bounds while it flies in and out.
+                .scrollClipDisabled()
+            }
+        }
+    }
+
+    private func warmAhead(after album: AlbumID3) {
+        guard let index = albums.firstIndex(where: { $0.id == album.id }) else { return }
+        let requests = albums[(index + 1)...].prefix(ImageWarmer.scrollAheadCount)
+            .map { ArtworkRequest.albumCard($0.coverArt ?? $0.id.raw) }
+        guard !requests.isEmpty else { return }
+        Task { await ImageWarmer.shared.warmAhead(requests) }
+    }
+}
+
 struct HomeView: View {
     @Bindable private var navigation = AppNavigation.shared
 
@@ -59,6 +111,8 @@ struct HomeView: View {
     @State private var allAlbums: [AlbumID3] = []
     @State private var sections = HomeAlbumSections()
     @State private var starredArtistIds: Set<String> = []
+    /// The starred artists the favorite-artists carousel was last picked for.
+    @State private var favoritesBuiltFor: Set<String>?
     @State private var recentlyPlayed: [AlbumID3] = []
     @State private var topPlaylists: [PlaylistSummary] = []
     @State private var isLoading = false
@@ -111,21 +165,8 @@ struct HomeView: View {
 
     // MARK: Carousels
 
-    @ViewBuilder
     private func albumCarousel(_ title: LocalizedStringKey, albums: [AlbumID3]) -> some View {
-        if !albums.isEmpty {
-            carousel(title) {
-                ForEach(albums) { album in
-                    NavigationLink(destination: LazyDestination { AlbumView(album: album, zoomNamespace: zoomNamespace) }) {
-                        AlbumCardView(album: album, zoomNamespace: zoomNamespace)
-                            .frame(width: 160)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!(networkMonitor.isOnline || downloads.hasDownloadedSong(inAlbum: album.id.raw)))
-                    .onAppear { warmAhead(after: album, in: albums) }
-                }
-            }
-        }
+        HomeAlbumCarousel(title: title, albums: albums)
     }
 
     @ViewBuilder
@@ -158,6 +199,7 @@ struct HomeView: View {
                 }
                 .padding(.horizontal, 16)
             }
+            .scrollClipDisabled()
         }
     }
 
@@ -165,14 +207,6 @@ struct HomeView: View {
         guard !networkMonitor.isOnline else { return true }
         let songIds = libraryCacheStatus.songIds(forPlaylist: playlist.id.raw) ?? []
         return songIds.contains { downloads.isDownloaded($0) }
-    }
-
-    private func warmAhead(after album: AlbumID3, in ordered: [AlbumID3]) {
-        guard let index = ordered.firstIndex(where: { $0.id == album.id }) else { return }
-        let requests = ordered[(index + 1)...].prefix(ImageWarmer.scrollAheadCount)
-            .map { ArtworkRequest.albumCard($0.coverArt ?? $0.id.raw) }
-        guard !requests.isEmpty else { return }
-        Task { await ImageWarmer.shared.warmAhead(requests) }
     }
 
     // MARK: Loading
@@ -216,6 +250,7 @@ struct HomeView: View {
         let albums = allAlbums
         let starredIds = starredArtistIds
         let groupVersions = groupReleaseVersionsEnabled
+        defer { favoritesBuiltFor = starredIds }
         let built = await Task.detached(priority: .userInitiated) {
             HomeAlbumSections.make(from: albums, starredArtistIds: starredIds, groupVersions: groupVersions)
         }.value
@@ -224,7 +259,10 @@ struct HomeView: View {
         } else {
             sections.latestReleases = built.latestReleases
             sections.recentlyAdded = built.recentlyAdded
-            sections.favoriteArtists = built.favoriteArtists
+            // Random like "Random albums": only re-rolled when the starred artists change.
+            if starredIds != favoritesBuiltFor || sections.favoriteArtists.isEmpty {
+                sections.favoriteArtists = built.favoriteArtists
+            }
         }
     }
 
