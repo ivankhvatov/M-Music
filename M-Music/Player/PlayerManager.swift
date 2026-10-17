@@ -113,6 +113,12 @@ final class PlayerManager: ObservableObject {
     private let client: SubsonicClient
     private let engine = PlayerEngine()
 
+    /// Where the song is right now: the player's own clock, which a view drawn on every frame can
+    /// ask for, and the last reported position while that isn't there (nothing loaded yet, or a
+    /// seek under way — `PlayerEngine.exactTime` is `nil` then). `currentTime` itself changes only
+    /// twice a second.
+    var livePosition: TimeInterval { engine.exactTime ?? currentTime }
+
     /// Whether the song is advancing: playing as asked, and past loading, buffering, seeking and the
     /// other waits between asking and hearing it. `isPlaying` is the request, and runs ahead of the
     /// audio by however long those take — for anything following the song's position by carrying
