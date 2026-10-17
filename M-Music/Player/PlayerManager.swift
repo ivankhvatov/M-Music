@@ -652,11 +652,8 @@ final class PlayerManager: ObservableObject {
         guard hasLoadedItem, isPlaying else { return }
         // Where the song really is, not where it was at the last update: a pause is where it's
         // picked up from — the lyrics' dots too — including after a relaunch.
-        let exact = engine.exactTime
+        if let exact = engine.exactTime { currentTime = exact }
         engine.pause()
-        // After the pause, not before: whatever follows the position — the progress bar — then
-        // takes it as the place the song stopped at, and not as one more step of the song playing.
-        if let exact { currentTime = exact }
         updateNowPlayingPlaybackState()
         persistState()
     }
