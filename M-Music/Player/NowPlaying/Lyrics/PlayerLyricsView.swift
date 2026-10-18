@@ -299,6 +299,7 @@ private struct LyricsScrollView: View {
             let distance = timeline.distance(of: line.id, from: current)
             LyricLineView(
                 text: line.text,
+                width: layout.textWidth,
                 // Browsing, every line but the current one looks like the next, and none is
                 // blurred.
                 distance: browsing ? min(distance, 1) : min(distance, Self.maxStyledDistance),
@@ -314,6 +315,7 @@ private struct LyricsScrollView: View {
             .padding(.vertical, line.id == layoutIndex ? Self.currentLineExtraSpacing : 0)
             .padding(.bottom, LyricsLayout.rowSpacing)
             .padding(.trailing, unusedWidthWhenScaled)
+            .frame(maxWidth: .infinity, alignment: .leading)
             // Tapping a line plays from it. The whole row takes the tap, not just the glyphs; a
             // drag on it still scrolls. The model is told first, so it knows a tap is what moved
             // the position.
@@ -352,11 +354,18 @@ private struct LyricsScrollView: View {
 /// One sung line of synced lyrics. It's `Equatable` and its inputs are capped, so that a change of
 /// the current line only touches the few lines near it.
 ///
+/// The text is given the width it was measured in (`LyricsLayout.textWidth`) outright, rather than
+/// whatever its row is offered: the width a row is offered comes out a fraction of a point
+/// different (a third of a point, or two thirds) from one row, and one scroll position, to the
+/// next, and a line that fills its slot nearly to the edge went from two lines to three and back
+/// as it scrolled.
+///
 /// The fade is an `.opacity` on the whole line, not a translucent text colour: animating a text's
 /// own colour made SwiftUI re-rasterize its glyphs on the CPU every frame, which was most of what
 /// the lyrics cost; a layer's opacity is just composited.
 private struct LyricLineView: View, Equatable {
     let text: String
+    let width: CGFloat
     /// How many sung lines away from the current one this is (capped); 0 for the current line.
     let distance: Int
     /// Whether the lines further from the current one are blurred; off while the user scrolls.
@@ -367,7 +376,7 @@ private struct LyricLineView: View, Equatable {
         Text(text)
             .font(.system(size: 26, weight: .bold))
             .foregroundStyle(.white)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(width: width, alignment: .leading)
             .scaleEffect(distance == 0 ? scale : 1, anchor: .leading)
             .blur(radius: isBlurred ? Self.blur(forDistance: distance) : 0)
             .opacity(distance == 0 ? 1 : Self.opacity(forDistance: distance))

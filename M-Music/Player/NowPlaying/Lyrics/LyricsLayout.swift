@@ -38,6 +38,8 @@ struct LyricsLayout: Equatable, Sendable {
         }
     }
 
+    /// The width the lines' text was measured in, which it has to be drawn in too.
+    let textWidth: CGFloat
     /// The height of each line's text; 0 for a break, which has no row unless it's current.
     let textHeights: [CGFloat]
     /// Where each line's slot starts, and, last, the total.
@@ -62,6 +64,7 @@ struct LyricsLayout: Equatable, Sendable {
             if height > 0 { y += height + Self.rowSpacing }
         }
         offsets.append(y)
+        self.textWidth = textWidth
         self.textHeights = heights
         self.offsets = offsets
     }
