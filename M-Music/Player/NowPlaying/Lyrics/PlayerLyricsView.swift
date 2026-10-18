@@ -5,8 +5,9 @@ import SwiftUI
 /// top and bottom fades). Plain lyrics are scrollable text; synced lyrics are lines that follow
 /// the song.
 ///
-/// These views hold no state of their own and observe nothing but `LyricsModel`: what's current,
-/// when to scroll, what the dots do are all worked out by `LyricsConductor`, off the main actor.
+/// These views hold next to no state of their own and observe `LyricsModel`: what's current and
+/// when to scroll it works out from the player's position, on every frame the song plays (see
+/// `LyricsFollower`); the dots draw from that position themselves.
 struct PlayerLyricsView: View {
     /// Width of the screen this sits on — see `LyricsScrollView`.
     var width: CGFloat
@@ -174,6 +175,9 @@ private struct LyricsScrollView: View {
                 .opacity(model.revealsContent ? 1 : 0)
             }
             .scrollIndicators(.hidden)
+            .background {
+                if case .lines = kind { LyricsFollower() }
+            }
             // The lines rest below the fade, which is taller here than the queue's, so the
             // previous line shows through it, softly, above the current one. Text has the queue's.
             .contentMargins(.top, kind.isText ? PlayerQueueList.FadeMask.topFade : Self.topFade, for: .scrollContent)
@@ -210,9 +214,9 @@ private struct LyricsScrollView: View {
                 guard case .lines = kind else { return }
                 switch phase {
                 case .interacting, .decelerating:
-                    LyricsConductor.shared.send(.scrollPhase(isUser: true))
+                    model.scrollPhase(isUser: true)
                 case .idle:
-                    LyricsConductor.shared.send(.scrollPhase(isUser: false))
+                    model.scrollPhase(isUser: false)
                 case .tracking, .animating:
                     break
                 @unknown default:
@@ -227,7 +231,7 @@ private struct LyricsScrollView: View {
                     model.setWindow(layout.window(top: context.geometry.visibleRect.minY, bottom: context.geometry.visibleRect.maxY))
                 }
             }
-            // The conductor says when and where to scroll.
+            // The model says when and where to scroll.
             .onChange(of: model.scrollRequest) { _, request in
                 guard timeline.lines.indices.contains(request.target) else { return }
                 if let duration = request.duration {
@@ -311,25 +315,25 @@ private struct LyricsScrollView: View {
             .padding(.bottom, LyricsLayout.rowSpacing)
             .padding(.trailing, unusedWidthWhenScaled)
             // Tapping a line plays from it. The whole row takes the tap, not just the glyphs; a
-            // drag on it still scrolls. The conductor is told first, so it knows a tap is what
-            // moved the position.
+            // drag on it still scrolls. The model is told first, so it knows a tap is what moved
+            // the position.
             .contentShape(.rect)
             .onTapGesture {
-                LyricsConductor.shared.send(.tap(line.id, time: line.start))
+                model.tap(line.id)
                 PlayerManager.shared.seek(to: line.start)
             }
         } else {
-            let next = timeline.nextStart(after: line.id)
+            let plan = model.breakPlan?.index == line.id ? model.breakPlan : nil
             Group {
-                if model.dotlessBreak == line.id {
+                if let plan, plan.timings == nil {
                     // Their room, without them: the line after is about to move in.
                     Color.clear.frame(maxWidth: .infinity, minHeight: LyricBreakDots.height)
                 } else {
-                    // The dots fill up by the time they start to leave.
                     LyricBreakDots(
                         start: line.start,
-                        end: next.map { $0 - (LyricsTimeline.breakTimings(available: $0 - line.start)?.lead ?? 0) },
-                        ending: model.breakEnding?.index == line.id ? model.breakEnding : nil
+                        next: timeline.nextStart(after: line.id),
+                        index: line.id,
+                        timings: plan?.timings
                     )
                 }
             }
@@ -384,38 +388,49 @@ private struct LyricLineView: View, Equatable {
 /// from wherever the pulse has them to its largest size, and then shrink away to nothing as they
 /// fade out.
 ///
-/// Everything is a function of the song's position — the model's clock anchor, carried forward by
-/// the `TimelineView`'s date while it plays — so there's nothing to observe or keep: the dots stop
-/// when the song is paused, carry on from exactly where they were when it resumes, and are as they
-/// were when a restored song is opened again. The pulse and the fill are drawn at ~20 fps (they're
-/// slow), and only the grow and shrink at the full rate.
+/// Everything is a function of the song's position — asked of the player on every frame the song
+/// plays — and of the plan made for the break (`LyricsModel.BreakPlan`), so there's nothing to
+/// keep: the dots stop when the song is paused, carry on from exactly where they were when it
+/// resumes, and are as they were when a restored song is opened again. The pulse and the fill are
+/// drawn at ~20 fps (they're slow), and only the grow and shrink at the full rate.
 private struct LyricBreakDots: View {
     let start: TimeInterval
-    /// When the dots should be full; `nil` for a break at the very end, which fill over the rest
-    /// of the song.
-    let end: TimeInterval?
-    /// How the dots are leaving, once the break is over; `nil` while it's still going.
-    let ending: BreakEnding?
+    /// When the line after the break starts.
+    let next: TimeInterval?
+    /// The break's line.
+    let index: Int
+    /// How they leave, as planned; `nil` if there's no plan for this break (it's not the current
+    /// one), when it's the full sequence.
+    let timings: BreakTimings?
 
     private let model = LyricsModel.shared
+    private let player = PlayerManager.shared
+    /// Its changes — a seek landing while paused — redraw the dots when no frames do.
+    @ObservedObject private var playback = PlaybackProgress.shared
+    @State private var advancing = false
 
     private static let pulseMaxScale: CGFloat = 1.18
     /// One full swell and relaxation of the pulse.
     private static let pulsePeriod: TimeInterval = 3.2
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: ending == nil ? 1.0 / 20 : nil)) { context in
-            let date = context.date
-            let clock = model.clock
-            let songTime = clock.estimate(at: date)
-            // A break at the end runs for as long as the song has left; guard against a missing or
-            // backwards duration.
-            let finish = max(end ?? clock.duration, start + 1)
-            let fraction = min(max((songTime - start) / (finish - start), 0), 1)
-            let (scale, opacity) = scaleAndOpacity(at: date, songTime: songTime)
+        let tapEnding = model.tapEnding?.index == index ? model.tapEnding : nil
+        let schedule = AnimationTimelineSchedule(
+            minimumInterval: model.dotsEnding ? nil : 1.0 / 20,
+            paused: !advancing && tapEnding == nil
+        )
+        TimelineView(schedule) { context in
+            let position = player.livePosition
+            // The dots fill up by the time they start to leave.
+            let full = next.flatMap { LyricsTimeline.breakTimings(available: $0 - start) }
+            let finish = max((next ?? start) - (full?.lead ?? 0), start + 1)
+            let fraction = min(max((position - start) / (finish - start), 0), 1)
+            let (scale, opacity) = scaleAndOpacity(
+                at: context.date, position: position, timings: timings ?? full, tapEnding: tapEnding
+            )
             HStack(spacing: 9) {
-                ForEach(0..<3, id: \.self) { index in
-                    let fill = min(max(fraction * 3 - Double(index), 0), 1)
+                ForEach(0..<3, id: \.self) { dot in
+                    let fill = min(max(fraction * 3 - Double(dot), 0), 1)
                     Circle()
                         .fill(Color.white.opacity(0.28 + 0.72 * fill))
                         .frame(width: 11, height: 11)
@@ -425,6 +440,7 @@ private struct LyricBreakDots: View {
             .opacity(opacity)
         }
         .frame(maxWidth: .infinity, minHeight: Self.height, alignment: .leading)
+        .onReceive(player.isAdvancingPublisher) { advancing = $0 }
     }
 
     /// The room the dots take.
@@ -435,20 +451,36 @@ private struct LyricBreakDots: View {
         return 1 + (Self.pulseMaxScale - 1) * CGFloat(swell)
     }
 
-    private func scaleAndOpacity(at date: Date, songTime: TimeInterval) -> (CGFloat, Double) {
+    private func scaleAndOpacity(
+        at date: Date, position: TimeInterval, timings: BreakTimings?, tapEnding: LyricsModel.TapEnding?
+    ) -> (CGFloat, Double) {
         // The pulse starts when the break does, so the dots come in at their smallest.
-        guard let ending else { return (pulseScale(after: songTime - start), 1) }
-        // Leaving, they follow the song too — unless a tap sent them away.
-        let elapsed = ending.songTime.map { max(songTime - $0, 0) } ?? date.timeIntervalSince(ending.since)
-        let grow = ending.timings.grow
-        let leavingFrom = pulseScale(after: ending.pulseTime - start)
+        let elapsed: TimeInterval
+        let leaving: BreakTimings
+        let pulseTime: TimeInterval
+        if let tapEnding {
+            // Sent away by a tap, they leave in their own time, playing or not.
+            elapsed = max(date.timeIntervalSince(tapEnding.since), 0)
+            leaving = BreakTimings(grow: 0, exit: LyricsTimeline.breakExitDuration, scroll: 0)
+            pulseTime = tapEnding.pulseTime
+        } else if let timings, let next, position >= next - timings.lead {
+            // Leaving, they follow the song: they begin when it gets within `lead` of the next
+            // line, and stop when it does.
+            pulseTime = next - timings.lead
+            elapsed = position - pulseTime
+            leaving = timings
+        } else {
+            return (pulseScale(after: position - start), 1)
+        }
+        let grow = leaving.grow
+        let leavingFrom = pulseScale(after: pulseTime - start)
         if elapsed < grow {
             // Eased at both ends, from the pulse's size at the moment the break ended.
             let progress = elapsed / grow
             let eased = progress * progress * (3 - 2 * progress)
             return (leavingFrom + (Self.pulseMaxScale - leavingFrom) * CGFloat(eased), 1)
         }
-        let progress = min((elapsed - grow) / ending.timings.exit, 1)
+        let progress = min((elapsed - grow) / leaving.exit, 1)
         let eased = progress * progress
         // Shrinks from the largest size, which the grow has just reached — or, with no grow, from
         // wherever the pulse had the dots.
@@ -467,6 +499,37 @@ private struct LyricsTopFade: View {
             LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
                 .frame(height: height)
             Rectangle()
+        }
+    }
+}
+
+/// Keeps the synced lyrics in step with the song: while it plays, on every frame of a
+/// `TimelineView`, and otherwise whenever something might have moved it (a pause or a resume, a
+/// seek landing), it has `LyricsModel` follow the position the player reports (`livePosition`). It
+/// draws nothing.
+private struct LyricsFollower: View {
+    private let model = LyricsModel.shared
+    /// Observed for its changes only — a seek landing, or the exact position published at a pause.
+    @ObservedObject private var playback = PlaybackProgress.shared
+    /// Observed, for the one thing: the player being up. Docked, nothing shows the lyrics.
+    private let presentation = PlayerPresentation.shared
+    /// Whether the song is advancing (see `PlayerManager.isAdvancingPublisher`).
+    @State private var advancing = false
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !(advancing && !presentation.accessoryVisible))) { context in
+            Color.clear
+                .onChange(of: context.date) { model.follow() }
+        }
+        .allowsHitTesting(false)
+        .onAppear { model.follow() }
+        .onChange(of: playback.currentTime) { model.follow() }
+        .onReceive(PlayerManager.shared.isAdvancingPublisher) {
+            advancing = $0
+            // A turn later: the publisher speaks as the player's flags are about to change (a
+            // seek starting hasn't yet made the position what it's being sought to), and the
+            // position read then is the one the song is leaving.
+            DispatchQueue.main.async { model.follow() }
         }
     }
 }
