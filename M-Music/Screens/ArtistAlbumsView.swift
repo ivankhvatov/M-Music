@@ -135,6 +135,8 @@ struct ArtistAlbumsView: View {
     /// Keeps the content hidden on first open until the header picture and the first screenful of
     /// album covers are in memory.
     @State private var imageReadiness = ImageReadiness()
+    /// Where the user last was in each grid or carousel, to warm around on resume — see `onAppResume`.
+    @State private var lastSeen = LastSeenIndex()
     @State private var isLoadingQueue = false
     /// The last tapped carousel card, drawn above its neighbors during the zoom transition.
     @State private var raisedCarouselAlbum: FlexibleID?
@@ -197,6 +199,7 @@ struct ArtistAlbumsView: View {
                     .padding(.top, 120)
             }
         }
+        .onAppResume { rewarmAfterResume() }
         .toolbar {
             starButton
             sortButton
@@ -382,11 +385,30 @@ struct ArtistAlbumsView: View {
     /// scroll finds them ready.
     private func warmAhead(after album: AlbumID3, in ordered: [AlbumID3]) {
         guard let index = ordered.firstIndex(where: { $0.id == album.id }) else { return }
-        let requests = ordered[(index + 1)...].prefix(ImageWarmer.scrollAheadCount)
+        lastSeen.byKey[Self.source(for: ordered)] = index
+        warmAround(index, in: ordered)
+    }
+
+    /// Each grid or carousel is its own source, so they don't cancel each other's queue.
+    private static func source(for list: [AlbumID3]) -> String {
+        "artistAlbums.\(list.first?.id.raw ?? "")"
+    }
+
+    private func warmAround(_ index: Int, in ordered: [AlbumID3]) {
+        let requests = ImageWarmer.neighbors(of: index, in: ordered, count: ImageWarmer.scrollAheadCount)
             .map { ArtworkRequest.albumCard($0.coverArt ?? $0.id.raw) }
         guard !requests.isEmpty else { return }
-        // Each grid or carousel is its own source, so they don't cancel each other's queue.
-        Task { await ImageWarmer.shared.warmAhead(requests, source: "artistAlbums.\(ordered.first?.id.raw ?? "")") }
+        Task { await ImageWarmer.shared.warmAhead(requests, source: Self.source(for: ordered)) }
+    }
+
+    /// The app resumed: warm every grid or carousel again around where it was left.
+    private func rewarmAfterResume() {
+        let lists = separateReleaseTypesEnabled && hasMultipleReleaseTypes
+            ? releaseTypeGroups.map(\.albums)
+            : [sortedAlbums]
+        for list in lists {
+            warmAround(lastSeen.byKey[Self.source(for: list)] ?? 0, in: list)
+        }
     }
 
     /// Same expression `AlbumCardView` computes internally for its own dimming — this is the

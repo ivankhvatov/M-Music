@@ -60,6 +60,8 @@ struct AlbumView: View {
     @State private var isRefreshing = false
     /// The last tapped related-album card, drawn above its neighbors during the zoom transition.
     @State private var raisedCarouselAlbum: FlexibleID?
+    /// Where the user last was in each related-albums carousel, to warm around on resume.
+    @State private var lastSeen = LastSeenIndex()
 
     /// `init` runs for every `AlbumView(...)` a parent constructs — including one per card in the
     /// related-album carousels, on every parent re-render — and these two go through `UIColor`'s
@@ -88,6 +90,7 @@ struct AlbumView: View {
         }
         .preferredColorScheme(.dark)
         .tint(.primary)
+        .onAppResume { rewarmAfterResume() }
         .task {
             await loadSongs()
         }
@@ -292,6 +295,7 @@ struct AlbumView: View {
                         .buttonStyle(.plain)
                         .simultaneousGesture(TapGesture().onEnded { raisedCarouselAlbum = relatedAlbum.id })
                         .zIndex(raisedCarouselAlbum == relatedAlbum.id ? 1 : 0)
+                        .onAppear { warmAhead(after: relatedAlbum, in: albums) }
                     }
                 }
                 .padding(.horizontal, 16)
@@ -299,6 +303,32 @@ struct AlbumView: View {
                 // The zoom transition's source is a card inside this scroll view; with clipping on,
                 // the artwork is cut off at the scroll view's bounds while it flies in and out.
                 .scrollClipDisabled()
+        }
+    }
+
+    /// A related-albums card scrolled into view: warm the cards around it, so a fast swipe finds
+    /// them ready.
+    private func warmAhead(after album: AlbumID3, in albums: [AlbumID3]) {
+        guard let index = albums.firstIndex(where: { $0.id == album.id }) else { return }
+        lastSeen.byKey[Self.carouselSource(for: albums)] = index
+        warmAround(index, in: albums)
+    }
+
+    private static func carouselSource(for albums: [AlbumID3]) -> String {
+        "albumRelated.\(albums.first?.id.raw ?? "")"
+    }
+
+    private func warmAround(_ index: Int, in albums: [AlbumID3]) {
+        let requests = ImageWarmer.neighbors(of: index, in: albums, count: ImageWarmer.scrollAheadCount)
+            .map { ArtworkRequest.albumCard($0.coverArt ?? $0.id.raw) }
+        guard !requests.isEmpty else { return }
+        Task { await ImageWarmer.shared.warmAhead(requests, source: Self.carouselSource(for: albums)) }
+    }
+
+    /// The app resumed: warm both carousels again around where they were left.
+    private func rewarmAfterResume() {
+        for albums in [otherVersions, moreByArtist] where !albums.isEmpty {
+            warmAround(lastSeen.byKey[Self.carouselSource(for: albums)] ?? 0, in: albums)
         }
     }
 

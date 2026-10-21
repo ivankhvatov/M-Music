@@ -120,6 +120,8 @@ struct SongsListView: View {
     @State private var imageReadiness = ImageReadiness()
     /// Where each displayed row is, for warming the ones below a row that scrolls into view.
     @State private var rowPositions = RowPositions()
+    /// Where the user last was, to warm around on resume — see `onAppResume`.
+    @State private var lastSeen = LastSeenIndex()
     /// Sorts/filters off the main actor — see `OffMainDeriver`.
     @State private var deriver = OffMainDeriver()
 
@@ -170,6 +172,7 @@ struct SongsListView: View {
             }
         }
         .refreshable { await performRefresh(force: true) }
+        .onAppResume { warmAround(lastSeen.index) }
         .navigationTitle("Songs")
         .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
         .toolbar {
@@ -303,7 +306,14 @@ struct SongsListView: View {
     private func warmAhead(after track: Child) {
         guard let index = rowPositions.position(of: track.id.raw),
               displayedSongs.indices.contains(index), displayedSongs[index].id == track.id else { return }
-        let requests = artworkRequests(for: displayedSongs[(index + 1)...].prefix(ImageWarmer.scrollAheadCount))
+        lastSeen.index = index
+        warmAround(index)
+    }
+
+    /// Warms the images around `index` — also after the app resumes, where the user left off.
+    private func warmAround(_ index: Int) {
+        guard displayedSongs.indices.contains(index) else { return }
+        let requests = artworkRequests(for: ArraySlice(ImageWarmer.neighbors(of: index, in: displayedSongs, count: ImageWarmer.scrollAheadCount)))
         guard !requests.isEmpty else { return }
         Task { await ImageWarmer.shared.warmAhead(requests, source: "songs") }
     }

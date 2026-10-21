@@ -41,6 +41,22 @@ actor ImageWarmer {
     /// How many rows below the one that just scrolled into view are warmed (see `warmAhead`).
     /// More than a Home carousel holds (20), so the first card to appear queues the whole carousel.
     static let scrollAheadCount = 40
+    /// Up to `count` items around `index`, nearest first, alternating after and before it. A
+    /// scrolling list or carousel needs the items on *both* sides warm: the ones ahead of the
+    /// scroll, and — after the cache was emptied while the app was away — the ones it scrolls back
+    /// to, which a look-ahead that only looks forward leaves cold.
+    static func neighbors<Element>(of index: Int, in items: [Element], count: Int) -> [Element] {
+        guard items.indices.contains(index) else { return [] }
+        var result: [Element] = []
+        var step = 1
+        while result.count < count, index + step < items.count || index - step >= 0 {
+            if index + step < items.count { result.append(items[index + step]) }
+            if result.count < count, index - step >= 0 { result.append(items[index - step]) }
+            step += 1
+        }
+        return result
+    }
+
     /// How many images a look-ahead worker decodes at the same time.
     static let aheadParallelism = 2
     /// How many of a destination's own items (an artist's albums, a playlist's songs) are warmed.

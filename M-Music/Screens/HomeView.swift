@@ -48,6 +48,12 @@ struct HomeAlbumSections: Equatable, Sendable {
     }
 }
 
+/// Where in a carousel the user last was: the index of the card that most recently appeared. Not
+/// observable on purpose — writing it must not re-render anything.
+private final class CarouselPosition {
+    var index = 0
+}
+
 /// One album carousel. Each carousel owns its zoom namespace: the same album can appear in
 /// several carousels at once, and a namespace shared between them would make the album screen
 /// zoom out of whichever card is highest on screen instead of the one that was tapped.
@@ -62,6 +68,8 @@ private struct HomeAlbumCarousel: View {
     @State private var raisedAlbum: FlexibleID?
     @ObservedObject private var downloads = DownloadStore.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var position = CarouselPosition()
 
     var body: some View {
         if !albums.isEmpty {
@@ -90,12 +98,23 @@ private struct HomeAlbumCarousel: View {
                 // the artwork is cut off at the scroll view's bounds while it flies in and out.
                 .scrollClipDisabled()
             }
+            // The app was away, and iOS may have emptied the image cache meanwhile — including the
+            // cards the carousel was scrolled away from, which then show placeholders when it's
+            // scrolled back. Warm the carousel again around where it was left, nearest cards first.
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { warmAround(position.index) }
+            }
         }
     }
 
     private func warmAhead(after album: AlbumID3) {
         guard let index = albums.firstIndex(where: { $0.id == album.id }) else { return }
-        let requests = albums[(index + 1)...].prefix(ImageWarmer.scrollAheadCount)
+        position.index = index
+        warmAround(index)
+    }
+
+    private func warmAround(_ index: Int) {
+        let requests = ImageWarmer.neighbors(of: index, in: albums, count: ImageWarmer.scrollAheadCount)
             .map { ArtworkRequest.albumCard($0.coverArt ?? $0.id.raw) }
         guard !requests.isEmpty else { return }
         Task { await ImageWarmer.shared.warmAhead(requests, source: source) }
@@ -217,6 +236,9 @@ struct HomeView: View {
     @State private var pendingParts: Set<HomeLoadingPolicy.Part> = []
     /// When the expensive requests last ran — see `HomeLoadingPolicy.shouldRunExpensiveRefresh`.
     @State private var lastExpensiveRefresh: Date?
+    @Environment(\.scenePhase) private var scenePhase
+    /// Where the Top playlists carousel was last scrolled to — see `HomeAlbumCarousel`.
+    @State private var playlistPosition = CarouselPosition()
     @AppStorage("library.groupReleaseVersions") private var groupReleaseVersionsEnabled = false
 
     @AppStorage(HomeContentSettings.Keys.order) private var carouselOrderStorage = ""
@@ -284,6 +306,9 @@ struct HomeView: View {
             .onChange(of: imageReadiness.isReady) { _, isReady in
                 if isReady { warmAllCarousels() }
             }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { warmPlaylists(around: playlistPosition.index) }
+            }
         }
     }
 
@@ -310,7 +335,13 @@ struct HomeView: View {
     /// them ready.
     private func warmAhead(after playlist: PlaylistSummary, in playlists: [PlaylistSummary]) {
         guard let index = playlists.firstIndex(where: { $0.id == playlist.id }) else { return }
-        let requests = playlists[(index + 1)...].prefix(ImageWarmer.scrollAheadCount)
+        playlistPosition.index = index
+        warmPlaylists(around: index)
+    }
+
+    private func warmPlaylists(around index: Int) {
+        let playlists = topPlaylists
+        let requests = ImageWarmer.neighbors(of: index, in: playlists, count: ImageWarmer.scrollAheadCount)
             .map { ArtworkRequest.playlistCard($0.coverArt ?? $0.id.raw) }
         guard !requests.isEmpty else { return }
         Task { await ImageWarmer.shared.warmAhead(requests, source: "home.topPlaylists") }

@@ -82,6 +82,8 @@ struct PlayerQueueList: View, Equatable {
     /// moving the wrong track.
     @State private var dragOriginCurrentIndex: Int?
     @State private var dragSnapshotQueueCount: Int?
+    /// Where in the list the user last was, to warm the thumbnails around on resume.
+    @State private var lastSeen = LastSeenIndex()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -116,6 +118,10 @@ struct PlayerQueueList: View, Equatable {
                     .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
                         frames.rows[entry.id] = frame
                     }
+                    .onAppear {
+                        lastSeen.index = index
+                        warmThumbnails(around: index)
+                    }
                     .listRowInsets(rowInsets)
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
@@ -128,6 +134,7 @@ struct PlayerQueueList: View, Equatable {
                     }
                 }
             }
+            .onAppResume { warmThumbnails(around: lastSeen.index) }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .scrollIndicators(.hidden)
@@ -536,6 +543,17 @@ struct PlayerQueueList: View, Equatable {
             seen[track.id.raw] = occurrence + 1
             return Entry(id: "\(track.id.raw)#\(occurrence)", track: track)
         }
+    }
+
+    /// Warms the thumbnails of the rows around `index` — a row appeared, or the app resumed — so
+    /// scrolling the queue finds them decoded.
+    private func warmThumbnails(around index: Int) {
+        let rows = displayedUpcoming
+        let scale = displayScale
+        let requests = ImageWarmer.neighbors(of: index, in: rows, count: ImageWarmer.scrollAheadCount)
+            .map { ArtworkRequest.songRow(ArtworkRequest.artworkId(of: $0.track), scale: scale) }
+        guard !requests.isEmpty else { return }
+        Task { await ImageWarmer.shared.warmAhead(requests, source: "nowPlaying.queue") }
     }
 
     /// `draftOrder` while a drag is in progress, so rows visually reorder in real time;

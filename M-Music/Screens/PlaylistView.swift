@@ -37,6 +37,8 @@ struct PlaylistView: View {
     @State private var artworkURL: URL?
 
     @State private var showingRemoveDownloadConfirmation = false
+    /// Where the user last was in the song list, to warm around on resume — see `onAppResume`.
+    @State private var lastSeen = LastSeenIndex()
 
     /// Point size artwork renders at in a song row — mirrors `SongsListView.rowArtworkSize`.
     private let rowArtworkSize: CGFloat = ImageCache.RowArtwork.song
@@ -64,6 +66,7 @@ struct PlaylistView: View {
             }
         }
         .preferredColorScheme(.dark)
+        .onAppResume { warmAround(lastSeen.index, in: visibleSongs) }
         .task {
             await loadSongs()
         }
@@ -192,6 +195,10 @@ struct PlaylistView: View {
             }
             .buttonStyle(.plain)
             .disabled(!(networkMonitor.isOnline || downloads.isDownloaded(track.id.raw)))
+            .onAppear {
+                lastSeen.index = index
+                warmAround(index, in: visibleSongs)
+            }
             .listRowSeparator(.hidden)
             .listRowBackground(darkenedBackgroundColor)
             .listRowInsets(EdgeInsets(
@@ -214,6 +221,15 @@ struct PlaylistView: View {
                 }
             }
         }
+    }
+
+    /// Warms the song thumbnails around `index` — a song row appeared, or the app resumed.
+    private func warmAround(_ index: Int, in songs: [Child]) {
+        let scale = displayScale
+        let requests = ImageWarmer.neighbors(of: index, in: songs, count: ImageWarmer.scrollAheadCount)
+            .map { ArtworkRequest.songRow(ArtworkRequest.artworkId(of: $0), scale: scale) }
+        guard !requests.isEmpty else { return }
+        Task { await ImageWarmer.shared.warmAhead(requests, source: "playlist.songs") }
     }
 
     /// See `AlbumView.trackSeparator`'s doc comment for why this is a fixed-height rule rather

@@ -99,6 +99,8 @@ struct AlbumsListView: View {
     @State private var imageReadiness = ImageReadiness()
     /// Where each displayed row is, for warming the ones below a row that scrolls into view.
     @State private var rowPositions = RowPositions()
+    /// Where the user last was, to warm around on resume — see `onAppResume`.
+    @State private var lastSeen = LastSeenIndex()
     @State private var albums: [AlbumID3] = []
     /// Cached result of filtering/sorting `albums`, recomputed only by `recompute()`
     /// (see its call sites) rather than on every `body` evaluation — `body` reads it 2-3 times a
@@ -161,6 +163,7 @@ struct AlbumsListView: View {
             }
         }
         .refreshable { await performRefresh(force: true) }
+        .onAppResume { warmAround(lastSeen.index) }
         .navigationTitle("Albums")
         .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
         .toolbar {
@@ -293,7 +296,14 @@ struct AlbumsListView: View {
     private func warmAhead(after album: AlbumID3) {
         guard let index = rowPositions.position(of: album.id.raw),
               displayedAlbums.indices.contains(index), displayedAlbums[index].id == album.id else { return }
-        let requests = artworkRequests(for: displayedAlbums[(index + 1)...].prefix(ImageWarmer.scrollAheadCount))
+        lastSeen.index = index
+        warmAround(index)
+    }
+
+    /// Warms the images around `index` — also after the app resumes, where the user left off.
+    private func warmAround(_ index: Int) {
+        guard displayedAlbums.indices.contains(index) else { return }
+        let requests = artworkRequests(for: ArraySlice(ImageWarmer.neighbors(of: index, in: displayedAlbums, count: ImageWarmer.scrollAheadCount)))
         guard !requests.isEmpty else { return }
         Task { await ImageWarmer.shared.warmAhead(requests, source: "albums") }
     }

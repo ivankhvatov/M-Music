@@ -100,3 +100,30 @@ struct BoundedConcurrencyTests {
         #expect(results.isEmpty)
     }
 }
+
+struct NeighborsTests {
+    @Test func theNearestItemsOnBothSidesComeFirst() {
+        let items = Array(0..<10)
+        #expect(ImageWarmer.neighbors(of: 5, in: items, count: 4) == [6, 4, 7, 3])
+    }
+
+    @Test func atTheEndOnlyTheItemsBeforeAreLeft() {
+        let items = Array(0..<6)
+        #expect(ImageWarmer.neighbors(of: 5, in: items, count: 10) == [4, 3, 2, 1, 0])
+    }
+
+    @Test func atTheStartOnlyTheItemsAfterAreLeft() {
+        let items = Array(0..<6)
+        #expect(ImageWarmer.neighbors(of: 0, in: items, count: 3) == [1, 2, 3])
+    }
+
+    @Test func aWholeCarouselFitsInTheDefaultCount() {
+        let items = Array(0..<20)
+        #expect(Set(ImageWarmer.neighbors(of: 19, in: items, count: ImageWarmer.scrollAheadCount)) == Set(0..<19))
+    }
+
+    @Test func anOutOfRangeIndexOrAnEmptyListGivesNothing() {
+        #expect(ImageWarmer.neighbors(of: 3, in: [Int](), count: 5).isEmpty)
+        #expect(ImageWarmer.neighbors(of: 9, in: [1, 2], count: 5).isEmpty)
+    }
+}

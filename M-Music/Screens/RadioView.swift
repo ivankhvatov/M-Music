@@ -18,6 +18,8 @@ struct RadioView: View {
 
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
     @Environment(\.displayScale) private var displayScale
+    /// Where the user last was in the station list, to warm around on resume — see `onAppResume`.
+    @State private var lastSeen = LastSeenIndex()
 
     private let client = SubsonicClient.shared
     @Bindable private var navigation = AppNavigation.shared
@@ -46,6 +48,7 @@ struct RadioView: View {
                     stationsList
                 }
             }
+            .onAppResume { warmAround(lastSeen.index) }
             .navigationTitle("Radio")
             .appRouteDestinations()
             .toolbar {
@@ -75,9 +78,27 @@ struct RadioView: View {
                 .buttonStyle(.plain)
                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                 .disabled(!networkMonitor.isOnline)
+                .onAppear {
+                    guard let index = stations.firstIndex(where: { $0.id == station.id }) else { return }
+                    lastSeen.index = index
+                    warmAround(index)
+                }
             }
         }
         .listStyle(.plain)
+    }
+
+    /// Warms the artwork of the stations around `index` — a row appeared, or the app resumed.
+    private func warmAround(_ index: Int) {
+        let size = Int(64 * displayScale)
+        let requests = ImageWarmer.neighbors(of: index, in: stations, count: ImageWarmer.scrollAheadCount)
+            .compactMap { station in
+                station.coverArt.map {
+                    ArtworkRequest(id: $0, size: size, maxPixelSize: ImageCache.standardMaxPixelSize)
+                }
+            }
+        guard !requests.isEmpty else { return }
+        Task { await ImageWarmer.shared.warmAhead(requests, source: "radio") }
     }
 
     private var disconnectedContent: some View {

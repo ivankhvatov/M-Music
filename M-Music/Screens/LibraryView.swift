@@ -17,6 +17,8 @@ struct LibraryView: View {
     @State private var imageReadiness = ImageReadiness()
     /// Where each album is in the grid, for warming the ones below a card that scrolls into view.
     @State private var rowPositions = RowPositions()
+    /// Where the user last was, to warm around on resume — see `onAppResume`.
+    @State private var lastSeen = LastSeenIndex()
 
     @ObservedObject private var downloads = DownloadStore.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
@@ -31,6 +33,7 @@ struct LibraryView: View {
                     }
                 }
                 .environment(\.colorScheme, colorScheme)
+                .onAppResume { warmAround(lastSeen.index) }
                 .navigationTitle("Library")
                 .appRouteDestinations()
                 .toolbar {
@@ -172,7 +175,14 @@ struct LibraryView: View {
     private func warmAhead(after album: AlbumID3) {
         guard let index = rowPositions.position(of: album.id.raw),
               recentAlbums.indices.contains(index), recentAlbums[index].id == album.id else { return }
-        let requests = artworkRequests(for: recentAlbums[(index + 1)...].prefix(ImageWarmer.scrollAheadCount))
+        lastSeen.index = index
+        warmAround(index)
+    }
+
+    /// Warms the images around `index` — also after the app resumes, where the user left off.
+    private func warmAround(_ index: Int) {
+        guard recentAlbums.indices.contains(index) else { return }
+        let requests = artworkRequests(for: ArraySlice(ImageWarmer.neighbors(of: index, in: recentAlbums, count: ImageWarmer.scrollAheadCount)))
         guard !requests.isEmpty else { return }
         Task { await ImageWarmer.shared.warmAhead(requests, source: "library") }
     }
