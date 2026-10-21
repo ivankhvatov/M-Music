@@ -190,7 +190,7 @@ struct ArtistsListView: View {
               displayedArtists.indices.contains(index), displayedArtists[index].id == artist.id else { return }
         let requests = artworkRequests(for: displayedArtists[(index + 1)...].prefix(ImageWarmer.scrollAheadCount))
         guard !requests.isEmpty else { return }
-        Task { await ImageWarmer.shared.warmAhead(requests) }
+        Task { await ImageWarmer.shared.warmAhead(requests, source: "artists") }
     }
 
     /// Tells `ImageWarmer` what this screen shows first, so its artwork is decoded ahead of the

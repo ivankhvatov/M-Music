@@ -113,7 +113,7 @@ final class ImageCache: @unchecked Sendable {
         permanentDirectory: URL? = ImageCache.defaultPermanentDirectory(),
         session: URLSession = .shared
     ) {
-        memory.totalCostLimit = 120 * 1024 * 1024
+        memory.totalCostLimit = 200 * 1024 * 1024
         self.regularDirectory = regularDirectory
         self.permanentDirectory = permanentDirectory
         self.session = session
@@ -393,7 +393,25 @@ final class ImageCache: @unchecked Sendable {
 
     // MARK: - Stable cache key
 
+    /// Memoized per URL: building the key parses the URL, filters and sorts its query items and
+    /// rebuilds the string, and it's asked for on every cell build and re-render on the main thread
+    /// (`CachedAsyncImage.init`) and for every request a warm-up looks at. The URLs are the same
+    /// few objects over and over (`SubsonicClient.cachedCoverArtURL` memoizes them too).
     func stableKey(for url: URL) -> String {
+        let nsURL = url as NSURL
+        if let known = stableKeys.object(forKey: nsURL) { return known as String }
+        let key = computeStableKey(for: url)
+        stableKeys.setObject(key as NSString, forKey: nsURL)
+        return key
+    }
+
+    private let stableKeys: NSCache<NSURL, NSString> = {
+        let cache = NSCache<NSURL, NSString>()
+        cache.countLimit = 4000
+        return cache
+    }()
+
+    func computeStableKey(for url: URL) -> String {
         guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
             return url.absoluteString
         }

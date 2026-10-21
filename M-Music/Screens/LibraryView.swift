@@ -174,7 +174,7 @@ struct LibraryView: View {
               recentAlbums.indices.contains(index), recentAlbums[index].id == album.id else { return }
         let requests = artworkRequests(for: recentAlbums[(index + 1)...].prefix(ImageWarmer.scrollAheadCount))
         guard !requests.isEmpty else { return }
-        Task { await ImageWarmer.shared.warmAhead(requests) }
+        Task { await ImageWarmer.shared.warmAhead(requests, source: "library") }
     }
 
     /// Downloads each album's original cover to disk (no decoding) so opening it from here

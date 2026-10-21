@@ -385,7 +385,8 @@ struct ArtistAlbumsView: View {
         let requests = ordered[(index + 1)...].prefix(ImageWarmer.scrollAheadCount)
             .map { ArtworkRequest.albumCard($0.coverArt ?? $0.id.raw) }
         guard !requests.isEmpty else { return }
-        Task { await ImageWarmer.shared.warmAhead(requests) }
+        // Each grid or carousel is its own source, so they don't cancel each other's queue.
+        Task { await ImageWarmer.shared.warmAhead(requests, source: "artistAlbums.\(ordered.first?.id.raw ?? "")") }
     }
 
     /// Same expression `AlbumCardView` computes internally for its own dimming — this is the

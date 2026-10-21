@@ -434,3 +434,96 @@ struct ImageReadinessTests {
         #expect(readiness.isReady)
     }
 }
+
+extension ImageCacheTests {
+    @Test func theMemoizedKeyIsTheComputedKey() {
+        let cache = Directories().makeCache()
+        let url = coverURL("al-20", size: 192)
+        let computed = cache.computeStableKey(for: url)
+        #expect(cache.stableKey(for: url) == computed)
+        #expect(cache.stableKey(for: url) == computed)            // from the memo
+        #expect(cache.stableKey(for: coverURL("al-20", size: 192, token: "other")) == computed)
+        #expect(cache.stableKey(for: coverURL("al-20")) != computed)
+    }
+}
+
+/// An extension of `ImageCacheTests` for the same reason as the preload tests above: the stub's
+/// request counter is shared.
+extension ImageCacheTests {
+    private func warmer(_ dirs: Directories) -> (ImageWarmer, ImageCache) {
+        let cache = dirs.makeCache()
+        let suite = "WarmAheadTests-\(UUID().uuidString)"
+        return (ImageWarmer(defaults: UserDefaults(suiteName: suite)!, cache: cache, scale: { 3 }), cache)
+    }
+
+    private func waitUntil(_ condition: () -> Bool) async -> Bool {
+        for _ in 0..<200 {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return condition()
+    }
+
+    private func target(_ id: String) -> ImageWarmer.Target {
+        .init(url: coverURL(id), maxPixelSize: ImageCache.standardMaxPixelSize)
+    }
+
+    @Test func eachSourceFinishesItsOwnQueue() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        for id in ["a1", "a2", "b1", "b2"] { await dirs.makeCache().load(coverURL(id)) }
+        let (warmer, cache) = warmer(dirs)
+
+        await warmer.warmAhead(targets: [target("a1"), target("a2")], source: "A")
+        await warmer.warmAhead(targets: [target("b1"), target("b2")], source: "B")
+        let done = await waitUntil {
+            ["a1", "a2", "b1", "b2"].allSatisfy { cache.image(for: coverURL($0)) != nil }
+        }
+        #expect(done)
+    }
+
+    @Test func aNewCallFromTheSameSourceKeepsTheWorkerGoing() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        for id in ["c1", "c2", "c3", "c4"] { await dirs.makeCache().load(coverURL(id)) }
+        let (warmer, cache) = warmer(dirs)
+
+        await warmer.warmAhead(targets: [target("c1"), target("c2"), target("c3")], source: "S")
+        // The next card appears: the queue moves on, nothing already under way is cancelled.
+        await warmer.warmAhead(targets: [target("c2"), target("c3"), target("c4")], source: "S")
+        let done = await waitUntil {
+            ["c2", "c3", "c4"].allSatisfy { cache.image(for: coverURL($0)) != nil }
+        }
+        #expect(done)
+    }
+
+    @Test func aSourceCanBeWarmedAgainAfterItsQueueRanDry() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        for id in ["d1", "d2"] { await dirs.makeCache().load(coverURL(id)) }
+        let (warmer, cache) = warmer(dirs)
+
+        await warmer.warmAhead(targets: [target("d1")], source: "S")
+        #expect(await waitUntil { cache.image(for: coverURL("d1")) != nil })
+        await warmer.warmAhead(targets: [target("d2")], source: "S")
+        #expect(await waitUntil { cache.image(for: coverURL("d2")) != nil })
+    }
+}
+
+@MainActor
+struct DownloadProgressStoreTests {
+    @Test func progressTicksDoNotPublishFromTheDownloadStore() {
+        var downloadStorePublishes = 0
+        var progressPublishes = 0
+        let a = DownloadStore.shared.objectWillChange.sink { downloadStorePublishes += 1 }
+        let b = DownloadProgressStore.shared.objectWillChange.sink { progressPublishes += 1 }
+        defer { DownloadProgressStore.shared.set([:]); a.cancel(); b.cancel() }
+
+        DownloadProgressStore.shared.set(["song": 0.25])
+        DownloadProgressStore.shared.set(["song": 0.5])
+        DownloadProgressStore.shared.set(["song": 0.5])           // unchanged: not published
+
+        #expect(downloadStorePublishes == 0)
+        #expect(progressPublishes == 2)
+    }
+}

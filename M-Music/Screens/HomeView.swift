@@ -54,6 +54,8 @@ struct HomeAlbumSections: Equatable, Sendable {
 private struct HomeAlbumCarousel: View {
     let title: LocalizedStringKey
     let albums: [AlbumID3]
+    /// Names this carousel's look-ahead queue in `ImageWarmer`, so carousels don't cancel each other's.
+    let source: String
 
     @Namespace private var zoomNamespace
     /// The last tapped card, drawn above its neighbors so the zoom transition isn't covered by them.
@@ -96,7 +98,36 @@ private struct HomeAlbumCarousel: View {
         let requests = albums[(index + 1)...].prefix(ImageWarmer.scrollAheadCount)
             .map { ArtworkRequest.albumCard($0.coverArt ?? $0.id.raw) }
         guard !requests.isEmpty else { return }
-        Task { await ImageWarmer.shared.warmAhead(requests) }
+        Task { await ImageWarmer.shared.warmAhead(requests, source: source) }
+    }
+}
+
+/// A Top playlists card with its link. It owns the observation of what decides whether the
+/// playlist is available offline, so a download or library-cache change re-renders the cards
+/// rather than all of Home.
+private struct HomePlaylistCell: View {
+    let playlist: PlaylistSummary
+    let zoomNamespace: Namespace.ID
+    let onAppear: () -> Void
+
+    @ObservedObject private var downloads = DownloadStore.shared
+    @ObservedObject private var libraryCacheStatus = LibraryCacheStatus.shared
+    @ObservedObject private var networkMonitor = NetworkMonitor.shared
+
+    var body: some View {
+        NavigationLink(destination: LazyDestination { PlaylistView(playlist: playlist, zoomNamespace: zoomNamespace) }) {
+            PlaylistCardView(playlist: playlist, zoomNamespace: zoomNamespace)
+                .frame(width: 160)
+        }
+        .buttonStyle(.plain)
+        .disabled(!isAvailable)
+        .onAppear(perform: onAppear)
+    }
+
+    private var isAvailable: Bool {
+        guard !networkMonitor.isOnline else { return true }
+        let songIds = libraryCacheStatus.songIds(forPlaylist: playlist.id.raw) ?? []
+        return songIds.contains { downloads.isDownloaded($0) }
     }
 }
 
@@ -188,10 +219,6 @@ struct HomeView: View {
     @State private var lastExpensiveRefresh: Date?
     @AppStorage("library.groupReleaseVersions") private var groupReleaseVersionsEnabled = false
 
-    @ObservedObject private var downloads = DownloadStore.shared
-    @ObservedObject private var libraryCacheStatus = LibraryCacheStatus.shared
-    @ObservedObject private var networkMonitor = NetworkMonitor.shared
-
     @AppStorage(HomeContentSettings.Keys.order) private var carouselOrderStorage = ""
     @AppStorage(HomeContentSettings.Keys.disabled) private var disabledCarouselsStorage = ""
 
@@ -214,7 +241,7 @@ struct HomeView: View {
     private func carousel(for kind: HomeCarouselKind) -> some View {
         switch kind {
         case .topPlaylists: playlistCarousel(kind.title, playlists: topPlaylists)
-        default: albumCarousel(kind.title, albums: albums(for: kind))
+        default: albumCarousel(kind, albums: albums(for: kind))
         }
     }
 
@@ -254,13 +281,16 @@ struct HomeView: View {
             .onChange(of: groupReleaseVersionsEnabled) {
                 rebuildSections(reshuffle: true)
             }
+            .onChange(of: imageReadiness.isReady) { _, isReady in
+                if isReady { warmAllCarousels() }
+            }
         }
     }
 
     // MARK: Carousels
 
-    private func albumCarousel(_ title: LocalizedStringKey, albums: [AlbumID3]) -> some View {
-        HomeAlbumCarousel(title: title, albums: albums)
+    private func albumCarousel(_ kind: HomeCarouselKind, albums: [AlbumID3]) -> some View {
+        HomeAlbumCarousel(title: kind.title, albums: albums, source: "home.\(kind.rawValue)")
     }
 
     @ViewBuilder
@@ -268,13 +298,9 @@ struct HomeView: View {
         if !playlists.isEmpty {
             carousel(title) {
                 ForEach(playlists) { playlist in
-                    NavigationLink(destination: LazyDestination { PlaylistView(playlist: playlist, zoomNamespace: zoomNamespace) }) {
-                        PlaylistCardView(playlist: playlist, zoomNamespace: zoomNamespace)
-                            .frame(width: 160)
+                    HomePlaylistCell(playlist: playlist, zoomNamespace: zoomNamespace) {
+                        warmAhead(after: playlist, in: playlists)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(!isAvailable(playlist))
-                    .onAppear { warmAhead(after: playlist, in: playlists) }
                 }
             }
         }
@@ -287,7 +313,7 @@ struct HomeView: View {
         let requests = playlists[(index + 1)...].prefix(ImageWarmer.scrollAheadCount)
             .map { ArtworkRequest.playlistCard($0.coverArt ?? $0.id.raw) }
         guard !requests.isEmpty else { return }
-        Task { await ImageWarmer.shared.warmAhead(requests) }
+        Task { await ImageWarmer.shared.warmAhead(requests, source: "home.topPlaylists") }
     }
 
     /// Same carousel presentation as `ArtistAlbumsView.albumCarousel`.
@@ -306,12 +332,6 @@ struct HomeView: View {
             }
             .scrollClipDisabled()
         }
-    }
-
-    private func isAvailable(_ playlist: PlaylistSummary) -> Bool {
-        guard !networkMonitor.isOnline else { return true }
-        let songIds = libraryCacheStatus.songIds(forPlaylist: playlist.id.raw) ?? []
-        return songIds.contains { downloads.isDownloaded($0) }
     }
 
     // MARK: First frame
@@ -333,10 +353,22 @@ struct HomeView: View {
         imageReadiness.require(firstScreenRequests)
     }
 
+    /// Warms the first cards of *every* carousel, not just the ones on the first screen the gate
+    /// waits for, so scrolling down to a lower carousel finds its cards already decoded.
+    private func warmAllCarousels() {
+        let requests = HomeLoadingPolicy.firstScreenRequests(
+            carousels: visibleCarousels, albums: { albums(for: $0) }, playlists: topPlaylists,
+            perCarousel: 12, limit: 12 * HomeCarouselKind.allCases.count
+        )
+        guard !requests.isEmpty else { return }
+        Task { await ImageWarmer.shared.warmAhead(requests, source: "home") }
+    }
+
     /// Tells `ImageWarmer` which covers Home opens with, to decode them ahead of the next resume.
     /// The random and favorite-artist picks change on every load, so only the carousels that stay
     /// the same are remembered.
     private func rememberFirstScreen() {
+        if imageReadiness.isReady { warmAllCarousels() }
         let stable = visibleCarousels.filter { $0 != .randomAlbums && $0 != .favoriteArtistAlbums }
         let requests = HomeLoadingPolicy.firstScreenRequests(
             carousels: stable, albums: { albums(for: $0) }, playlists: topPlaylists,

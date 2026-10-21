@@ -305,7 +305,7 @@ struct SongsListView: View {
               displayedSongs.indices.contains(index), displayedSongs[index].id == track.id else { return }
         let requests = artworkRequests(for: displayedSongs[(index + 1)...].prefix(ImageWarmer.scrollAheadCount))
         guard !requests.isEmpty else { return }
-        Task { await ImageWarmer.shared.warmAhead(requests) }
+        Task { await ImageWarmer.shared.warmAhead(requests, source: "songs") }
     }
 
     /// Tells `ImageWarmer` what this screen shows first, so its artwork is decoded ahead of the
@@ -661,6 +661,8 @@ private struct SongTrailingActions: View {
     private let player = PlayerManager.shared
     @ObservedObject private var starStore = StarStore.shared
     @ObservedObject private var downloads = DownloadStore.shared
+    /// The only thing that re-renders on a download's progress ticks — see `DownloadProgressStore`.
+    @ObservedObject private var downloadProgress = DownloadProgressStore.shared
 
     var body: some View {
         DownloadStatusIndicator(state: downloads.state(for: track.id.raw))

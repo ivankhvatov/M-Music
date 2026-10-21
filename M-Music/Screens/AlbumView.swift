@@ -739,6 +739,8 @@ private struct TrackRow: View {
     private let player = PlayerManager.shared
     @ObservedObject private var starStore = StarStore.shared
     @ObservedObject private var downloads = DownloadStore.shared
+    /// The only thing that re-renders on a download's progress ticks — see `DownloadProgressStore`.
+    @ObservedObject private var downloadProgress = DownloadProgressStore.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
     var body: some View {

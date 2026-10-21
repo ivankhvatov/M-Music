@@ -295,7 +295,7 @@ struct AlbumsListView: View {
               displayedAlbums.indices.contains(index), displayedAlbums[index].id == album.id else { return }
         let requests = artworkRequests(for: displayedAlbums[(index + 1)...].prefix(ImageWarmer.scrollAheadCount))
         guard !requests.isEmpty else { return }
-        Task { await ImageWarmer.shared.warmAhead(requests) }
+        Task { await ImageWarmer.shared.warmAhead(requests, source: "albums") }
     }
 
     /// Tells `ImageWarmer` what this screen shows first, so its artwork is decoded ahead of the
