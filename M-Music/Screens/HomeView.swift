@@ -13,11 +13,24 @@ struct HomeAlbumSections: Equatable, Sendable {
     var latestReleases: [AlbumID3] = []
     var recentlyAdded: [AlbumID3] = []
     var favoriteArtists: [AlbumID3] = []
+    var genres: [GenreCarousel] = []
+
+    /// One "Random genres" carousel.
+    struct GenreCarousel: Equatable, Sendable, Identifiable {
+        let name: String
+        let albums: [AlbumID3]
+        var id: String { name.lowercased() }
+    }
 
     static let carouselLimit = 20
+    /// A genre needs at least this many albums to get a carousel of its own.
+    static let minimumGenreAlbums = 3
 
     /// `starredArtistIds` empty means "none starred (or not loaded yet)".
-    static func make(from albums: [AlbumID3], starredArtistIds: Set<String>, groupVersions: Bool) -> HomeAlbumSections {
+    static func make(
+        from albums: [AlbumID3], starredArtistIds: Set<String>, groupVersions: Bool, genreCount: Int = 0,
+        preferredGenres: [String] = []
+    ) -> HomeAlbumSections {
         let limit = carouselLimit
         // "Group release versions" applies to every carousel except "Recently added", where a
         // newly added edition is exactly what the user wants to see.
@@ -39,11 +52,28 @@ struct HomeAlbumSections: Equatable, Sendable {
             .prefix(limit)
         let favorites = candidates.filter { $0.artistId.map { starredArtistIds.contains($0.raw) } ?? false }
             .shuffled().prefix(limit)
+        // Each genre is picked at most once, so no two genre carousels share one.
+        var byGenre: [String: (name: String, albums: [AlbumID3])] = [:]
+        if genreCount > 0 {
+            for album in candidates {
+                guard let name = album.genre?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { continue }
+                byGenre[name.lowercased(), default: (name, [])].albums.append(album)
+            }
+        }
+        // The genres picked earlier stay while they're still fresh and still have enough albums;
+        // the rest of the slots are filled at random.
+        let eligible = byGenre.filter { $0.value.albums.count >= minimumGenreAlbums }
+        let kept = preferredGenres.compactMap { eligible[$0.lowercased()] }.prefix(max(genreCount, 0))
+        let keptKeys = Set(kept.map { $0.name.lowercased() })
+        let fresh = eligible.filter { !keptKeys.contains($0.key) }.values.shuffled()
+        let genres = (Array(kept) + fresh).prefix(max(genreCount, 0))
+            .map { GenreCarousel(name: $0.name, albums: Array($0.albums.shuffled().prefix(limit))) }
         return HomeAlbumSections(
             random: Array(candidates.shuffled().prefix(limit)),
             latestReleases: Array(latest),
             recentlyAdded: Array(added),
-            favoriteArtists: Array(favorites)
+            favoriteArtists: Array(favorites),
+            genres: genres
         )
     }
 }
@@ -58,7 +88,7 @@ private final class CarouselPosition {
 /// several carousels at once, and a namespace shared between them would make the album screen
 /// zoom out of whichever card is highest on screen instead of the one that was tapped.
 private struct HomeAlbumCarousel: View {
-    let title: LocalizedStringKey
+    let title: Text
     let albums: [AlbumID3]
     /// Names this carousel's look-ahead queue in `ImageWarmer`, so carousels don't cancel each other's.
     let source: String
@@ -74,7 +104,7 @@ private struct HomeAlbumCarousel: View {
     var body: some View {
         if !albums.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
-                Text(title)
+                title
                     .font(.system(size: 20, weight: .bold))
                     .padding(.horizontal, 16)
 
@@ -161,6 +191,7 @@ enum HomeLoadingPolicy {
         carousels: [HomeCarouselKind],
         albums: (HomeCarouselKind) -> [AlbumID3],
         playlists: [PlaylistSummary],
+        genreCarousels: [[AlbumID3]] = [],
         perCarousel: Int = cardsPerCarousel,
         limit: Int = ImageWarmer.gateLimit
     ) -> [ArtworkRequest] {
@@ -168,6 +199,10 @@ enum HomeLoadingPolicy {
         for kind in carousels {
             if kind == .topPlaylists {
                 requests += playlists.prefix(perCarousel).map { .playlistCard($0.coverArt ?? $0.id.raw) }
+            } else if kind == .randomGenres {
+                for genre in genreCarousels {
+                    requests += genre.prefix(perCarousel).map { .albumCard($0.coverArt ?? $0.id.raw) }
+                }
             } else {
                 requests += albums(kind).prefix(perCarousel).map { .albumCard($0.coverArt ?? $0.id.raw) }
             }
@@ -202,7 +237,7 @@ enum HomeLoadingPolicy {
         var parts: Set<Part> = []
         for kind in carousels {
             switch kind {
-            case .randomAlbums, .latestReleases, .recentlyAdded, .favoriteArtistAlbums: parts.insert(.library)
+            case .randomAlbums, .latestReleases, .recentlyAdded, .favoriteArtistAlbums, .randomGenres: parts.insert(.library)
             case .recentlyPlayed: parts.insert(.recentlyPlayed)
             case .topPlaylists: parts.insert(.topPlaylists)
             }
@@ -224,6 +259,8 @@ struct HomeView: View {
     @State private var starredArtistIds: Set<String> = []
     /// The starred artists the favorite-artists carousel was last picked for.
     @State private var favoritesBuiltFor: Set<String>?
+    /// The genre count the genre carousels were last picked for.
+    @State private var genresBuiltFor: Int?
     @State private var recentlyPlayed: [AlbumID3] = []
     @State private var topPlaylists: [PlaylistSummary] = []
     @State private var isLoading = false
@@ -243,9 +280,12 @@ struct HomeView: View {
 
     @AppStorage(HomeContentSettings.Keys.order) private var carouselOrderStorage = ""
     @AppStorage(HomeContentSettings.Keys.disabled) private var disabledCarouselsStorage = ""
+    @AppStorage(HomeContentSettings.Keys.randomGenreCount) private var randomGenreCount = 0
 
     private var visibleCarousels: [HomeCarouselKind] {
-        HomeContentSettings.visible(order: carouselOrderStorage, disabled: disabledCarouselsStorage)
+        HomeContentSettings.visible(
+            order: carouselOrderStorage, disabled: disabledCarouselsStorage, randomGenreCount: randomGenreCount
+        )
     }
 
     private func albums(for kind: HomeCarouselKind) -> [AlbumID3] {
@@ -255,7 +295,7 @@ struct HomeView: View {
         case .recentlyAdded: sections.recentlyAdded
         case .recentlyPlayed: recentlyPlayed
         case .favoriteArtistAlbums: sections.favoriteArtists
-        case .topPlaylists: []
+        case .topPlaylists, .randomGenres: []
         }
     }
 
@@ -263,6 +303,10 @@ struct HomeView: View {
     private func carousel(for kind: HomeCarouselKind) -> some View {
         switch kind {
         case .topPlaylists: playlistCarousel(kind.title, playlists: topPlaylists)
+        case .randomGenres:
+            ForEach(sections.genres.prefix(randomGenreCount)) { genre in
+                HomeAlbumCarousel(title: Text(verbatim: genre.name), albums: genre.albums, source: "home.genre.\(genre.id)")
+            }
         default: albumCarousel(kind, albums: albums(for: kind))
         }
     }
@@ -303,6 +347,9 @@ struct HomeView: View {
             .onChange(of: groupReleaseVersionsEnabled) {
                 rebuildSections(reshuffle: true)
             }
+            .onChange(of: randomGenreCount) {
+                rebuildSections(reshuffle: false)
+            }
             .onChange(of: imageReadiness.isReady) { _, isReady in
                 if isReady { warmAllCarousels() }
             }
@@ -315,7 +362,7 @@ struct HomeView: View {
     // MARK: Carousels
 
     private func albumCarousel(_ kind: HomeCarouselKind, albums: [AlbumID3]) -> some View {
-        HomeAlbumCarousel(title: kind.title, albums: albums, source: "home.\(kind.rawValue)")
+        HomeAlbumCarousel(title: Text(kind.title), albums: albums, source: "home.\(kind.rawValue)")
     }
 
     @ViewBuilder
@@ -371,7 +418,8 @@ struct HomeView: View {
         HomeLoadingPolicy.firstScreenRequests(
             carousels: visibleCarousels,
             albums: { albums(for: $0) },
-            playlists: topPlaylists
+            playlists: topPlaylists,
+            genreCarousels: sections.genres.map(\.albums)
         )
     }
 
@@ -389,7 +437,8 @@ struct HomeView: View {
     private func warmAllCarousels() {
         let requests = HomeLoadingPolicy.firstScreenRequests(
             carousels: visibleCarousels, albums: { albums(for: $0) }, playlists: topPlaylists,
-            perCarousel: 12, limit: 12 * HomeCarouselKind.allCases.count
+            genreCarousels: sections.genres.map(\.albums),
+            perCarousel: 12, limit: 12 * (HomeCarouselKind.allCases.count + HomeContentSettings.randomGenreRange.upperBound)
         )
         guard !requests.isEmpty else { return }
         Task { await ImageWarmer.shared.warmAhead(requests, source: "home") }
@@ -400,7 +449,7 @@ struct HomeView: View {
     /// the same are remembered.
     private func rememberFirstScreen() {
         if imageReadiness.isReady { warmAllCarousels() }
-        let stable = visibleCarousels.filter { $0 != .randomAlbums && $0 != .favoriteArtistAlbums }
+        let stable = visibleCarousels.filter { $0 != .randomAlbums && $0 != .favoriteArtistAlbums && $0 != .randomGenres }
         let requests = HomeLoadingPolicy.firstScreenRequests(
             carousels: stable, albums: { albums(for: $0) }, playlists: topPlaylists,
             perCarousel: 4, limit: ImageWarmer.manifestLimit
@@ -468,8 +517,13 @@ struct HomeView: View {
         let albums = allAlbums
         let starredIds = starredArtistIds
         let groupVersions = groupReleaseVersionsEnabled
+        let genreCount = visibleCarousels.contains(.randomGenres) ? randomGenreCount : 0
+        let pinnedGenres = HomeGenrePicks.pinned()
         deriver.run({
-            HomeAlbumSections.make(from: albums, starredArtistIds: starredIds, groupVersions: groupVersions)
+            HomeAlbumSections.make(
+                from: albums, starredArtistIds: starredIds, groupVersions: groupVersions, genreCount: genreCount,
+                preferredGenres: pinnedGenres
+            )
         }, apply: { built in
             var next = sections
             if reshuffle || sections.random.isEmpty {
@@ -482,7 +536,15 @@ struct HomeView: View {
                     next.favoriteArtists = built.favoriteArtists
                 }
             }
+            // The genres are kept for 24 hours (`HomeGenrePicks`, which also survives relaunches);
+            // they're re-picked only when that has passed or the count changes, so popping back
+            // from an album doesn't swap them.
+            if genreCount != genresBuiltFor || (genreCount > 0 && (sections.genres.isEmpty || pinnedGenres.isEmpty)) {
+                next.genres = built.genres
+            }
+            if genreCount > 0 { HomeGenrePicks.remember(next.genres.map(\.name)) }
             favoritesBuiltFor = starredIds
+            genresBuiltFor = genreCount
             // Only a change re-renders the carousels.
             if next != sections { sections = next }
             // Whichever build is applied last settles the library part, so a build superseded

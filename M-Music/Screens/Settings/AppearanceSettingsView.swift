@@ -19,6 +19,7 @@ struct AppearanceSettingsView: View {
 
     @AppStorage(HomeContentSettings.Keys.order) private var homeOrderStorage = ""
     @AppStorage(HomeContentSettings.Keys.disabled) private var homeDisabledStorage = ""
+    @AppStorage(HomeContentSettings.Keys.randomGenreCount) private var randomGenreCount = 0
     @State private var isHomeContentExpanded = false
 
     private var homeOrder: [HomeCarouselKind] { HomeContentSettings.order(from: homeOrderStorage) }
@@ -80,7 +81,20 @@ struct AppearanceSettingsView: View {
                     DisclosureGroup("Home page content", isExpanded: $isHomeContentExpanded) {
                         // Edit mode on just these rows shows the drag handles for reordering.
                         ForEach(homeOrder) { kind in
-                            Toggle(kind.title, isOn: homeCarouselEnabled(kind))
+                            if kind == .randomGenres {
+                                // A number of carousels rather than an on/off switch.
+                                Stepper(value: $randomGenreCount, in: HomeContentSettings.randomGenreRange) {
+                                    HStack {
+                                        Text(kind.title)
+                                        Spacer()
+                                        Text("\(randomGenreCount)")
+                                            .foregroundStyle(.secondary)
+                                            .monospacedDigit()
+                                    }
+                                }
+                            } else {
+                                Toggle(kind.title, isOn: homeCarouselEnabled(kind))
+                            }
                         }
                         .onMove(perform: moveHomeCarousels)
                         .environment(\.editMode, .constant(.active))
@@ -88,7 +102,7 @@ struct AppearanceSettingsView: View {
                 } header: {
                     Text("Home")
                 } footer: {
-                    Text("Choose which carousels the Home page shows and drag to reorder them.")
+                    Text("Choose which carousels the Home page shows and drag to reorder them. Random genres shows the chosen number of carousels, each with albums of a different random genre.")
                 }
                 Section {
                     Toggle("Show audio info", isOn: $showAudioInfo)

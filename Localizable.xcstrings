@@ -815,22 +815,6 @@
         }
       }
     },
-    "Choose which carousels the Home page shows and drag to reorder them." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wähle, welche Karussells die Startseite zeigt, und ziehe sie, um die Reihenfolge zu ändern."
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Выберите, какие карусели показывать на главной странице, и перетащите их, чтобы изменить порядок."
-          }
-        }
-      }
-    },
     "Choosing Never deletes every cached song now. From then on, the upcoming track is cached only while it's in the queue." : {
       "localizations" : {
         "ru" : {
@@ -2735,6 +2719,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Год"
+          }
+        }
+      }
+    },
+    "Random genres" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zufällige Genres"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Случайные жанры"
+          }
+        }
+      }
+    },
+    "Choose which carousels the Home page shows and drag to reorder them. Random genres shows the chosen number of carousels, each with albums of a different random genre." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wähle, welche Karussells die Startseite zeigt, und ziehe sie, um die Reihenfolge zu ändern. „Zufällige Genres“ zeigt die gewählte Anzahl an Karussells, jeweils mit Alben eines anderen zufälligen Genres."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Выберите, какие карусели показывать на главной странице, и перетащите их, чтобы изменить порядок. «Случайные жанры» показывает выбранное количество каруселей, в каждой — альбомы другого случайного жанра."
           }
         }
       }
