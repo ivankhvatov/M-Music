@@ -348,7 +348,7 @@ private struct ArtistRow: View {
 
     var body: some View {
         HStack(spacing: 16) {
-            CachedAsyncImage(url: artworkURL, maxPixelSize: ImageCache.avatarMaxPixelSize, loadDelay: .milliseconds(50)) { image in
+            CachedAsyncImage(url: artworkURL, maxPixelSize: ImageCache.avatarMaxPixelSize) { image in
                 image
                     .resizable()
                     .aspectRatio(contentMode: .fill)

@@ -80,7 +80,7 @@ struct AlbumCardView: View {
                 // Same URL AlbumView requests (original size, no `size` param), so opening this
                 // album reuses the image straight from ImageCache instead of triggering a second
                 // fetch — see CachedAsyncImage.
-                CachedAsyncImage(url: artworkURL, maxPixelSize: ImageCache.cardMaxPixelSize, loadDelay: .milliseconds(50)) { image in
+                CachedAsyncImage(url: artworkURL, maxPixelSize: ImageCache.cardMaxPixelSize) { image in
                     image
                         .resizable()
                         .aspectRatio(contentMode: .fit)

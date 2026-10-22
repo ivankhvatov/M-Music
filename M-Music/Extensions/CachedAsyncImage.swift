@@ -61,6 +61,27 @@ final class ImageCache: @unchecked Sendable {
     }
 
     private let memory = NSCache<NSString, UIImage>()
+
+    /// The images used most recently, held by strong reference *as well as* in `memory`.
+    ///
+    /// `NSCache` gives its contents up whenever the system likes — and in practice a backgrounded
+    /// app comes back with it empty. Everything on screen kept its own copy, but whatever had just
+    /// scrolled away (the start of a carousel scrolled to its end) was gone, and scrolling back to
+    /// it showed a placeholder for each card until it was read from disk and decoded again. These
+    /// references can't be given up behind the app's back: they're dropped only on an actual
+    /// memory warning, and otherwise by least-recent use once they exceed `pinnedCostLimit`.
+    private var pinned: [NSString: PinnedImage] = [:]
+    private var pinnedCost = 0
+    private var pinnedTick = 0
+    private let pinLock = NSLock()
+    private let pinnedCostLimit: Int
+    private var memoryWarningObserver: NSObjectProtocol?
+
+    private struct PinnedImage {
+        let image: UIImage
+        let cost: Int
+        var tick: Int
+    }
     private let fileManager = FileManager.default
     private let session: URLSession
     /// The regular cache (`Caches/`) — see the type's doc comment.
@@ -111,12 +132,29 @@ final class ImageCache: @unchecked Sendable {
     init(
         regularDirectory: URL? = ImageCache.defaultRegularDirectory(),
         permanentDirectory: URL? = ImageCache.defaultPermanentDirectory(),
-        session: URLSession = .shared
+        session: URLSession = .shared,
+        pinnedCostLimit: Int = 96 * 1024 * 1024
     ) {
+        self.pinnedCostLimit = pinnedCostLimit
         memory.totalCostLimit = 200 * 1024 * 1024
         self.regularDirectory = regularDirectory
         self.permanentDirectory = permanentDirectory
         self.session = session
+        memoryWarningObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: nil
+        ) { [weak self] _ in self?.dropPinned() }
+    }
+
+    deinit {
+        if let memoryWarningObserver { NotificationCenter.default.removeObserver(memoryWarningObserver) }
+    }
+
+    /// How many bytes of images are pinned right now, for tests.
+    var pinnedCostForTesting: Int { pinLock.withLock { pinnedCost } }
+
+    /// What the system does to the `NSCache` when it sees fit, for tests: the pinned images stay.
+    func simulateSystemPurge() {
+        memory.removeAllObjects()
     }
 
     private static func defaultRegularDirectory() -> URL? {
@@ -140,19 +178,81 @@ final class ImageCache: @unchecked Sendable {
     /// in-memory hit can render on the very first frame. Doesn't consult disk; use `load(_:)`
     /// for the full memory → disk → network lookup.
     func image(for url: URL, maxPixelSize: Int? = ImageCache.standardMaxPixelSize) -> UIImage? {
-        memory.object(forKey: memoryKey(stableKey(for: url), maxPixelSize: maxPixelSize))
+        cachedImage(forKey: memoryKey(stableKey(for: url), maxPixelSize: maxPixelSize))
+    }
+
+    /// `memory`, then the pinned images (an image the `NSCache` has given up on comes back from
+    /// there and goes into it again). A hit also counts as a use for the pinned images' recency.
+    private func cachedImage(forKey key: NSString) -> UIImage? {
+        if let image = memory.object(forKey: key) {
+            pin(image, forKey: key)
+            return image
+        }
+        let pinnedImage: UIImage? = pinLock.withLock {
+            guard var entry = pinned[key] else { return nil }
+            pinnedTick += 1
+            entry.tick = pinnedTick
+            pinned[key] = entry
+            return entry.image
+        }
+        if let pinnedImage {
+            memory.setObject(pinnedImage, forKey: key, cost: Self.cost(of: pinnedImage))
+        }
+        return pinnedImage
+    }
+
+    private static func cost(of image: UIImage) -> Int {
+        image.cgImage.map { $0.bytesPerRow * $0.height } ?? 0
+    }
+
+    private func pin(_ image: UIImage, forKey key: NSString) {
+        let cost = Self.cost(of: image)
+        pinLock.withLock {
+            pinnedTick += 1
+            if let old = pinned[key] { pinnedCost -= old.cost }
+            pinned[key] = PinnedImage(image: image, cost: cost, tick: pinnedTick)
+            pinnedCost += cost
+            guard pinnedCost > pinnedCostLimit else { return }
+            // Least recently used first, down to 80% of the limit so this doesn't run on every pin.
+            let target = pinnedCostLimit / 5 * 4
+            for (key, entry) in pinned.sorted(by: { $0.value.tick < $1.value.tick }) {
+                guard pinnedCost > target else { break }
+                pinned[key] = nil
+                pinnedCost -= entry.cost
+            }
+        }
+    }
+
+    private func unpin(_ key: NSString) {
+        pinLock.withLock {
+            if let old = pinned.removeValue(forKey: key) { pinnedCost -= old.cost }
+        }
+    }
+
+    private func dropPinned() {
+        pinLock.withLock {
+            pinned.removeAll()
+            pinnedCost = 0
+        }
     }
 
     /// Returns the cached image for `url` if present (memory, then the regular cache), otherwise
     /// loads it from the permanent cache or the server — see `originalData(for:key:)` — and
     /// caches the result.
+    ///
+    /// An `.interactive` load (a view that is showing, or about to show, the image — the default)
+    /// takes its turn at the decode gate ahead of every `.background` one (a warm-up). Without
+    /// that, a screen's own cells waited behind however many warm-up decodes were already queued —
+    /// after a resume, one look-ahead per carousel on Home.
     @discardableResult
-    func load(_ url: URL, maxPixelSize: Int? = ImageCache.standardMaxPixelSize) async -> UIImage? {
+    func load(
+        _ url: URL, maxPixelSize: Int? = ImageCache.standardMaxPixelSize, priority: LoadPriority = .interactive
+    ) async -> UIImage? {
         let key = stableKey(for: url)
         let memKey = memoryKey(key, maxPixelSize: maxPixelSize)
-        if let cached = memory.object(forKey: memKey) { return cached }
+        if let cached = cachedImage(forKey: memKey) { return cached }
 
-        let entry = joinOrStart(memKey: memKey, key: key, url: url, maxPixelSize: maxPixelSize)
+        let (entry, entryKey) = joinOrStart(memKey: memKey, key: key, url: url, maxPixelSize: maxPixelSize, priority: priority)
         let departure = Departure()
         // A caller that goes away — a row scrolled off screen, a popped screen — stops waiting;
         // once nobody is left waiting the load itself is cancelled, so a fast scroll doesn't leave
@@ -160,56 +260,80 @@ final class ImageCache: @unchecked Sendable {
         let result = await withTaskCancellationHandler {
             await entry.task.value
         } onCancel: {
-            leave(entry, memKey: memKey as String, departure)
+            leave(entry, key: entryKey, departure)
         }
-        leave(entry, memKey: memKey as String, departure)
+        leave(entry, key: entryKey, departure)
         return result
     }
+
+    enum LoadPriority { case interactive, background }
 
     /// Returns the in-flight load for `memKey` — counting the caller among its waiters — or
     /// creates and registers a new one, atomically, so two concurrent callers for the same key
     /// can't both decide to start their own fetch. Synchronous (unlike `load` itself) so the
     /// locking stays a plain, provably-safe critical section instead of straddling `async`
     /// suspension points.
-    private func joinOrStart(memKey: NSString, key: String, url: URL, maxPixelSize: Int?) -> InFlight {
-        lock.withLock {
-            if let existing = inFlightTasks[memKey as String] {
+    ///
+    /// Interactive and background loads of the same image are separate entries (the background
+    /// one is registered under a suffixed key): an interactive caller never joins a background
+    /// load that may be sitting far back in the decode queue, and starts its own at the front.
+    /// Whichever decodes first stores the image; the other then finds it in memory and skips the
+    /// decode. A background caller does join an interactive load, which is at least as fast.
+    private func joinOrStart(
+        memKey: NSString, key: String, url: URL, maxPixelSize: Int?, priority: LoadPriority
+    ) -> (InFlight, String) {
+        let interactiveKey = memKey as String
+        let backgroundKey = interactiveKey + "|bg"
+        return lock.withLock {
+            if let existing = inFlightTasks[interactiveKey] {
                 existing.waiters += 1
-                return existing
+                return (existing, interactiveKey)
+            }
+            if priority == .background, let existing = inFlightTasks[backgroundKey] {
+                existing.waiters += 1
+                return (existing, backgroundKey)
             }
             let task = Task<UIImage?, Never> { [weak self] in
-                await self?.fetch(url, key: key, memKey: memKey, maxPixelSize: maxPixelSize)
+                await self?.fetch(url, key: key, memKey: memKey, maxPixelSize: maxPixelSize, priority: priority)
             }
             let entry = InFlight(task: task)
-            inFlightTasks[memKey as String] = entry
-            return entry
+            let entryKey = priority == .interactive ? interactiveKey : backgroundKey
+            inFlightTasks[entryKey] = entry
+            return (entry, entryKey)
         }
     }
 
     /// A caller stops waiting for `entry`. The last one out unregisters it (so a later request
     /// starts fresh rather than joining a cancelled load) and cancels it.
-    private func leave(_ entry: InFlight, memKey: String, _ departure: Departure) {
+    private func leave(_ entry: InFlight, key: String, _ departure: Departure) {
         guard departure.claim() else { return }
         let isLast = lock.withLock { () -> Bool in
             entry.waiters -= 1
             guard entry.waiters == 0 else { return false }
-            if inFlightTasks[memKey] === entry { inFlightTasks[memKey] = nil }
+            if inFlightTasks[key] === entry { inFlightTasks[key] = nil }
             return true
         }
         if isLast { entry.task.cancel() }
     }
 
-    private func fetch(_ url: URL, key: String, memKey: NSString, maxPixelSize: Int?) async -> UIImage? {
+    private func fetch(
+        _ url: URL, key: String, memKey: NSString, maxPixelSize: Int?, priority: LoadPriority
+    ) async -> UIImage? {
         // Network and disk reads happen outside the decode gate: they aren't CPU-bound, and
         // gating them would just let a slow download hold up unrelated decodes.
         guard let data = await originalData(for: url, key: key) else { return nil }
 
-        await decodeGate.acquire()
-        // Cancelled while waiting its turn (nobody wants this image any more): give the slot
-        // straight back, with no decode and no cooldown.
+        await decodeGate.acquire(priority: priority == .interactive ? .high : .low)
+        // Cancelled while waiting its turn (nobody wants this image any more), or already decoded
+        // by the other class of load meanwhile: give the slot straight back, with no decode and
+        // no cooldown.
         if Task.isCancelled {
             await decodeGate.release()
             return nil
+        }
+        if let existing = cachedImage(forKey: memKey) {
+            await decodeGate.release()
+            return existing
         }
         let image = decodedImage(from: data, maxPixelSize: maxPixelSize)
         if let image { store(image, forKey: memKey) }
@@ -279,22 +403,27 @@ final class ImageCache: @unchecked Sendable {
     /// waiting on these images (it still goes through the decode gate, one at a time).
     /// Returns whether the image is in memory afterwards.
     @discardableResult
-    func preload(_ request: ArtworkRequest, allowNetwork: Bool = false, paced: Bool = true) async -> Bool {
+    func preload(
+        _ request: ArtworkRequest, allowNetwork: Bool = false, paced: Bool = true, priority: LoadPriority = .background
+    ) async -> Bool {
         guard let url = request.url else { return false }
-        return await preload(url, maxPixelSize: request.maxPixelSize, allowNetwork: allowNetwork, paced: paced)
+        return await preload(url, maxPixelSize: request.maxPixelSize, allowNetwork: allowNetwork, paced: paced, priority: priority)
     }
 
     /// `preload(_:allowNetwork:paced:)` for a URL that's already in hand (Now Playing's `artworkURL`).
     @discardableResult
-    func preload(_ url: URL, maxPixelSize: Int?, allowNetwork: Bool = false, paced: Bool = true) async -> Bool {
+    func preload(
+        _ url: URL, maxPixelSize: Int?, allowNetwork: Bool = false, paced: Bool = true,
+        priority: LoadPriority = .background
+    ) async -> Bool {
         guard !Task.isCancelled else { return false }
         let key = stableKey(for: url)
         let memKey = memoryKey(key, maxPixelSize: maxPixelSize)
-        if memory.object(forKey: memKey) != nil { return true }
+        if cachedImage(forKey: memKey) != nil { return true }
         if !allowNetwork, !fileExists(regularURL(forKey: key)), !fileExists(permanentURL(forKey: key)) {
             return false
         }
-        guard paced else { return await load(url, maxPixelSize: maxPixelSize) != nil }
+        guard paced else { return await load(url, maxPixelSize: maxPixelSize, priority: priority) != nil }
 
         await warmGate.acquire()
         let gate = warmGate
@@ -305,8 +434,8 @@ final class ImageCache: @unchecked Sendable {
             }
         }
         guard !Task.isCancelled else { return false }
-        if memory.object(forKey: memKey) != nil { return true }
-        return await load(url, maxPixelSize: maxPixelSize) != nil
+        if cachedImage(forKey: memKey) != nil { return true }
+        return await load(url, maxPixelSize: maxPixelSize, priority: priority) != nil
     }
 
     /// Makes sure `url`'s image is saved in *both* the regular cache and the permanent one,
@@ -343,7 +472,9 @@ final class ImageCache: @unchecked Sendable {
         let key = stableKey(for: url)
         let tiers: [Int?] = [nil, Self.standardMaxPixelSize, Self.cardMaxPixelSize, Self.avatarMaxPixelSize, Self.colorSamplingMaxPixelSize]
         for tier in tiers {
-            memory.removeObject(forKey: memoryKey(key, maxPixelSize: tier))
+            let memKey = memoryKey(key, maxPixelSize: tier)
+            memory.removeObject(forKey: memKey)
+            unpin(memKey)
         }
         if let fileURL = regularURL(forKey: key) { try? fileManager.removeItem(at: fileURL) }
         if let fileURL = permanentURL(forKey: key) { try? fileManager.removeItem(at: fileURL) }
@@ -355,6 +486,7 @@ final class ImageCache: @unchecked Sendable {
     /// artwork available offline.
     func invalidateAll() {
         memory.removeAllObjects()
+        dropPinned()
         guard let regularDirectory else { return }
         try? fileManager.removeItem(at: regularDirectory)
         try? fileManager.createDirectory(at: regularDirectory, withIntermediateDirectories: true)
@@ -366,10 +498,29 @@ final class ImageCache: @unchecked Sendable {
     /// actually an image. Without the second check, an error body (Subsonic reports a missing
     /// cover as a JSON error) would be written to disk — and, for downloaded content, to the
     /// permanent cache — as if it were the artwork, and never retried.
+    ///
+    /// One download per image at a time: a card that needs an image a warm-up is already fetching
+    /// waits for that download instead of starting a second one. A caller that stops waiting
+    /// doesn't cancel it — someone else may be waiting too, and the bytes are kept on disk.
     private func downloadImageData(_ url: URL) async -> Data? {
+        let key = stableKey(for: url)
+        let task: Task<Data?, Never> = lock.withLock {
+            if let existing = downloadsInFlight[key] { return existing }
+            let created = Task { [session] in await Self.fetchImageData(url, session: session) }
+            downloadsInFlight[key] = created
+            return created
+        }
+        let data = await task.value
+        lock.withLock { if downloadsInFlight[key] == task { downloadsInFlight[key] = nil } }
+        return data
+    }
+
+    private var downloadsInFlight: [String: Task<Data?, Never>] = [:]
+
+    private static func fetchImageData(_ url: URL, session: URLSession) async -> Data? {
         guard let (data, response) = try? await session.data(from: url) else { return nil }
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) { return nil }
-        guard Self.isImage(data) else { return nil }
+        guard isImage(data) else { return nil }
         return data
     }
 
@@ -389,6 +540,7 @@ final class ImageCache: @unchecked Sendable {
     private func store(_ image: UIImage, forKey key: NSString) {
         let cost = image.cgImage.map { $0.bytesPerRow * $0.height } ?? 0
         memory.setObject(image, forKey: key, cost: cost)
+        pin(image, forKey: key)
     }
 
     // MARK: - Stable cache key
@@ -547,29 +699,41 @@ final class ImageCache: @unchecked Sendable {
 }
 
 /// A minimal async counting semaphore: at most `limit` callers between `acquire()` and
-/// `release()` at once; the rest suspend in FIFO order until a slot frees up.
-private actor AsyncLimiter {
+/// `release()` at once; the rest suspend until a slot frees up — every `.high` waiter first, in
+/// FIFO order, then the `.low` ones. The two classes are what keep a screen's own images from
+/// queueing behind a backlog of warm-ups.
+actor AsyncLimiter {
+    enum Priority { case high, low }
+
     private let limit: Int
     private var running = 0
-    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var highWaiters: [CheckedContinuation<Void, Never>] = []
+    private var lowWaiters: [CheckedContinuation<Void, Never>] = []
 
     init(limit: Int) {
         self.limit = limit
     }
 
-    func acquire() async {
+    func acquire(priority: Priority = .high) async {
         if running < limit {
             running += 1
             return
         }
-        await withCheckedContinuation { waiters.append($0) }
+        await withCheckedContinuation { continuation in
+            switch priority {
+            case .high: highWaiters.append(continuation)
+            case .low: lowWaiters.append(continuation)
+            }
+        }
     }
 
     func release() {
-        if waiters.isEmpty {
-            running -= 1
+        if !highWaiters.isEmpty {
+            highWaiters.removeFirst().resume()
+        } else if !lowWaiters.isEmpty {
+            lowWaiters.removeFirst().resume()
         } else {
-            waiters.removeFirst().resume()
+            running -= 1
         }
     }
 }

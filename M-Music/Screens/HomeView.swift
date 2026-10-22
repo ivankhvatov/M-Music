@@ -92,6 +92,9 @@ private struct HomeAlbumCarousel: View {
     let albums: [AlbumID3]
     /// Names this carousel's look-ahead queue in `ImageWarmer`, so carousels don't cancel each other's.
     let source: String
+    /// Called when the carousel is built — it has scrolled near the screen — so Home can warm the
+    /// carousels around it before they're reached.
+    var onNear: () -> Void = {}
 
     @Namespace private var zoomNamespace
     /// The last tapped card, drawn above its neighbors so the zoom transition isn't covered by them.
@@ -128,6 +131,7 @@ private struct HomeAlbumCarousel: View {
                 // the artwork is cut off at the scroll view's bounds while it flies in and out.
                 .scrollClipDisabled()
             }
+            .onAppear(perform: onNear)
             // The app was away, and iOS may have emptied the image cache meanwhile — including the
             // cards the carousel was scrolled away from, which then show placeholders when it's
             // scrolled back. Warm the carousel again around where it was left, nearest cards first.
@@ -305,7 +309,10 @@ struct HomeView: View {
         case .topPlaylists: playlistCarousel(kind.title, playlists: topPlaylists)
         case .randomGenres:
             ForEach(sections.genres.prefix(randomGenreCount)) { genre in
-                HomeAlbumCarousel(title: Text(verbatim: genre.name), albums: genre.albums, source: "home.genre.\(genre.id)")
+                HomeAlbumCarousel(
+                    title: Text(verbatim: genre.name), albums: genre.albums, source: "home.genre.\(genre.id)",
+                    onNear: { warmNeighborCarousels(of: "home.genre.\(genre.id)") }
+                )
             }
         default: albumCarousel(kind, albums: albums(for: kind))
         }
@@ -328,7 +335,11 @@ struct HomeView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.top, 120)
                 } else {
-                    VStack(alignment: .leading, spacing: 24) {
+                    // Lazy: with the random-genre carousels Home can hold sixteen of them, and a plain
+                    // `VStack` built every one (each with its first cards, links and image loads)
+                    // when Home first showed — and, after a resume, had every one of them warm
+                    // its own images at once. Only the carousels near the screen exist now.
+                    LazyVStack(alignment: .leading, spacing: 24) {
                         ForEach(visibleCarousels) { kind in
                             carousel(for: kind)
                         }
@@ -362,13 +373,16 @@ struct HomeView: View {
     // MARK: Carousels
 
     private func albumCarousel(_ kind: HomeCarouselKind, albums: [AlbumID3]) -> some View {
-        HomeAlbumCarousel(title: Text(kind.title), albums: albums, source: "home.\(kind.rawValue)")
+        HomeAlbumCarousel(
+            title: Text(kind.title), albums: albums, source: "home.\(kind.rawValue)",
+            onNear: { warmNeighborCarousels(of: "home.\(kind.rawValue)") }
+        )
     }
 
     @ViewBuilder
     private func playlistCarousel(_ title: LocalizedStringKey, playlists: [PlaylistSummary]) -> some View {
         if !playlists.isEmpty {
-            carousel(title) {
+            carousel(title, onNear: { warmNeighborCarousels(of: "home.topPlaylists") }) {
                 ForEach(playlists) { playlist in
                     HomePlaylistCell(playlist: playlist, zoomNamespace: zoomNamespace) {
                         warmAhead(after: playlist, in: playlists)
@@ -376,6 +390,46 @@ struct HomeView: View {
                 }
             }
         }
+    }
+
+    /// The covers of every carousel, in the order they're shown, each under the name of its
+    /// look-ahead queue.
+    private var carouselRequestLists: [(source: String, requests: [ArtworkRequest])] {
+        var lists: [(source: String, requests: [ArtworkRequest])] = []
+        for kind in visibleCarousels {
+            switch kind {
+            case .topPlaylists:
+                if !topPlaylists.isEmpty {
+                    lists.append(("home.topPlaylists", topPlaylists.map { .playlistCard($0.coverArt ?? $0.id.raw) }))
+                }
+            case .randomGenres:
+                for genre in sections.genres.prefix(randomGenreCount) where !genre.albums.isEmpty {
+                    lists.append(("home.genre.\(genre.id)", genre.albums.map { .albumCard($0.coverArt ?? $0.id.raw) }))
+                }
+            default:
+                let albums = albums(for: kind)
+                if !albums.isEmpty {
+                    lists.append(("home.\(kind.rawValue)", albums.map { .albumCard($0.coverArt ?? $0.id.raw) }))
+                }
+            }
+        }
+        return lists
+    }
+
+    /// A carousel came near the screen: warm the whole of the ones after and before it, so
+    /// scrolling down to them — and swiping along them — finds their covers fetched and decoded.
+    /// A carousel only gets its own look-ahead once one of its cards has appeared, which is too
+    /// late for a fast swipe; the first two carousels never had that problem because they were on
+    /// screen from the start and had long been warmed. Three carousels at a time (about 60 covers)
+    /// stays well inside the image cache.
+    private func warmNeighborCarousels(of source: String) {
+        let lists = carouselRequestLists
+        guard let index = lists.firstIndex(where: { $0.source == source }) else { return }
+        let requests = [index + 1, index - 1, index + 2]
+            .filter { lists.indices.contains($0) }
+            .flatMap { lists[$0].requests }
+        guard !requests.isEmpty else { return }
+        Task { await ImageWarmer.shared.warmAhead(requests, source: "home.nearby") }
     }
 
     /// A card scrolled into view: warm the ones after it in its carousel, so a fast swipe finds
@@ -395,7 +449,9 @@ struct HomeView: View {
     }
 
     /// Same carousel presentation as `ArtistAlbumsView.albumCarousel`.
-    private func carousel<Content: View>(_ title: LocalizedStringKey, @ViewBuilder content: () -> Content) -> some View {
+    private func carousel<Content: View>(
+        _ title: LocalizedStringKey, onNear: @escaping () -> Void = {}, @ViewBuilder content: () -> Content
+    ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title)
                 .font(.system(size: 20, weight: .bold))
@@ -410,6 +466,7 @@ struct HomeView: View {
             }
             .scrollClipDisabled()
         }
+        .onAppear(perform: onNear)
     }
 
     // MARK: First frame
@@ -419,7 +476,7 @@ struct HomeView: View {
             carousels: visibleCarousels,
             albums: { albums(for: $0) },
             playlists: topPlaylists,
-            genreCarousels: sections.genres.map(\.albums)
+            genreCarousels: sections.genres.prefix(randomGenreCount).map(\.albums)
         )
     }
 
@@ -432,13 +489,20 @@ struct HomeView: View {
         imageReadiness.require(firstScreenRequests)
     }
 
+    /// How many cards of every carousel are warmed up front — see `warmAllCarousels`.
+    private static let warmedCardsPerCarousel = 4
+
     /// Warms the first cards of *every* carousel, not just the ones on the first screen the gate
-    /// waits for, so scrolling down to a lower carousel finds its cards already decoded.
+    /// waits for, so scrolling down to a lower carousel finds its cards already decoded. Few per
+    /// carousel: with up to sixteen carousels, twelve each decoded some 190 MB of covers — most of
+    /// the image cache, evicting what the user was about to scroll back to.
     private func warmAllCarousels() {
+        let perCarousel = Self.warmedCardsPerCarousel
         let requests = HomeLoadingPolicy.firstScreenRequests(
             carousels: visibleCarousels, albums: { albums(for: $0) }, playlists: topPlaylists,
-            genreCarousels: sections.genres.map(\.albums),
-            perCarousel: 12, limit: 12 * (HomeCarouselKind.allCases.count + HomeContentSettings.randomGenreRange.upperBound)
+            genreCarousels: sections.genres.prefix(randomGenreCount).map(\.albums),
+            perCarousel: perCarousel,
+            limit: perCarousel * (HomeCarouselKind.allCases.count + HomeContentSettings.randomGenreRange.upperBound)
         )
         guard !requests.isEmpty else { return }
         Task { await ImageWarmer.shared.warmAhead(requests, source: "home") }

@@ -53,10 +53,13 @@ private struct Directories {
     }
 
     /// A fresh `ImageCache` over these directories — and so an empty memory tier, like a relaunch.
-    func makeCache() -> ImageCache {
+    func makeCache(pinnedCostLimit: Int = 96 * 1024 * 1024) -> ImageCache {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [ImageStub.self]
-        return ImageCache(regularDirectory: regular, permanentDirectory: permanent, session: URLSession(configuration: config))
+        return ImageCache(
+            regularDirectory: regular, permanentDirectory: permanent,
+            session: URLSession(configuration: config), pinnedCostLimit: pinnedCostLimit
+        )
     }
 
     func fileCount(_ directory: URL) -> Int {
@@ -525,5 +528,127 @@ struct DownloadProgressStoreTests {
 
         #expect(downloadStorePublishes == 0)
         #expect(progressPublishes == 2)
+    }
+}
+
+struct AsyncLimiterTests {
+    private actor Order {
+        private(set) var entries: [String] = []
+        func add(_ name: String) { entries.append(name) }
+    }
+
+    @Test func highPriorityWaitersAreServedBeforeLowOnesWhateverTheArrivalOrder() async {
+        let limiter = AsyncLimiter(limit: 1)
+        let order = Order()
+        await limiter.acquire()                                   // the slot is taken
+
+        let low = Task { await limiter.acquire(priority: .low); await order.add("low"); await limiter.release() }
+        try? await Task.sleep(for: .milliseconds(50))             // low is queued first
+        let high = Task { await limiter.acquire(priority: .high); await order.add("high"); await limiter.release() }
+        try? await Task.sleep(for: .milliseconds(50))
+
+        await limiter.release()
+        await low.value
+        await high.value
+        #expect(await order.entries == ["high", "low"])
+    }
+
+    @Test func waitersOfOneClassKeepTheirArrivalOrder() async {
+        let limiter = AsyncLimiter(limit: 1)
+        let order = Order()
+        await limiter.acquire()
+        var tasks: [Task<Void, Never>] = []
+        for name in ["first", "second", "third"] {
+            tasks.append(Task { await limiter.acquire(priority: .low); await order.add(name); await limiter.release() })
+            try? await Task.sleep(for: .milliseconds(30))
+        }
+        await limiter.release()
+        for task in tasks { await task.value }
+        #expect(await order.entries == ["first", "second", "third"])
+    }
+}
+
+extension ImageCacheTests {
+    @Test func anImageIsDownloadedOnceHoweverManyLoadsAskForItAtTheSameTime() async {
+        ImageStub.reset()
+        let cache = Directories().makeCache()
+        let url = coverURL("al-31")
+
+        async let prefetch: Void = cache.prefetchOriginalData(url)
+        async let background = cache.load(url, priority: .background)
+        async let interactive = cache.load(url, priority: .interactive)
+        let (_, b, i) = await ((), background, interactive)
+        _ = await prefetch
+        #expect(b != nil)
+        #expect(i != nil)
+        #expect(ImageStub.requestCount == 1)
+    }
+
+    @Test func aBackgroundAndAnInteractiveLoadOfOneImageBothGetIt() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        let url = coverURL("al-30")
+        await dirs.makeCache().load(url)
+        let cache = dirs.makeCache()
+
+        async let background = cache.load(url, priority: .background)
+        async let interactive = cache.load(url, priority: .interactive)
+        let (b, i) = await (background, interactive)
+        #expect(b != nil)
+        #expect(i != nil)
+        #expect(cache.image(for: url) != nil)
+    }
+}
+
+extension ImageCacheTests {
+    @Test func aRecentlyUsedImageSurvivesTheSystemEmptyingTheCache() async {
+        ImageStub.reset()
+        let cache = Directories().makeCache()
+        let url = coverURL("al-40")
+        await cache.load(url)
+        #expect(cache.image(for: url) != nil)
+
+        cache.simulateSystemPurge()                    // what a pause and resume can do to an NSCache
+        #expect(cache.image(for: url) != nil)
+        #expect(ImageStub.requestCount == 1)
+    }
+
+    @Test func aMemoryWarningReleasesThePinnedImages() async {
+        ImageStub.reset()
+        let cache = Directories().makeCache()
+        let url = coverURL("al-41")
+        await cache.load(url)
+
+        NotificationCenter.default.post(name: UIApplication.didReceiveMemoryWarningNotification, object: nil)
+        cache.simulateSystemPurge()
+        #expect(cache.image(for: url) == nil)
+    }
+
+    @Test func onlyTheMostRecentlyUsedImagesStayPinnedWithinTheLimit() async {
+        ImageStub.reset()
+        // Room for two of the (tiny) test bitmaps, measured rather than assumed.
+        let dirs = Directories()
+        let probe = dirs.makeCache()
+        await probe.load(coverURL("probe"))
+        let one = probe.pinnedCostForTesting
+        #expect(one > 0)
+
+        let cache = dirs.makeCache(pinnedCostLimit: one * 2 + one / 2)
+        let urls = ["p1", "p2", "p3", "p4"].map { coverURL($0) }
+        for url in urls { await cache.load(url) }
+
+        cache.simulateSystemPurge()
+        #expect(cache.image(for: urls[0]) == nil)
+        #expect(cache.image(for: urls[3]) != nil)
+    }
+
+    @Test func removingAnImageAlsoUnpinsIt() async {
+        ImageStub.reset()
+        let cache = Directories().makeCache()
+        let url = coverURL("al-42")
+        await cache.load(url)
+        cache.remove(url)
+        cache.simulateSystemPurge()
+        #expect(cache.image(for: url) == nil)
     }
 }

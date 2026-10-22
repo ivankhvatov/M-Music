@@ -73,6 +73,8 @@ actor ImageWarmer {
     }
     /// Each look-ahead source's queue — see `warmAhead`.
     private var aheadQueues: [String: AheadQueue] = [:]
+    /// URLs whose bytes a look-ahead is already fetching.
+    private var prefetching: Set<URL> = []
     /// The warm-up of each screen's newly changed first screenful (see `remember`).
     private var refreshTasks: [Screen: Task<Void, Never>] = [:]
     /// Destinations already warmed since the memory layer was last (possibly) emptied.
@@ -185,7 +187,8 @@ actor ImageWarmer {
                 }
                 for request in requests {
                     guard !Task.isCancelled else { return }
-                    await cache.preload(request, allowNetwork: true, paced: false)
+                    // A screen is waiting on these: ahead of any warm-up in the decode queue.
+                    await cache.preload(request, allowNetwork: true, paced: false, priority: .interactive)
                 }
             }
             group.addTask { try? await Task.sleep(for: timeout) }
@@ -220,6 +223,15 @@ actor ImageWarmer {
 
     func warmAhead(targets: [Target], source: String) {
         let missing = targets.filter { cache.image(for: $0.url, maxPixelSize: $0.maxPixelSize) == nil }
+        // Bytes first, all at once (the cache's prefetch gate keeps a few downloads running at a
+        // time, in this order): a worker that downloaded each image only when its turn to decode
+        // came couldn't keep up with a swipe. Each URL is fetched once however often it's asked.
+        for target in missing where prefetching.insert(target.url).inserted {
+            Task(priority: .utility) { [cache] in
+                await cache.prefetchOriginalData(target.url)
+                await self.finishedPrefetch(target.url)
+            }
+        }
         var queue = aheadQueues[source] ?? AheadQueue()
         queue.pending = missing
         let start = !queue.isRunning && !missing.isEmpty
@@ -227,6 +239,10 @@ actor ImageWarmer {
         aheadQueues[source] = queue
         guard start else { return }
         Task(priority: .userInitiated) { await self.runAheadWorker(source) }
+    }
+
+    private func finishedPrefetch(_ url: URL) {
+        prefetching.remove(url)
     }
 
     /// The next few targets of `source`'s queue, nearest first; empty — and the worker marked as
@@ -253,7 +269,6 @@ actor ImageWarmer {
                 for target in batch {
                     group.addTask {
                         if cache.image(for: target.url, maxPixelSize: target.maxPixelSize) != nil { return }
-                        await cache.prefetchOriginalData(target.url)
                         await cache.preload(target.url, maxPixelSize: target.maxPixelSize, allowNetwork: true, paced: false)
                     }
                 }
