@@ -395,7 +395,7 @@ struct ArtistAlbumsView: View {
     }
 
     private func warmAround(_ index: Int, in ordered: [AlbumID3]) {
-        let requests = ImageWarmer.neighbors(of: index, in: ordered, count: ImageWarmer.scrollAheadCount)
+        let requests = ImageWarmer.neighbors(of: index, in: ordered, count: ImageWarmer.carouselAheadCount)
             .map { ArtworkRequest.albumCard($0.coverArt ?? $0.id.raw) }
         guard !requests.isEmpty else { return }
         Task { await ImageWarmer.shared.warmAhead(requests, source: Self.source(for: ordered)) }

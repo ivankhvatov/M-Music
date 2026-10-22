@@ -95,6 +95,9 @@ struct MainView: View {
             }
             .onReceive(Self.hasNowPlayingPublisher) { PlayerPresentation.shared.hasNowPlaying = $0 }
             .task {
+                #if DEBUG
+                PerfProbe.startIfRequested()
+                #endif
                 try? await Task.sleep(for: .milliseconds(900))
                 PlayerPresentation.shared.overlayReady = true
                 // Once, at idle — not from each list screen's `.onAppear`, where the cache scans

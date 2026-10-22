@@ -31,22 +31,15 @@ struct AlbumCardView: View {
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            artwork
-
-            Text(
-                album.name + (album.version != nil ? (" (" + album.version! + ")") : "")
-            )
-                .font(.system(size: 14))
-                .lineLimit(1)
-
-            Text(subtitleText)
-                .font(.caption)
-                .foregroundColor(.gray)
-                .lineLimit(1)
-                .padding(.top, -3)
-        }
-        .dimmedIfUnavailable(isAvailable)
+        CoverCard(
+            transitionID: album.id,
+            title: album.name + (album.version != nil ? (" (" + album.version! + ")") : ""),
+            subtitle: subtitleText,
+            artworkURL: artworkURL,
+            placeholderSymbol: "music.note",
+            isAvailable: isAvailable,
+            zoomNamespace: zoomNamespace
+        )
     }
 
     /// Nothing is ever "unavailable" while online (everything can still stream) — only offline
@@ -64,45 +57,6 @@ struct AlbumCardView: View {
             return album.artist ?? "Unknown Artist"
         case .year:
             return album.year.map(String.init) ?? "Unknown Year"
-        }
-    }
-
-    @ViewBuilder
-    private var artwork: some View {
-        // `Color.clear.aspectRatio(1, contentMode: .fit)` establishes the square footprint every
-        // card in the grid shares (its side derived from the column's proposed width, same as
-        // this used to do directly) — `.overlay` then proposes that resolved square, concretely,
-        // to the real artwork below, so a non-square cover can `.fit` within it (longer side
-        // matching the square, not stretched to fill it) instead of forcing a 1:1 crop.
-        let image = Color.clear
-            .aspectRatio(1, contentMode: .fit)
-            .overlay {
-                // Same URL AlbumView requests (original size, no `size` param), so opening this
-                // album reuses the image straight from ImageCache instead of triggering a second
-                // fetch — see CachedAsyncImage.
-                CachedAsyncImage(url: artworkURL, maxPixelSize: ImageCache.cardMaxPixelSize) { image in
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.secondary, lineWidth: 0.15)
-                        )
-                } placeholder: {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.secondary.opacity(0.15))
-                        .overlay {
-                            Image(systemName: "music.note")
-                                .foregroundStyle(.secondary)
-                        }
-                }
-            }
-
-        if let zoomNamespace {
-            image.matchedTransitionSource(id: album.id, in: zoomNamespace)
-        } else {
-            image
         }
     }
 }

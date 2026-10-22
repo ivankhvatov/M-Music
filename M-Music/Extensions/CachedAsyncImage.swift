@@ -119,6 +119,8 @@ final class ImageCache: @unchecked Sendable {
     /// returned before reaching the gate. Raise `limit` / lower the cooldown to trade CPU for
     /// artwork appearing sooner.
     private let decodeGate = AsyncLimiter(limit: 2)
+    /// The one lane warm-up decodes go through before the gate — see `fetch`.
+    private let backgroundLane = AsyncLimiter(limit: 1)
     private static let decodeCooldown: Duration = .milliseconds(10)
     /// Same idea for `prefetchOriginalData`'s downloads — not CPU-heavy, but a screen full of
     /// rows shouldn't open dozens of simultaneous connections either.
@@ -323,26 +325,51 @@ final class ImageCache: @unchecked Sendable {
         // gating them would just let a slow download hold up unrelated decodes.
         guard let data = await originalData(for: url, key: key) else { return nil }
 
-        await decodeGate.acquire(priority: priority == .interactive ? .high : .low)
+        // Warm-up decodes are rationed: one at a time on their own lane, which then rests for as
+        // long as the decode took (see below). Cards that are showing, or are about to, skip the
+        // lane and the rest.
+        let isBackground = priority == .background
+        if isBackground {
+            // Nobody is waiting for this one: hold off while the user scrolls.
+            await ScrollActivity.shared.waitUntilIdle()
+            await backgroundLane.acquire()
+        }
+        await decodeGate.acquire(priority: isBackground ? .low : .high)
         // Cancelled while waiting its turn (nobody wants this image any more), or already decoded
-        // by the other class of load meanwhile: give the slot straight back, with no decode and
+        // by the other class of load meanwhile: give the slots straight back, with no decode and
         // no cooldown.
         if Task.isCancelled {
             await decodeGate.release()
+            if isBackground { await backgroundLane.release() }
             return nil
         }
         if let existing = cachedImage(forKey: memKey) {
             await decodeGate.release()
+            if isBackground { await backgroundLane.release() }
             return existing
         }
+        let started = ContinuousClock.now
         let image = decodedImage(from: data, maxPixelSize: maxPixelSize)
+        let spent = ContinuousClock.now - started
         if let image { store(image, forKey: memKey) }
-        // The cooldown runs in its own task, holding the slot, so this image is handed back to
-        // its caller right now — only the *next* decode waits out the pause.
+        // The rests run in their own tasks, holding the slots, so this image is handed back to its
+        // caller right now — only the *next* decode waits out the pause. A background decode frees
+        // the shared gate at once (a card that's showing must never wait on it) and keeps only its
+        // own lane for as long as it ran: warming a long queue then costs about half a core, not
+        // every core it can get.
         let gate = decodeGate
-        Task {
-            try? await Task.sleep(for: Self.decodeCooldown)
-            await gate.release()
+        if isBackground {
+            let lane = backgroundLane
+            Task {
+                await gate.release()
+                try? await Task.sleep(for: max(Self.decodeCooldown, spent))
+                await lane.release()
+            }
+        } else {
+            Task {
+                try? await Task.sleep(for: Self.decodeCooldown)
+                await gate.release()
+            }
         }
 
         return image
@@ -577,12 +604,28 @@ final class ImageCache: @unchecked Sendable {
     // MARK: - Disk tiers
 
     private func regularURL(forKey key: String) -> URL? {
-        regularDirectory.map { $0.appendingPathComponent(SubsonicClient.md5Hex(key)).appendingPathExtension("img") }
+        regularDirectory.map { $0.appendingPathComponent(fileName(forKey: key)) }
     }
 
     private func permanentURL(forKey key: String) -> URL? {
-        permanentDirectory.map { $0.appendingPathComponent(SubsonicClient.md5Hex(key)).appendingPathExtension("img") }
+        permanentDirectory.map { $0.appendingPathComponent(fileName(forKey: key)) }
     }
+
+    /// The on-disk file name for a cache key (`<md5 of the key>.img`), memoized: every disk lookup
+    /// of an image needs it, and the same few hundred keys come up again and again.
+    func fileName(forKey key: String) -> String {
+        let nsKey = key as NSString
+        if let known = fileNames.object(forKey: nsKey) { return known as String }
+        let name = SubsonicClient.md5Hex(key) + ".img"
+        fileNames.setObject(name as NSString, forKey: nsKey)
+        return name
+    }
+
+    private let fileNames: NSCache<NSString, NSString> = {
+        let cache = NSCache<NSString, NSString>()
+        cache.countLimit = 4000
+        return cache
+    }()
 
     private func fileExists(_ url: URL?) -> Bool {
         url.map { fileManager.fileExists(atPath: $0.path) } ?? false
@@ -655,7 +698,7 @@ final class ImageCache: @unchecked Sendable {
                         kCGImageSourceSubsampleFactor: factor,
                     ]
                     if let reduced = CGImageSourceCreateImageAtIndex(source, 0, options as CFDictionary) {
-                        return normalizedBitmap(from: reduced, scale: 1, orientation: .up)
+                        return normalizedBitmap(from: reduced, scale: 1, orientation: .up, longestSide: maxPixelSize)
                     }
                 }
             } else if Double(longest) > Double(maxPixelSize) * Self.downsampleThreshold {
@@ -680,9 +723,19 @@ final class ImageCache: @unchecked Sendable {
 
     /// Redraws `cgImage` into a plain device-RGB, premultiplied-alpha bitmap — the workaround
     /// described on `decodedImage(from:maxPixelSize:)`.
-    private func normalizedBitmap(from cgImage: CGImage, scale: CGFloat, orientation: UIImage.Orientation) -> UIImage? {
-        let width = cgImage.width
-        let height = cgImage.height
+    /// With `longestSide`, the bitmap is drawn at most that big — in the same pass that makes it a
+    /// plain bitmap, so the sub-sampled decode (between 1x and 2x the target) shrinks to exactly the
+    /// target instead of being kept at up to four times the pixels it will ever be shown with.
+    private func normalizedBitmap(
+        from cgImage: CGImage, scale: CGFloat, orientation: UIImage.Orientation, longestSide: Int? = nil
+    ) -> UIImage? {
+        var width = cgImage.width
+        var height = cgImage.height
+        if let longestSide, max(width, height) > longestSide {
+            let ratio = Double(longestSide) / Double(max(width, height))
+            width = max(1, Int((Double(width) * ratio).rounded()))
+            height = max(1, Int((Double(height) * ratio).rounded()))
+        }
         guard width > 0, height > 0, let context = CGContext(
             data: nil,
             width: width,
@@ -692,6 +745,7 @@ final class ImageCache: @unchecked Sendable {
             space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ) else { return nil }
+        context.interpolationQuality = .medium
         context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
         guard let normalized = context.makeImage() else { return nil }
         return UIImage(cgImage: normalized, scale: scale, orientation: orientation)

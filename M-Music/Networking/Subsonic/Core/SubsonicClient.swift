@@ -161,10 +161,19 @@ final class SubsonicClient: @unchecked Sendable {
         return String((0..<length).compactMap { _ in alphabet.randomElement() })
     }
 
+    private static let hexDigits = Array("0123456789abcdef".utf8)
+
+    /// The MD5 of `string` as 32 lowercase hex digits. Built from a digit table: the obvious
+    /// `String(format: "%02hhx")` per byte is sixteen formatter calls and allocations for every
+    /// hash, and one is computed for every file the image cache looks at.
     static func md5Hex(_ string: String) -> String {
-        Insecure.MD5.hash(data: Data(string.utf8))
-            .map { String(format: "%02hhx", $0) }
-            .joined()
+        var hex: [UInt8] = []
+        hex.reserveCapacity(32)
+        for byte in Insecure.MD5.hash(data: Data(string.utf8)) {
+            hex.append(hexDigits[Int(byte >> 4)])
+            hex.append(hexDigits[Int(byte & 0x0f)])
+        }
+        return String(decoding: hex, as: UTF8.self)
     }
 
     // MARK: - Networking primitives

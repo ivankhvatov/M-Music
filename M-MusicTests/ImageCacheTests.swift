@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import CryptoKit
 import UIKit
 @testable import M_Music
 
@@ -650,5 +651,147 @@ extension ImageCacheTests {
         cache.remove(url)
         cache.simulateSystemPurge()
         #expect(cache.image(for: url) == nil)
+    }
+}
+
+struct Md5HexTests {
+    @Test func knownVectors() {
+        #expect(SubsonicClient.md5Hex("") == "d41d8cd98f00b204e9800998ecf8427e")
+        #expect(SubsonicClient.md5Hex("abc") == "900150983cd24fb0d6963f7d28e17f72")
+        #expect(SubsonicClient.md5Hex("The quick brown fox jumps over the lazy dog") == "9e107d9d372bb6826bd81d3542a419d6")
+    }
+
+    @Test func theFormatterBasedVersionGivesTheSameDigits() {
+        func slow(_ string: String) -> String {
+            Insecure.MD5.hash(data: Data(string.utf8)).map { String(format: "%02hhx", $0) }.joined()
+        }
+        for sample in ["a", "http://example.test/rest/getCoverArt?id=al-1&size=192", "ÅÄÖ 音楽", String(repeating: "x", count: 500)] {
+            #expect(SubsonicClient.md5Hex(sample) == slow(sample))
+        }
+    }
+}
+
+extension ImageCacheTests {
+    @Test func theMemoizedFileNameIsTheHashOfTheKey() {
+        let cache = Directories().makeCache()
+        let key = cache.stableKey(for: coverURL("al-50"))
+        #expect(cache.fileName(forKey: key) == SubsonicClient.md5Hex(key) + ".img")
+        #expect(cache.fileName(forKey: key) == SubsonicClient.md5Hex(key) + ".img")
+    }
+}
+
+extension ImageCacheTests {
+    private func jpegData(side: Int) -> Data {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format)
+        return renderer.jpegData(withCompressionQuality: 0.8) { context in
+            UIColor.orange.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: side, height: side))
+        }
+    }
+
+    @Test func aDecodedCoverIsNoBiggerThanItsTier() async {
+        ImageStub.reset(body: jpegData(side: 1400))
+        let cache = Directories().makeCache()
+        let url = coverURL("al-60")
+        let image = await cache.load(url, maxPixelSize: ImageCache.cardMaxPixelSize)
+        let longest = max(image?.cgImage?.width ?? 0, image?.cgImage?.height ?? 0)
+        #expect(longest > 0)
+        #expect(longest <= ImageCache.cardMaxPixelSize)
+    }
+
+    @Test func aSmallCoverIsNotScaledUp() async {
+        ImageStub.reset(body: jpegData(side: 300))
+        let cache = Directories().makeCache()
+        let image = await cache.load(coverURL("al-61"), maxPixelSize: ImageCache.cardMaxPixelSize)
+        #expect(image?.cgImage?.width == 300)
+    }
+
+    @Test func backgroundDecodesRunOneAtATime() async {
+        ImageStub.reset(body: jpegData(side: 900))
+        let dirs = Directories()
+        let urls = (0..<8).map { coverURL("bg-\($0)") }
+        for url in urls { await dirs.makeCache().load(url) }
+        let cache = dirs.makeCache()
+
+        let started = ContinuousClock.now
+        await withTaskGroup(of: Void.self) { group in
+            for url in urls { group.addTask { _ = await cache.load(url, maxPixelSize: 512, priority: .background) } }
+        }
+        let background = ContinuousClock.now - started
+        for url in urls { #expect(cache.image(for: url, maxPixelSize: 512) != nil) }
+
+        // The same eight as interactive loads (two at a time, no rest) finish faster.
+        let fast = dirs.makeCache()
+        let fastStart = ContinuousClock.now
+        await withTaskGroup(of: Void.self) { group in
+            for url in urls { group.addTask { _ = await fast.load(url, maxPixelSize: 512, priority: .interactive) } }
+        }
+        #expect(ContinuousClock.now - fastStart < background)
+    }
+}
+
+extension ImageCacheTests {
+    @Test func askingForTheSameNeighboursAgainStartsNoNewWork() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        let ids = (0..<12).map { "w\($0)" }
+        for id in ids { await dirs.makeCache().load(coverURL(id)) }
+        let cache = dirs.makeCache()
+        let warmer = ImageWarmer(defaults: UserDefaults(suiteName: "w-\(UUID().uuidString)")!, cache: cache, scale: { 3 })
+        let targets = ids.map { ImageWarmer.Target(url: coverURL($0), maxPixelSize: ImageCache.standardMaxPixelSize) }
+
+        await warmer.warmAhead(targets: targets, source: "S")
+        let first = await warmer.prefetchBatchesStarted
+        #expect(first == 1)
+
+        // The next card asks for nearly the same window, and then for exactly the same one.
+        await warmer.warmAhead(targets: Array(targets.dropFirst()), source: "S")
+        await warmer.warmAhead(targets: targets, source: "S")
+        #expect(await warmer.prefetchBatchesStarted == first)
+    }
+
+    @Test func aWindowThatMovesOnOnlyRequestsWhatIsNew() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        let ids = (0..<20).map { "m\($0)" }
+        for id in ids { await dirs.makeCache().load(coverURL(id)) }
+        let cache = dirs.makeCache()
+        let warmer = ImageWarmer(defaults: UserDefaults(suiteName: "w-\(UUID().uuidString)")!, cache: cache, scale: { 3 })
+        let targets = ids.map { ImageWarmer.Target(url: coverURL($0), maxPixelSize: ImageCache.standardMaxPixelSize) }
+
+        await warmer.warmAhead(targets: Array(targets[0..<10]), source: "S")
+        await warmer.warmAhead(targets: Array(targets[5..<15]), source: "S")        // five new ones
+        #expect(await warmer.prefetchBatchesStarted == 2)
+        // The window moved past the first five before they were reached: only the rest is warmed.
+        let done = await waitFor { ids[5..<15].allSatisfy { cache.image(for: coverURL($0)) != nil } }
+        #expect(done)
+    }
+
+    @Test func goingToTheBackgroundMakesEverythingRequestableAgain() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        await dirs.makeCache().load(coverURL("b1"))
+        let cache = dirs.makeCache(pinnedCostLimit: 0)           // nothing pinned: a purge loses it
+        let warmer = ImageWarmer(defaults: UserDefaults(suiteName: "w-\(UUID().uuidString)")!, cache: cache, scale: { 3 })
+        let targets = [ImageWarmer.Target(url: coverURL("b1"), maxPixelSize: ImageCache.standardMaxPixelSize)]
+
+        await warmer.warmAhead(targets: targets, source: "S")
+        _ = await waitFor { cache.image(for: coverURL("b1")) != nil }
+        await warmer.cancel()
+        cache.simulateSystemPurge()
+        await warmer.memoryWasPurged()
+
+        await warmer.warmAhead(targets: targets, source: "S")
+        #expect(await warmer.prefetchBatchesStarted == 2)
+    }
+
+    private func waitFor(_ condition: () -> Bool) async -> Bool {
+        for _ in 0..<300 {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return condition()
     }
 }
