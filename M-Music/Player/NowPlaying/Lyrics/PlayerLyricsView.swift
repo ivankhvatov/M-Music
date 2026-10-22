@@ -299,7 +299,7 @@ private struct LyricsScrollView: View {
             let distance = timeline.distance(of: line.id, from: current)
             LyricLineView(
                 text: line.text,
-                width: layout.textWidth,
+                width: min(layout.textWidth, LyricsLayout.textWidth(forViewWidth: width)),
                 // Browsing, every line but the current one looks like the next, and none is
                 // blurred.
                 distance: browsing ? min(distance, 1) : min(distance, Self.maxStyledDistance),
@@ -359,6 +359,10 @@ private struct LyricsScrollView: View {
 /// different (a third of a point, or two thirds) from one row, and one scroll position, to the
 /// next, and a line that fills its slot nearly to the edge went from two lines to three and back
 /// as it scrolled.
+///
+/// Never more than the view has room for, though: the placeholder shown while lyrics load is
+/// measured at a width of its own, and a row wider than its view made the content wider than the
+/// view and centered on it — everything in the player's lower half jumped sideways while it showed.
 ///
 /// The fade is an `.opacity` on the whole line, not a translucent text colour: animating a text's
 /// own colour made SwiftUI re-rasterize its glyphs on the CPU every frame, which was most of what

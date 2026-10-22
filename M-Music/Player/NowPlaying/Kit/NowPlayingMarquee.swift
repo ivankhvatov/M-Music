@@ -16,6 +16,12 @@ import SwiftUI
 ///   frame by a `TimelineView` — nothing to start, stop, drop or restart, and it keeps scrolling
 ///   straight through any transition.
 ///
+/// The clock starts afresh whenever the text changes and whenever the label starts to scroll — it
+/// does that mid-animation too, as the container narrows past the text's width — and the frame in
+/// which that happens is drawn at the start position, not at wherever the clock of the text before
+/// (or of the label's last scroll) had got to: that showed as the text jumping sideways for a
+/// moment and then back.
+///
 /// While `isActive` is false (the chrome is hidden) the timeline is paused, so an always-mounted
 /// but invisible chrome costs no per-frame work.
 struct NowPlayingMarquee: View {
@@ -37,18 +43,21 @@ struct NowPlayingMarquee: View {
     var restartToken = 0
 
     @State private var containerWidth: CGFloat = 0
-    /// When the current text started — the scroll's clock. Reset whenever `text` changes.
-    @State private var startDate = Date()
+    /// The scroll's clock. It only counts for the text and the scrolling state it was started for
+    /// (see the type's doc comment); until it has been started for the current ones, the label
+    /// sits at its start position.
+    @State private var clock = ScrollClock()
 
     var body: some View {
         let metrics = Self.metrics(for: text, font: font)
         let overflows = containerWidth > 0 && metrics.width > containerWidth
+        let clockKey = ScrollClock.Key(text: text, scrolls: overflows)
         let gap = metrics.height * 2
         let travel = metrics.width + gap
         let edge = overflows ? fade : 0
 
         TimelineView(.animation(minimumInterval: frameInterval, paused: !(overflows && isActive))) { context in
-            let offset = overflows ? scrollOffset(at: context.date, travel: travel) : 0
+            let offset = overflows && clock.key == clockKey ? scrollOffset(at: context.date, since: clock.start, travel: travel) : 0
             Color.clear
                 .frame(maxWidth: .infinity)
                 .frame(height: metrics.height)
@@ -85,8 +94,19 @@ struct NowPlayingMarquee: View {
                     }
                 }
         }
-        .onChange(of: text) { startDate = Date() }
-        .onChange(of: restartToken) { startDate = Date() }
+        .onChange(of: clockKey, initial: true) { _, key in clock = ScrollClock(key: key, start: Date()) }
+        .onChange(of: restartToken) { clock.start = Date() }
+    }
+
+    /// When the label's current scroll started, and for what.
+    private struct ScrollClock {
+        struct Key: Equatable {
+            let text: String
+            let scrolls: Bool
+        }
+
+        var key: Key?
+        var start = Date()
     }
 
     private struct MetricsKey: Hashable {
@@ -113,9 +133,9 @@ struct NowPlayingMarquee: View {
     /// 0 while pausing at the start of a loop, then growing at `speed` until one full copy of the
     /// text plus the gap has gone by — at which point the second copy sits exactly where the first
     /// started, so the loop is seamless.
-    private func scrollOffset(at date: Date, travel: CGFloat) -> CGFloat {
+    private func scrollOffset(at date: Date, since start: Date, travel: CGFloat) -> CGFloat {
         let cycle = startDelay + Double(travel / speed)
-        let elapsed = date.timeIntervalSince(startDate).truncatingRemainder(dividingBy: cycle)
+        let elapsed = max(date.timeIntervalSince(start), 0).truncatingRemainder(dividingBy: cycle)
         return elapsed <= startDelay ? 0 : CGFloat(elapsed - startDelay) * speed
     }
 
