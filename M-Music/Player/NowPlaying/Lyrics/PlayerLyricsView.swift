@@ -530,7 +530,7 @@ private struct LyricsFollower: View {
     @State private var advancing = false
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !(advancing && !presentation.accessoryVisible))) { context in
+        TimelineView(.animation(paused: !(advancing && !presentation.accessoryVisible))) { context in
             Color.clear
                 .onChange(of: context.date) { model.follow() }
         }

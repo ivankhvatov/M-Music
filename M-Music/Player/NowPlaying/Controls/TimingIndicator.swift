@@ -26,7 +26,7 @@ struct TimingIndicator: View {
     private var drawsFrames: Bool { advancing && !presentation.accessoryVisible && !isDragging }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !drawsFrames)) { _ in
+        TimelineView(.animation(paused: !drawsFrames)) { _ in
             // Asked for once per frame, so the bar and the labels agree.
             let position = isDragging ? progress : player.livePosition
             ElasticSlider(

@@ -33,11 +33,6 @@ struct NowPlayingMarquee: View {
     /// Scroll speed, in points per second.
     var speed: CGFloat = 30
     var isActive = true
-    /// Caps how often the scroll is redrawn; `nil` redraws every display frame. The slow scroll
-    /// (30 pt/s) is indistinguishable at 30 Hz from 120 Hz, and the mini player's marquee runs
-    /// whenever its title is long, on every screen the app can show — so redrawing it at display
-    /// rate was a constant per-frame cost under every transition.
-    var frameInterval: TimeInterval?
     /// Changing this restarts the scroll from the beginning (the start position, then the usual
     /// pause) — for when the label is about to be shown again.
     var restartToken = 0
@@ -56,46 +51,74 @@ struct NowPlayingMarquee: View {
         let travel = metrics.width + gap
         let edge = overflows ? fade : 0
 
-        TimelineView(.animation(minimumInterval: frameInterval, paused: !(overflows && isActive))) { context in
-            let offset = overflows && clock.key == clockKey ? scrollOffset(at: context.date, since: clock.start, travel: travel) : 0
-            Color.clear
-                .frame(maxWidth: .infinity)
-                .frame(height: metrics.height)
-                .onGeometryChange(for: CGFloat.self, of: { $0.size.width.rounded() }) { width in
-                    if containerWidth != width { containerWidth = width }
-                }
-                .overlay(alignment: .leading) {
-                    // While scrolling, the visible window reaches `edge` further left than the
-                    // label's own bounds (a negative leading padding), and the text is pushed
-                    // right by the same amount — so at rest it starts exactly where plain text
-                    // would, and the left fade lives in the extra strip, always on, beginning
-                    // before the text's start position instead of eating into it.
-                    let label = Color.clear
-                        .overlay(alignment: .leading) {
-                            HStack(spacing: gap) {
-                                Text(text)
-                                if overflows { Text(text) }
-                            }
-                            .font(Font(font))
-                            .lineLimit(1)
-                            .fixedSize()
-                            .offset(x: edge - offset)
+        Color.clear
+            .frame(maxWidth: .infinity)
+            .frame(height: metrics.height)
+            .onGeometryChange(for: CGFloat.self, of: { $0.size.width.rounded() }) { width in
+                if containerWidth != width { containerWidth = width }
+            }
+            .overlay(alignment: .leading) {
+                // While scrolling, the visible window reaches `edge` further left than the
+                // label's own bounds (a negative leading padding), and the text is pushed
+                // right by the same amount — so at rest it starts exactly where plain text
+                // would, and the left fade lives in the extra strip, always on, beginning
+                // before the text's start position instead of eating into it.
+                let label = Color.clear
+                    .overlay(alignment: .leading) {
+                        // Only this is drawn on every frame, and all that changes between
+                        // frames is how far the text is moved: the text itself is an unchanged,
+                        // `Equatable` view that isn't evaluated again. Redrawing everything above
+                        // and around it every frame cost twice the CPU, which is why the scroll
+                        // used to be held to 30 frames a second — and moved in steps of a point,
+                        // visibly, on a display that runs at 60 or 120. It's drawn on every
+                        // display frame.
+                        //
+                        // Moved by a transform rather than an `.offset`: an offset changes where
+                        // the text is placed, and SwiftUI then built its glyphs' display list
+                        // again on every frame; a transform moves the unchanged text as it is,
+                        // at little over half the cost.
+                        TimelineView(.animation(paused: !(overflows && isActive))) { context in
+                            let offset = overflows && clock.key == clockKey
+                                ? scrollOffset(at: context.date, since: clock.start, travel: travel)
+                                : 0
+                            MarqueeText(text: text, font: font, gap: gap, repeats: overflows)
+                                .equatable()
+                                .transformEffect(CGAffineTransform(translationX: edge - offset, y: 0))
                         }
-                    // Clipped and faded only when there's something to clip: text that fits is
-                    // left alone, since a clip/mask on it does nothing at rest and, while an
-                    // ancestor's layout is animating, can slice the text against its own frame.
-                    if overflows {
-                        label
-                            .clipped()
-                            .mask(fadeMask(edge: edge))
-                            .padding(.leading, -edge)
-                    } else {
-                        label
                     }
+                // Clipped and faded only when there's something to clip: text that fits is
+                // left alone, since a clip/mask on it does nothing at rest and, while an
+                // ancestor's layout is animating, can slice the text against its own frame.
+                if overflows {
+                    label
+                        .clipped()
+                        .mask(fadeMask(edge: edge))
+                        .padding(.leading, -edge)
+                } else {
+                    label
                 }
-        }
+            }
         .onChange(of: clockKey, initial: true) { _, key in clock = ScrollClock(key: key, start: Date()) }
         .onChange(of: restartToken) { clock.start = Date() }
+    }
+
+    /// The text, twice (a gap apart) when it scrolls — a view of its own so that frames which only
+    /// move it don't evaluate it again.
+    private struct MarqueeText: View, Equatable {
+        let text: String
+        let font: UIFont
+        let gap: CGFloat
+        let repeats: Bool
+
+        var body: some View {
+            HStack(spacing: gap) {
+                Text(text)
+                if repeats { Text(text) }
+            }
+            .font(Font(font))
+            .lineLimit(1)
+            .fixedSize()
+        }
     }
 
     /// When the label's current scroll started, and for what.
