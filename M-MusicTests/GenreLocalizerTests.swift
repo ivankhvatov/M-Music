@@ -62,4 +62,21 @@ struct GenreLocalizerTests {
         #expect(l.localized("Zydeco") == "Zydeco")
         #expect(!l.hasPending)
     }
+
+    @Test func clearingForgetsTheTranslationsAndTheFile() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("genres-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let l = GenreLocalizer(
+            language: "de", isEnabled: { true }, cacheURL: url,
+            entriesURL: Bundle.main.url(forResource: "LocalizedGenres", withExtension: "json")
+        )
+        _ = l.localized("Zydeco")
+        _ = l.takePending()
+        l.finish(translations: ["zydeco": "Zydeko"], failed: [])
+        #expect(FileManager.default.fileExists(atPath: url.path))
+        l.clearTranslations()
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+        #expect(l.localized("Zydeco") == "Zydeco")
+        #expect(l.hasPending)
+    }
 }

@@ -107,6 +107,9 @@ struct AppearanceSettingsView: View {
                 }
                 Section {
                     Toggle("Translate genres", isOn: $translateGenres)
+                        .onChange(of: translateGenres) { _, isOn in
+                            if !isOn { GenreLocalizer.shared.clearTranslations() }
+                        }
                 } header: {
                     Text("Genres")
                 } footer: {

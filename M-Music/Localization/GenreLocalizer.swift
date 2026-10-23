@@ -161,10 +161,21 @@ final class GenreLocalizer {
     /// Stores a batch's translations, and the genres that couldn't be translated.
     func finish(translations: [String: String], failed failedKeys: Set<String>) {
         failed.formUnion(failedKeys)
-        if !translations.isEmpty {
+        // The switch was turned off while this batch was being translated: keep nothing.
+        if !translations.isEmpty, isEnabled() {
             cache[language, default: [:]].merge(translations) { _, new in new }
             save()
         }
+        revision += 1
+    }
+
+    /// Forgets every translation of an unlisted genre, in memory and on disk. Called when the
+    /// switch is turned off.
+    func clearTranslations() {
+        cache = [:]
+        pending = [:]
+        failed = []
+        if let cacheURL { try? FileManager.default.removeItem(at: cacheURL) }
         revision += 1
     }
 
