@@ -739,6 +739,12 @@
             "state" : "translated",
             "value" : "По возрастанию"
           }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aufsteigend"
+          }
         }
       }
     },
@@ -815,6 +821,22 @@
         }
       }
     },
+    "Choose which carousels the Home page shows and drag to reorder them. Random genres shows the chosen number of carousels, each with albums of a different random genre." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wähle, welche Karussells die Startseite zeigt, und ziehe sie, um die Reihenfolge zu ändern. „Zufällige Genres“ zeigt die gewählte Anzahl an Karussells, jeweils mit Alben eines anderen zufälligen Genres."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Выберите, какие карусели показывать на главной странице, и перетащите их, чтобы изменить порядок. «Случайные жанры» показывает выбранное количество каруселей, в каждой — альбомы другого случайного жанра."
+          }
+        }
+      }
+    },
     "Choosing Never deletes every cached song now. From then on, the upcoming track is cached only while it's in the queue." : {
       "localizations" : {
         "ru" : {
@@ -863,16 +885,16 @@
     },
     "Connect to your Navidrome server to get started" : {
       "localizations" : {
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Добавьте ваш сервер Navidrome, чтобы начать"
-          }
-        },
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Verbinde dich mit deinem Navidrome-Server, um loszulegen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Добавьте ваш сервер Navidrome, чтобы начать"
           }
         }
       }
@@ -903,6 +925,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Конвертировать файлы Opus в .caf"
+          }
+        }
+      }
+    },
+    "Create" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erstellen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Создать"
+          }
+        }
+      }
+    },
+    "Creation date" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erstellungsdatum"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Дата создания"
           }
         }
       }
@@ -1015,6 +1069,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "По убыванию"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Absteigend"
           }
         }
       }
@@ -1319,6 +1379,22 @@
         }
       }
     },
+    "Genres" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Genres"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Жанры"
+          }
+        }
+      }
+    },
     "Go to album" : {
       "localizations" : {
         "ru" : {
@@ -1614,6 +1690,22 @@
         }
       }
     },
+    "Name" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Name"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Название"
+          }
+        }
+      }
+    },
     "Name: A-Z" : {
       "localizations" : {
         "de" : {
@@ -1837,6 +1929,12 @@
             "state" : "translated",
             "value" : "Порядок"
           }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reihenfolge"
+          }
         }
       }
     },
@@ -2043,6 +2141,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Случайные альбомы"
+          }
+        }
+      }
+    },
+    "Random genres" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zufällige Genres"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Случайные жанры"
           }
         }
       }
@@ -2323,6 +2437,22 @@
         }
       }
     },
+    "Shows genres in the app language. Common genres use a built-in list; any other genre is translated once on this device and remembered, so it isn't translated again." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zeigt Genres in der App-Sprache an. Gängige Genres stammen aus einer integrierten Liste; jedes andere Genre wird einmal auf diesem Gerät übersetzt und gespeichert, damit es nicht erneut übersetzt wird."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Показывает жанры на языке приложения. Распространённые жанры берутся из встроенного списка; любой другой жанр переводится один раз на этом устройстве и запоминается, чтобы не переводить его повторно."
+          }
+        }
+      }
+    },
     "Shows the current playback source, codec, and bitrate (or bit depth/sample rate for a lossless codec) below the artist name in the expanded Now Playing view." : {
       "localizations" : {
         "ru" : {
@@ -2375,6 +2505,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Сортировать по"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sortieren nach"
           }
         }
       }
@@ -2521,6 +2657,22 @@
         }
       }
     },
+    "Translate genres" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Genres übersetzen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Переводить жанры"
+          }
+        }
+      }
+    },
     "Unknown Album" : {
       "localizations" : {
         "ru" : {
@@ -2543,6 +2695,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Далее"
+          }
+        }
+      }
+    },
+    "Update date" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Änderungsdatum"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Дата обновления"
           }
         }
       }
@@ -2719,86 +2887,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Год"
-          }
-        }
-      }
-    },
-    "Random genres" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Zufällige Genres"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Случайные жанры"
-          }
-        }
-      }
-    },
-    "Choose which carousels the Home page shows and drag to reorder them. Random genres shows the chosen number of carousels, each with albums of a different random genre." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wähle, welche Karussells die Startseite zeigt, und ziehe sie, um die Reihenfolge zu ändern. „Zufällige Genres“ zeigt die gewählte Anzahl an Karussells, jeweils mit Alben eines anderen zufälligen Genres."
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Выберите, какие карусели показывать на главной странице, и перетащите их, чтобы изменить порядок. «Случайные жанры» показывает выбранное количество каруселей, в каждой — альбомы другого случайного жанра."
-          }
-        }
-      }
-    },
-    "Translate genres" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Genres übersetzen"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Переводить жанры"
-          }
-        }
-      }
-    },
-    "Genres" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Genres"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Жанры"
-          }
-        }
-      }
-    },
-    "Shows genres in the app language. Common genres use a built-in list; any other genre is translated once on this device and remembered, so it isn't translated again." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Zeigt Genres in der App-Sprache an. Gängige Genres stammen aus einer integrierten Liste; jedes andere Genre wird einmal auf diesem Gerät übersetzt und gespeichert, damit es nicht erneut übersetzt wird."
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Показывает жанры на языке приложения. Распространённые жанры берутся из встроенного списка; любой другой жанр переводится один раз на этом устройстве и запоминается, чтобы не переводить его повторно."
           }
         }
       }

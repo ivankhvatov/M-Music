@@ -7,6 +7,40 @@
 
 import SwiftUI
 
+private enum PlaylistSortField: LocalizedStringKey, CaseIterable {
+    case name = "Name"
+    case creationDate = "Creation date"
+    case updateDate = "Update date"
+
+    var storageKey: String {
+        switch self {
+        case .name: return "name"
+        case .creationDate: return "creationDate"
+        case .updateDate: return "updateDate"
+        }
+    }
+
+    init(storageKey: String) {
+        self = Self.allCases.first { $0.storageKey == storageKey } ?? .name
+    }
+}
+
+private enum PlaylistSortOrder: LocalizedStringKey, CaseIterable {
+    case ascending = "Ascending"
+    case descending = "Descending"
+
+    var storageKey: String {
+        switch self {
+        case .ascending: return "ascending"
+        case .descending: return "descending"
+        }
+    }
+
+    init(storageKey: String) {
+        self = Self.allCases.first { $0.storageKey == storageKey } ?? .ascending
+    }
+}
+
 struct PlaylistsListView: View {
     @Namespace private var playlistZoomNamespace
     @Environment(\.displayScale) private var displayScale
@@ -24,6 +58,8 @@ struct PlaylistsListView: View {
     @State private var hasLoadedOnce = false
 
     @AppStorage("library.playlistsDisplayStyle") private var displayStyleStorage = LibraryDisplayStyle.grid.storageKey
+    @AppStorage("playlistsList.sortField") private var sortFieldStorage = PlaylistSortField.name.storageKey
+    @AppStorage("playlistsList.sortOrder") private var sortOrderStorage = PlaylistSortOrder.ascending.storageKey
     @AppStorage(OfflineModeSettings.Keys.showUnavailableInLists) private var showUnavailableInLists = true
 
     /// Keeps the content hidden on first open until the first screenful's images are in memory.
@@ -38,6 +74,20 @@ struct PlaylistsListView: View {
 
     private var displayStyle: LibraryDisplayStyle {
         LibraryDisplayStyle(storageKey: displayStyleStorage)
+    }
+
+    private var sortField: Binding<PlaylistSortField> {
+        Binding(
+            get: { PlaylistSortField(storageKey: sortFieldStorage) },
+            set: { sortFieldStorage = $0.storageKey }
+        )
+    }
+
+    private var sortOrder: Binding<PlaylistSortOrder> {
+        Binding(
+            get: { PlaylistSortOrder(storageKey: sortOrderStorage) },
+            set: { sortOrderStorage = $0.storageKey }
+        )
     }
 
     private let gridColumns = [
@@ -82,7 +132,13 @@ struct PlaylistsListView: View {
         .onAppResume { warmAround(lastSeen.index) }
         .navigationTitle("Playlists")
         .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
+        .toolbar {
+            createButton
+            sortButton
+        }
         .task { await refresh() }
+        .onChange(of: sortFieldStorage) { updateDisplayedPlaylists() }
+        .onChange(of: sortOrderStorage) { updateDisplayedPlaylists() }
         .onChange(of: searchText) { updateDisplayedPlaylists() }
         .onChange(of: showUnavailableInLists) { updateDisplayedPlaylists() }
         .onChange(of: networkMonitor.isOnline) { updateDisplayedPlaylists() }
@@ -146,8 +202,72 @@ struct PlaylistsListView: View {
         if !networkMonitor.isOnline, !showUnavailableInLists {
             result = result.filter { isFullyDownloaded($0) }
         }
-        displayedPlaylists = result
+        displayedPlaylists = sorted(result)
         rememberFirstScreenful()
+    }
+
+    /// Sorts by the stored field/order. The server's dates are ISO 8601 strings in one format, so
+    /// comparing them as strings orders them chronologically; playlists without a date sort as the
+    /// oldest, and ties keep their name order.
+    private func sorted(_ list: [PlaylistSummary]) -> [PlaylistSummary] {
+        let ascending = sortOrder.wrappedValue == .ascending
+        let byName = list.sortedByLocalizedKey(ascending: true) { $0.name.sortKey }
+        switch sortField.wrappedValue {
+        case .name:
+            return ascending ? byName : byName.reversed()
+        case .creationDate:
+            return sortedByDate(byName, ascending: ascending) { $0.created }
+        case .updateDate:
+            return sortedByDate(byName, ascending: ascending) { $0.changed }
+        }
+    }
+
+    /// `byName` is already name-ordered; the index tie-breaker keeps that order among equal dates
+    /// (`sorted` itself makes no stability promise).
+    private func sortedByDate(_ byName: [PlaylistSummary], ascending: Bool, date: (PlaylistSummary) -> String?) -> [PlaylistSummary] {
+        byName.enumerated().sorted { lhs, rhs in
+            let l = date(lhs.element) ?? ""
+            let r = date(rhs.element) ?? ""
+            if l == r { return lhs.offset < rhs.offset }
+            return ascending ? l < r : l > r
+        }.map(\.element)
+    }
+
+    @ToolbarContentBuilder
+    private var createButton: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            Button {
+                // Not implemented yet.
+            } label: {
+                Image(systemName: "plus")
+                    .foregroundStyle(.primary)
+            }
+            .accessibilityLabel("Create")
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var sortButton: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            Menu {
+                Picker("Sort by", selection: sortField) {
+                    ForEach(PlaylistSortField.allCases, id: \.self) { field in
+                        Text(field.rawValue).tag(field)
+                    }
+                }
+                .pickerStyle(.inline)
+
+                Picker("Order", selection: sortOrder) {
+                    ForEach(PlaylistSortOrder.allCases, id: \.self) { order in
+                        Text(order.rawValue).tag(order)
+                    }
+                }
+                .pickerStyle(.inline)
+            } label: {
+                Image(systemName: "arrow.up.arrow.down")
+                    .foregroundStyle(.primary)
+            }
+        }
     }
 
     /// The requests the screen's cards or rows make for `playlists`, in the current display style.
