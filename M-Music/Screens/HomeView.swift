@@ -28,8 +28,8 @@ struct HomeAlbumSections: Equatable, Sendable {
 
     /// `starredArtistIds` empty means "none starred (or not loaded yet)".
     static func make(
-        from albums: [AlbumID3], starredArtistIds: Set<String>, groupVersions: Bool, genreCount: Int = 0,
-        preferredGenres: [String] = []
+        from albums: [AlbumID3], starredArtistIds: Set<String>, groupVersions: Bool,
+        genreSources: [GenreCarousel] = []
     ) -> HomeAlbumSections {
         let limit = carouselLimit
         // "Group release versions" applies to every carousel except "Recently added", where a
@@ -52,22 +52,14 @@ struct HomeAlbumSections: Equatable, Sendable {
             .prefix(limit)
         let favorites = candidates.filter { $0.artistId.map { starredArtistIds.contains($0.raw) } ?? false }
             .shuffled().prefix(limit)
-        // Each genre is picked at most once, so no two genre carousels share one.
-        var byGenre: [String: (name: String, albums: [AlbumID3])] = [:]
-        if genreCount > 0 {
-            for album in candidates {
-                guard let name = album.genre?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { continue }
-                byGenre[name.lowercased(), default: (name, [])].albums.append(album)
-            }
+        // `genreSources` are the picked genres with every album the server lists under them;
+        // "Group release versions" and the limit apply here like to the other carousels.
+        let genres = genreSources.map { source in
+            GenreCarousel(
+                name: source.name,
+                albums: Array((groupVersions ? source.albums.groupedByPreferredVersion() : source.albums).shuffled().prefix(limit))
+            )
         }
-        // The genres picked earlier stay while they're still fresh and still have enough albums;
-        // the rest of the slots are filled at random.
-        let eligible = byGenre.filter { $0.value.albums.count >= minimumGenreAlbums }
-        let kept = preferredGenres.compactMap { eligible[$0.lowercased()] }.prefix(max(genreCount, 0))
-        let keptKeys = Set(kept.map { $0.name.lowercased() })
-        let fresh = eligible.filter { !keptKeys.contains($0.key) }.values.shuffled()
-        let genres = (Array(kept) + fresh).prefix(max(genreCount, 0))
-            .map { GenreCarousel(name: $0.name, albums: Array($0.albums.shuffled().prefix(limit))) }
         return HomeAlbumSections(
             random: Array(candidates.shuffled().prefix(limit)),
             latestReleases: Array(latest),
@@ -129,8 +121,10 @@ struct HomeView: View {
     @State private var starredArtistIds: Set<String> = []
     /// The starred artists the favorite-artists carousel was last picked for.
     @State private var favoritesBuiltFor: Set<String>?
-    /// The genre count the genre carousels were last picked for.
-    @State private var genresBuiltFor: Int?
+    /// The genres the carousels were picked with, each with all the server's albums for it.
+    @State private var pickedGenres: [HomeAlbumSections.GenreCarousel] = []
+    /// Every genre on the server, for picking from.
+    @State private var serverGenres: [Genre] = []
     @State private var recentlyPlayed: [AlbumID3] = []
     @State private var topPlaylists: [PlaylistSummary] = []
     /// Which albums and playlists are available offline — see `HomeAvailability`.
@@ -219,7 +213,10 @@ struct HomeView: View {
                 rebuildSections(reshuffle: true)
             }
             .onChange(of: randomGenreCount) {
-                rebuildSections(reshuffle: false)
+                Task {
+                    await pickGenres()
+                    rebuildSections(reshuffle: false)
+                }
             }
             .onChange(of: translateGenres) { rebuildLayout() }
             .onChange(of: GenreLocalizer.shared.revision) { rebuildLayout() }
@@ -347,6 +344,7 @@ struct HomeView: View {
         await loadLibrary()
         _ = await (starred, played, playlists)
         if runExpensive { lastExpensiveRefresh = Date() }
+        await pickGenres()
         // The favorite-artist carousel needs both the library and the starred set.
         rebuildSections(reshuffle: false)
     }
@@ -367,6 +365,62 @@ struct HomeView: View {
         if !gotAlbums { settle(.library) }
     }
 
+    /// Picks the genres for the "Random genres" carousels from every genre on the server — not
+    /// only those some album has as its primary genre — and downloads the albums listed under
+    /// each. The picks are kept for 24 hours (`HomeGenrePicks`); the pinned ones that are still
+    /// good stay and the remaining slots are filled at random. Without the server (offline), the
+    /// genres of the cached albums stand in.
+    private func pickGenres() async {
+        let count = visibleCarousels.contains(.randomGenres) ? randomGenreCount : 0
+        guard count > 0 else {
+            if !pickedGenres.isEmpty { pickedGenres = [] }
+            return
+        }
+        if serverGenres.isEmpty { serverGenres = (try? await client.getGenres()) ?? [] }
+        let minimum = HomeAlbumSections.minimumGenreAlbums
+        var pool: [String: String] = [:]
+        for genre in serverGenres where genre.albumCount >= minimum {
+            pool[genre.value.lowercased()] = genre.value
+        }
+        if pool.isEmpty {
+            var counts: [String: (name: String, count: Int)] = [:]
+            for album in allAlbums {
+                for name in album.genreNames { counts[name.lowercased(), default: (name, 0)].count += 1 }
+            }
+            for (key, entry) in counts where entry.count >= minimum { pool[key] = entry.name }
+        }
+        let pinned = HomeGenrePicks.pinned()
+        if !pickedGenres.isEmpty, !pinned.isEmpty, pickedGenres.count == min(count, pool.count) { return }
+
+        let kept = pinned.compactMap { pool[$0.lowercased()] }.prefix(count)
+        let keptKeys = Set(kept.map { $0.lowercased() })
+        let fresh = pool.filter { !keptKeys.contains($0.key) }.values.shuffled()
+        let names = Array((Array(kept) + fresh).prefix(count))
+
+        let client = client
+        let local = allAlbums
+        let fetched = await withTaskGroup(of: (String, [AlbumID3]).self) { group -> [String: [AlbumID3]] in
+            for name in names {
+                group.addTask {
+                    if let albums = try? await client.getAlbumList2(type: .byGenre, size: 500, genre: name), !albums.isEmpty {
+                        return (name, albums)
+                    }
+                    let key = name.lowercased()
+                    return (name, local.filter { $0.genreNames.contains { $0.lowercased() == key } })
+                }
+            }
+            var result: [String: [AlbumID3]] = [:]
+            for await (name, albums) in group { result[name] = albums }
+            return result
+        }
+        guard !Task.isCancelled else { return }
+        let sources = names.compactMap { name in
+            fetched[name].flatMap { $0.isEmpty ? nil : HomeAlbumSections.GenreCarousel(name: name, albums: $0) }
+        }
+        pickedGenres = sources
+        HomeGenrePicks.remember(sources.map(\.name))
+    }
+
     /// `reshuffle` re-rolls the random picks; otherwise they stay put so a quiet refresh (popping
     /// back to Home) doesn't swap the cards under the user. The sorting and shuffling of the whole
     /// library run off the main actor, and only the newest request is applied (`OffMainDeriver`).
@@ -374,12 +428,10 @@ struct HomeView: View {
         let albums = allAlbums
         let starredIds = starredArtistIds
         let groupVersions = groupReleaseVersionsEnabled
-        let genreCount = visibleCarousels.contains(.randomGenres) ? randomGenreCount : 0
-        let pinnedGenres = HomeGenrePicks.pinned()
+        let genreSources = visibleCarousels.contains(.randomGenres) ? pickedGenres : []
         deriver.run({
             HomeAlbumSections.make(
-                from: albums, starredArtistIds: starredIds, groupVersions: groupVersions, genreCount: genreCount,
-                preferredGenres: pinnedGenres
+                from: albums, starredArtistIds: starredIds, groupVersions: groupVersions, genreSources: genreSources
             )
         }, apply: { built in
             var next = sections
@@ -393,15 +445,12 @@ struct HomeView: View {
                     next.favoriteArtists = built.favoriteArtists
                 }
             }
-            // The genres are kept for 24 hours (`HomeGenrePicks`, which also survives relaunches);
-            // they're re-picked only when that has passed or the count changes, so popping back
-            // from an album doesn't swap them.
-            if genreCount != genresBuiltFor || (genreCount > 0 && (sections.genres.isEmpty || pinnedGenres.isEmpty)) {
+            // The picks themselves are kept for 24 hours (`pickGenres`); the albums shown for them
+            // are only redrawn when the picks change, so popping back from an album doesn't swap them.
+            if next.genres.map(\.name) != genreSources.map(\.name) || (!genreSources.isEmpty && sections.genres.isEmpty) {
                 next.genres = built.genres
             }
-            if genreCount > 0 { HomeGenrePicks.remember(next.genres.map(\.name)) }
             favoritesBuiltFor = starredIds
-            genresBuiltFor = genreCount
             // Only a change re-renders the carousels.
             if next != sections { sections = next }
             // Whichever build is applied last settles the library part, so a build superseded
