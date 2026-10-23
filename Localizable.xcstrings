@@ -2754,6 +2754,54 @@
           }
         }
       }
+    },
+    "Translate genres" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Genres übersetzen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Переводить жанры"
+          }
+        }
+      }
+    },
+    "Genres" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Genres"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Жанры"
+          }
+        }
+      }
+    },
+    "Shows genres in the app language. Common genres use a built-in list; any other genre is translated once on this device and remembered, so it isn't translated again." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zeigt Genres in der App-Sprache an. Gängige Genres stammen aus einer integrierten Liste; jedes andere Genre wird einmal auf diesem Gerät übersetzt und gespeichert, damit es nicht erneut übersetzt wird."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Показывает жанры на языке приложения. Распространённые жанры берутся из встроенного списка; любой другой жанр переводится один раз на этом устройстве и запоминается, чтобы не переводить его повторно."
+          }
+        }
+      }
     }
   },
   "version" : "1.1"

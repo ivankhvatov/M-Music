@@ -93,6 +93,7 @@ struct MainView: View {
             .overlay {
                 PlayerOverlay()
             }
+            .genreTranslationHost()
             .onReceive(Self.hasNowPlayingPublisher) { PlayerPresentation.shared.hasNowPlaying = $0 }
             .task {
                 #if DEBUG

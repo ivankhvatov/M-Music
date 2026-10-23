@@ -152,6 +152,7 @@ enum HomeLayoutBuilder {
         order: String,
         disabled: String,
         randomGenreCount: Int,
+        genreTitles: [String: String] = [:],
         sections: HomeAlbumSections,
         recentlyPlayed: [AlbumID3],
         topPlaylists: [PlaylistSummary],
@@ -180,7 +181,7 @@ enum HomeLayoutBuilder {
                 add(kind, title: .kind(kind), source: "home.\(kind.rawValue)", cards: cards)
             case .randomGenres:
                 for genre in sections.genres.prefix(randomGenreCount) {
-                    add(kind, title: .verbatim(genre.name), source: "home.genre.\(genre.id)", cards: albumCards(genre.albums))
+                    add(kind, title: .verbatim(genreTitles[genre.name] ?? genre.name), source: "home.genre.\(genre.id)", cards: albumCards(genre.albums))
                 }
             case .randomAlbums: add(kind, title: .kind(kind), source: "home.\(kind.rawValue)", cards: albumCards(sections.random))
             case .latestReleases: add(kind, title: .kind(kind), source: "home.\(kind.rawValue)", cards: albumCards(sections.latestReleases))

@@ -162,6 +162,7 @@ struct HomeView: View {
     @AppStorage(HomeContentSettings.Keys.order) private var carouselOrderStorage = ""
     @AppStorage(HomeContentSettings.Keys.disabled) private var disabledCarouselsStorage = ""
     @AppStorage(HomeContentSettings.Keys.randomGenreCount) private var randomGenreCount = 0
+    @AppStorage(GenreTranslationSettings.Keys.isEnabled) private var translateGenres = false
 
     private var visibleCarousels: [HomeCarouselKind] {
         HomeContentSettings.visible(
@@ -220,6 +221,8 @@ struct HomeView: View {
             .onChange(of: randomGenreCount) {
                 rebuildSections(reshuffle: false)
             }
+            .onChange(of: translateGenres) { rebuildLayout() }
+            .onChange(of: GenreLocalizer.shared.revision) { rebuildLayout() }
             .onChange(of: carouselOrderStorage) { rebuildLayout() }
             .onChange(of: disabledCarouselsStorage) { rebuildLayout() }
             .onChange(of: imageReadiness.isReady) { _, isReady in
@@ -260,12 +263,17 @@ struct HomeView: View {
         let disabled = disabledCarouselsStorage
         let genreCount = randomGenreCount
         let sections = sections
+        // Localized here, on the main actor: the builder runs off it.
+        let genreTitles = Dictionary(
+            sections.genres.map { ($0.name, GenreLocalizer.shared.localized($0.name)) },
+            uniquingKeysWith: { first, _ in first }
+        )
         let played = recentlyPlayed
         let playlists = topPlaylists
         let availability = availability
         layoutDeriver.run({
             HomeLayoutBuilder.build(
-                order: order, disabled: disabled, randomGenreCount: genreCount, sections: sections,
+                order: order, disabled: disabled, randomGenreCount: genreCount, genreTitles: genreTitles, sections: sections,
                 recentlyPlayed: played, topPlaylists: playlists, availability: availability
             )
         }, apply: { built in

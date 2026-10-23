@@ -564,7 +564,7 @@ struct AlbumView: View {
     }
 
     func albumDetails() -> Text {
-        let parts = [album.genre, album.year.map(String.init), albumCodec].compactMap { $0 }
+        let parts = [album.genre.map(GenreLocalizer.shared.localized), album.year.map(String.init), albumCodec].compactMap { $0 }
         return Text(parts.joined(separator: " • "))
             .font(.caption)
             .foregroundColor(.secondary)

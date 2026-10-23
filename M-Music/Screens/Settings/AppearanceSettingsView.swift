@@ -20,6 +20,7 @@ struct AppearanceSettingsView: View {
     @AppStorage(HomeContentSettings.Keys.order) private var homeOrderStorage = ""
     @AppStorage(HomeContentSettings.Keys.disabled) private var homeDisabledStorage = ""
     @AppStorage(HomeContentSettings.Keys.randomGenreCount) private var randomGenreCount = 0
+    @AppStorage(GenreTranslationSettings.Keys.isEnabled) private var translateGenres = false
     @State private var isHomeContentExpanded = false
 
     private var homeOrder: [HomeCarouselKind] { HomeContentSettings.order(from: homeOrderStorage) }
@@ -103,6 +104,13 @@ struct AppearanceSettingsView: View {
                     Text("Home")
                 } footer: {
                     Text("Choose which carousels the Home page shows and drag to reorder them. Random genres shows the chosen number of carousels, each with albums of a different random genre.")
+                }
+                Section {
+                    Toggle("Translate genres", isOn: $translateGenres)
+                } header: {
+                    Text("Genres")
+                } footer: {
+                    Text("Shows genres in the app language. Common genres use a built-in list; any other genre is translated once on this device and remembered, so it isn't translated again.")
                 }
                 Section {
                     Toggle("Show audio info", isOn: $showAudioInfo)
