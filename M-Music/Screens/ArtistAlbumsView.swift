@@ -290,7 +290,7 @@ struct ArtistAlbumsView: View {
             let ordered = sortedAlbums
             LazyVGrid(columns: gridColumns, spacing: 16) {
                 ForEach(ordered) { album in
-                    NavigationLink(destination: LazyDestination { AlbumView(album: album, zoomNamespace: albumZoomNamespace) }) {
+                    NavigationLink(destination: LazyDestination { AlbumView(album: album, zoomNamespace: albumZoomNamespace, openedFromArtistID: artist.id.raw) }) {
                         AlbumCardView(album: album, zoomNamespace: albumZoomNamespace, subtitle: .year)
                     }
                     .buttonStyle(.plain)
@@ -352,7 +352,7 @@ struct ArtistAlbumsView: View {
                 // their artwork) — an eager `HStack` started every card's image load at once.
                 LazyHStack(alignment: .top, spacing: 16) {
                     ForEach(albums) { album in
-                        NavigationLink(destination: LazyDestination { AlbumView(album: album, zoomNamespace: albumZoomNamespace) }) {
+                        NavigationLink(destination: LazyDestination { AlbumView(album: album, zoomNamespace: albumZoomNamespace, openedFromArtistID: artist.id.raw) }) {
                             AlbumCardView(album: album, zoomNamespace: albumZoomNamespace, subtitle: .year)
                                 .frame(width: 160)
                         }

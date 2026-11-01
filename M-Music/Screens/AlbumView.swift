@@ -3,6 +3,9 @@ import SwiftUI
 struct AlbumView: View {
     let album: AlbumID3
     var zoomNamespace: Namespace.ID? = nil
+    /// The artist whose screen this album was opened from, when it was — so tapping the artist's
+    /// name can simply close this screen instead of stacking a second copy of that artist's.
+    var openedFromArtistID: String? = nil
 
     private let client = SubsonicClient.shared
     /// Not `@ObservedObject`: this view only ever calls a method on it (`playTrack(at:)` below),
@@ -13,6 +16,7 @@ struct AlbumView: View {
     @ObservedObject private var downloads = DownloadStore.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.dismiss) private var dismiss
 
     /// Zoom transition for the "Other versions" / "More by artist" cards below — separate from
     /// the incoming `zoomNamespace` param, which only matches this view's own entry transition.
@@ -69,9 +73,10 @@ struct AlbumView: View {
     private static let placeholderDarkenedBackground = Color(.systemBackground).darkened()
     private static let placeholderDarkenedRelatedSectionBackground = Color(.systemBackground).darkened().darkened(by: 0.8)
 
-    init(album: AlbumID3, zoomNamespace: Namespace.ID? = nil) {
+    init(album: AlbumID3, zoomNamespace: Namespace.ID? = nil, openedFromArtistID: String? = nil) {
         self.album = album
         self.zoomNamespace = zoomNamespace
+        self.openedFromArtistID = openedFromArtistID
         _isStarred = State(initialValue: album.isStarred)
         _backgroundColor = State(initialValue: Color(.systemBackground))
         _darkenedBackgroundColor = State(initialValue: Self.placeholderDarkenedBackground)
@@ -570,6 +575,39 @@ struct AlbumView: View {
             .foregroundColor(.secondary)
     }
 
+    /// Goes to the album artist's screen, found from this album's id the same way the expanded
+    /// player's "go to artist" does (`AppRoute.artist(ofAlbum:)`), and closes this album as it
+    /// does — a `NavigationLink(value:)` left this screen on top of the artist's: the tab's stack
+    /// keeps its typed routes apart from screens pushed by destination links, and shows the latter
+    /// above the former. Plain text when the album carries no artist id to follow.
+    @ViewBuilder
+    private func artistName() -> some View {
+        let label = Text(album.artist ?? "Unknown Artist")
+            .font(.title3)
+            .multilineTextAlignment(.center)
+        if album.artistId != nil {
+            Button {
+                dismiss()
+                // That artist's screen is already right below this one: going back is going there.
+                if let openedFromArtistID, openedFromArtistID == album.artistId?.raw { return }
+                let navigation = AppNavigation.shared
+                let tab = navigation.selectedTab
+                let route = AppRoute.artist(ofAlbum: album.id.raw)
+                // Pushed once this screen has finished leaving — adding the route while it's
+                // still on the stack scrambles the stack's two kinds of pushes into a blank page.
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(0.4))
+                    navigation.paths[tab].append(route)
+                }
+            } label: {
+                label
+            }
+            .buttonStyle(.plain)
+        } else {
+            label
+        }
+    }
+
     func albumHeader() -> some View {
         HStack(alignment: .center) {
             Spacer()
@@ -581,9 +619,7 @@ struct AlbumView: View {
                     .font(.system(size: 24, weight: .semibold))
                     .multilineTextAlignment(.center)
                     .padding(.top, 15)
-                Text(album.artist ?? "Unknown Artist")
-                    .font(.title3)
-                    .multilineTextAlignment(.center)
+                artistName()
                 albumDetails()
                     .font(.caption)
                     .multilineTextAlignment(.center)
