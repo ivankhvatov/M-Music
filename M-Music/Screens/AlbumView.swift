@@ -575,34 +575,31 @@ struct AlbumView: View {
             .foregroundColor(.secondary)
     }
 
-    /// Goes to the album artist's screen, found from this album's id the same way the expanded
-    /// player's "go to artist" does (`AppRoute.artist(ofAlbum:)`), and closes this album as it
-    /// does — a `NavigationLink(value:)` left this screen on top of the artist's: the tab's stack
-    /// keeps its typed routes apart from screens pushed by destination links, and shows the latter
-    /// above the former. Plain text when the album carries no artist id to follow.
+    /// Opens the album artist's screen on top of this one, looked up from this album's id the same
+    /// way the expanded player's "go to artist" does (`RoutedArtistView`). A destination link, not
+    /// `NavigationLink(value: AppRoute.artist(...))`: the tab's stack shows screens pushed by
+    /// destination links above typed routes, so the latter left this screen on top of the
+    /// artist's. When this album was opened from that same artist's screen, it goes back to it
+    /// instead of stacking a second copy. Plain text when the album carries no artist id.
     @ViewBuilder
     private func artistName() -> some View {
         let label = Text(album.artist ?? "Unknown Artist")
             .font(.title3)
             .multilineTextAlignment(.center)
-        if album.artistId != nil {
-            Button {
-                dismiss()
-                // That artist's screen is already right below this one: going back is going there.
-                if let openedFromArtistID, openedFromArtistID == album.artistId?.raw { return }
-                let navigation = AppNavigation.shared
-                let tab = navigation.selectedTab
-                let route = AppRoute.artist(ofAlbum: album.id.raw)
-                // Pushed once this screen has finished leaving — adding the route while it's
-                // still on the stack scrambles the stack's two kinds of pushes into a blank page.
-                Task { @MainActor in
-                    try? await Task.sleep(for: .seconds(0.4))
-                    navigation.paths[tab].append(route)
+        if let artistId = album.artistId?.raw {
+            if openedFromArtistID == artistId {
+                Button {
+                    dismiss()
+                } label: {
+                    label
                 }
-            } label: {
-                label
+                .buttonStyle(.plain)
+            } else {
+                NavigationLink(destination: LazyDestination { RoutedArtistView(albumID: album.id.raw) }) {
+                    label
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         } else {
             label
         }
