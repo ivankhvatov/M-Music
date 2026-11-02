@@ -429,12 +429,22 @@ struct PlayerQueueList: View, Equatable {
         }
     }
 
-    /// The shuffle, repeat and non-stop buttons, sharing the row's width. They don't do anything yet.
+    /// The shuffle, repeat and non-stop buttons, sharing the row's width. The non-stop one doesn't
+    /// do anything yet.
     private var buttons: some View {
         HStack(spacing: 8) {
-            HeaderButton(symbol: "shuffle")
-            HeaderButton(symbol: "repeat")
-            HeaderButton(symbol: "infinity")
+            HeaderButton(symbol: "shuffle", isActive: player.isShuffled, label: "Shuffle") {
+                player.toggleShuffle()
+            }
+            // Off, then on for the queue, then on for the song — which has a symbol of its own.
+            HeaderButton(
+                symbol: player.repeatMode == .one ? "repeat.1" : "repeat",
+                isActive: player.repeatMode != .off,
+                label: player.repeatMode == .one ? "Repeat One" : "Repeat"
+            ) {
+                player.cycleRepeatMode()
+            }
+            HeaderButton(symbol: "infinity", label: "Non-Stop") {}
         }
         .padding(.horizontal, NowPlayingLayout.cardPaddings)
         .padding(.top, 8)
@@ -463,21 +473,45 @@ struct PlayerQueueList: View, Equatable {
         player.queueSourceName ?? player.currentTrack?.album
     }
 
-    /// A capsule-shaped, transparent gray button with a symbol, as wide as the row gives it.
+    /// A capsule-shaped button with a symbol, as wide as the row gives it: a transparent gray
+    /// capsule with the symbol in transparent white — or, while it's on, a capsule of transparent
+    /// white with the symbol cut out of it, so that what's behind shows through.
     private struct HeaderButton: View {
         let symbol: String
+        var isActive = false
+        let label: LocalizedStringKey
+        let action: () -> Void
+
+        private var glyph: some View {
+            Image(systemName: symbol)
+                .font(.system(size: 18, weight: .semibold))
+        }
 
         var body: some View {
-            Button {} label: {
-                Image(systemName: symbol)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(Color.transparentWhite)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 42)
-                    .background(Color.white.opacity(0.15), in: .capsule)
-                    .contentShape(.capsule)
+            Button(action: action) {
+                ZStack {
+                    Capsule()
+                        .fill(Color.white.opacity(0.15))
+                        .overlay { glyph.foregroundStyle(Color.transparentWhite) }
+                        .opacity(isActive ? 0 : 1)
+                    Capsule()
+                        .fill(Color.transparentWhite)
+                        // The mask is opaque but for the symbol, which is cut out of it.
+                        .mask {
+                            Rectangle()
+                                .overlay { glyph.blendMode(.destinationOut) }
+                                .compositingGroup()
+                        }
+                        .opacity(isActive ? 1 : 0)
+                }
+                .animation(.easeInOut(duration: 0.2), value: isActive)
+                .frame(maxWidth: .infinity)
+                .frame(height: 42)
+                .contentShape(.capsule)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(label)
+            .accessibilityAddTraits(isActive ? .isSelected : [])
         }
     }
 

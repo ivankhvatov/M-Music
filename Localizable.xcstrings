@@ -1,8 +1,12 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "-%@" : {},
-    "%lld" : {},
+    "-%@" : {
+
+    },
+    "%lld" : {
+
+    },
     "%lld dB" : {
       "localizations" : {
         "de" : {
@@ -265,7 +269,9 @@
         }
       }
     },
-    "%lld%%" : {},
+    "%lld%%" : {
+
+    },
     "1 day" : {
       "localizations" : {
         "de" : {
@@ -734,16 +740,16 @@
     },
     "Ascending" : {
       "localizations" : {
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "По возрастанию"
-          }
-        },
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Aufsteigend"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "По возрастанию"
           }
         }
       }
@@ -1065,16 +1071,16 @@
     },
     "Descending" : {
       "localizations" : {
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "По убыванию"
-          }
-        },
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Absteigend"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "По убыванию"
           }
         }
       }
@@ -1573,7 +1579,9 @@
         }
       }
     },
-    "LIVE" : {},
+    "LIVE" : {
+
+    },
     "Live albums" : {
       "localizations" : {
         "ru" : {
@@ -1880,6 +1888,9 @@
         }
       }
     },
+    "Non-Stop" : {
+
+    },
     "Not Playing" : {
       "localizations" : {
         "de" : {
@@ -1924,16 +1935,16 @@
     },
     "Order" : {
       "localizations" : {
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Порядок"
-          }
-        },
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Reihenfolge"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Порядок"
           }
         }
       }
@@ -2249,6 +2260,12 @@
         }
       }
     },
+    "Repeat" : {
+
+    },
+    "Repeat One" : {
+
+    },
     "ReplayGain" : {
       "localizations" : {
         "de" : {
@@ -2463,6 +2480,9 @@
         }
       }
     },
+    "Shuffle" : {
+
+    },
     "Singles" : {
       "localizations" : {
         "ru" : {
@@ -2501,16 +2521,16 @@
     },
     "Sort by" : {
       "localizations" : {
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Сортировать по"
-          }
-        },
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sortieren nach"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сортировать по"
           }
         }
       }

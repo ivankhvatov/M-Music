@@ -210,6 +210,16 @@ final class PlayerEngine: ObservableObject {
         return true
     }
 
+    /// Takes back what `preloadForGapless(url:)` queued, for when the track that comes next has
+    /// changed and nothing can be preloaded in its place — left in the queue, the player would
+    /// advance into it anyway.
+    func cancelGaplessPreload() {
+        if let stale = gaplessNextItem { player.remove(stale) }
+        gaplessNextItem = nil
+        gaplessNextURL = nil
+        gaplessPreloaded = false
+    }
+
     /// `AVPlayerItemDidPlayToEndTime` is posted *before* the queue player has advanced its
     /// `currentItem` to the next item — by the time this runs the advance may or may not have
     /// happened yet. Everything after the swap (most importantly preloading the *following* item,
