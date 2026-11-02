@@ -434,7 +434,8 @@ struct PlayerQueueList: View, Equatable {
     private var buttons: some View {
         HStack(spacing: 8) {
             HeaderButton(symbol: "shuffle", isActive: player.isShuffled, label: "Shuffle") {
-                player.toggleShuffle()
+                // The rows keep their ids, so the list moves them to their new places.
+                withAnimation(.smooth(duration: 0.5)) { player.toggleShuffle() }
             }
             // Off, then on for the queue, then on for the song — which has a symbol of its own.
             HeaderButton(
@@ -485,6 +486,22 @@ struct PlayerQueueList: View, Equatable {
         private var glyph: some View {
             Image(systemName: symbol)
                 .font(.system(size: 18, weight: .semibold))
+                // A different symbol (repeat, repeat that song) takes the place of the one before it at
+                // once, without a transition of its own.
+                .contentTransition(.identity)
+                .transaction { $0.animation = nil }
+        }
+
+        /// Dimmed while it's pressed and back to full the moment it's let go. With the plain style
+        /// the button came back from being pressed over half a second, so a symbol that changed
+        /// with the tap — repeat to repeat that song — was seen to fade in, dimmed, rather than
+        /// to change.
+        private struct PressStyle: ButtonStyle {
+            func makeBody(configuration: Configuration) -> some View {
+                configuration.label
+                    .opacity(configuration.isPressed ? 0.7 : 1)
+                    .animation(nil, value: configuration.isPressed)
+            }
         }
 
         var body: some View {
@@ -509,7 +526,7 @@ struct PlayerQueueList: View, Equatable {
                 .frame(height: 42)
                 .contentShape(.capsule)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
             .accessibilityLabel(label)
             .accessibilityAddTraits(isActive ? .isSelected : [])
         }
