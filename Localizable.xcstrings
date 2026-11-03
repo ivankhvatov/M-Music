@@ -522,6 +522,22 @@
         }
       }
     },
+    "Add to playlist" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zu Playlist hinzufügen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Добавить в плейлист"
+          }
+        }
+      }
+    },
     "Add to queue" : {
       "localizations" : {
         "ru" : {
@@ -1917,6 +1933,22 @@
         }
       }
     },
+    "Open lyrics" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Songtext öffnen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Открыть текст песни"
+          }
+        }
+      }
+    },
     "Opus" : {
       "localizations" : {
         "de" : {
@@ -2394,6 +2426,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Сервер"
+          }
+        }
+      }
+    },
+    "Set timer" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Timer einstellen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Установить таймер"
           }
         }
       }

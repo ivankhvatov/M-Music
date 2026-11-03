@@ -3,7 +3,7 @@ import SwiftUI
 /// The row below the transport buttons: lyrics and queue toggles flanking a "more" button.
 /// The queue and lyrics toggles each replace the big artwork with their panel (see
 /// `RegularChrome`); the two are mutually exclusive — `panel` can only be one of them — so turning
-/// either on turns the other off. "More" opens a menu to go to the song's album or artist.
+/// either on turns the other off. "More" opens a menu to go to the song's album or artist, and to add it to a playlist, set a timer or open its lyrics (the last three do nothing yet).
 struct PlayerBottomRow: View {
     @Binding var panel: PlayerPanel
 
@@ -23,8 +23,9 @@ struct PlayerBottomRow: View {
 }
 
 private extension PlayerBottomRow {
-    /// Where the song is from: its album, and the album's artist. The ids are read when a button
-    /// is tapped, so the menu doesn't follow the player's every tick.
+    /// Where the song is from: its album, and the album's artist; then what else can be done with
+    /// it. The ids are read when a button is tapped, so the menu doesn't follow the player's every
+    /// tick.
     var moreMenu: some View {
         Menu {
             Button("Go to album", systemImage: "opticaldisc") {
@@ -35,6 +36,10 @@ private extension PlayerBottomRow {
                 guard let albumID = PlayerManager.shared.currentTrack?.albumId?.raw else { return }
                 AppNavigation.shared.open(.artist(ofAlbum: albumID))
             }
+            // Not wired up yet.
+            Button("Add to playlist", systemImage: "text.badge.plus") {}
+            Button("Set timer", systemImage: "timer") {}
+            Button("Open lyrics", systemImage: "quote.closing") {}
         } label: {
             PlayerBottomGlyph(symbol: "ellipsis", isOn: false)
                 .frame(width: 48, height: 48, alignment: .center)
