@@ -57,6 +57,10 @@ struct PlaylistsListView: View {
     @State private var loadError: String?
     @State private var hasLoadedOnce = false
 
+    @State private var isCreatingPlaylist = false
+    @State private var newPlaylistName = ""
+    @State private var createError: String?
+
     @AppStorage("library.playlistsDisplayStyle") private var displayStyleStorage = LibraryDisplayStyle.grid.storageKey
     @AppStorage("playlistsList.sortField") private var sortFieldStorage = PlaylistSortField.name.storageKey
     @AppStorage("playlistsList.sortOrder") private var sortOrderStorage = PlaylistSortOrder.ascending.storageKey
@@ -135,6 +139,19 @@ struct PlaylistsListView: View {
         .toolbar {
             createButton
             sortButton
+        }
+        .alert("Create a playlist", isPresented: $isCreatingPlaylist) {
+            TextField("Playlist name", text: $newPlaylistName)
+            Button("Cancel", role: .cancel) {}
+            Button("Create") { createPlaylist(named: newPlaylistName) }
+        }
+        .alert("Couldn't create the playlist", isPresented: Binding(
+            get: { createError != nil },
+            set: { if !$0 { createError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(createError ?? "")
         }
         .task { await refresh() }
         .onChange(of: sortFieldStorage) { updateDisplayedPlaylists() }
@@ -233,11 +250,37 @@ struct PlaylistsListView: View {
         }.map(\.element)
     }
 
+    /// "New Playlist N" (localized) with the smallest N no existing playlist already uses,
+    /// ignoring case.
+    private func defaultPlaylistName() -> String {
+        let taken = Set(playlists.map { $0.name.lowercased() })
+        var number = 1
+        while taken.contains(String(localized: "New Playlist \(number)").lowercased()) {
+            number += 1
+        }
+        return String(localized: "New Playlist \(number)")
+    }
+
+    /// Creates an empty playlist on the server, then force-refreshes so it shows up.
+    private func createPlaylist(named name: String) {
+        var name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.isEmpty { name = defaultPlaylistName() }
+        Task {
+            do {
+                try await client.createPlaylist(name: name)
+                await performRefresh(force: true)
+            } catch {
+                createError = error.localizedDescription
+            }
+        }
+    }
+
     @ToolbarContentBuilder
     private var createButton: some ToolbarContent {
         ToolbarItem(placement: .topBarTrailing) {
             Button {
-                // Not implemented yet.
+                newPlaylistName = ""
+                isCreatingPlaylist = true
             } label: {
                 Image(systemName: "plus")
                     .foregroundStyle(.primary)

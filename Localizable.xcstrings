@@ -1,12 +1,8 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "-%@" : {
-
-    },
-    "%lld" : {
-
-    },
+    "-%@" : {},
+    "%lld" : {},
     "%lld dB" : {
       "localizations" : {
         "de" : {
@@ -269,9 +265,7 @@
         }
       }
     },
-    "%lld%%" : {
-
-    },
+    "%lld%%" : {},
     "1 day" : {
       "localizations" : {
         "de" : {
@@ -817,8 +811,13 @@
       }
     },
     "Cancel" : {
-      "extractionState" : "stale",
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abbrechen"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -951,6 +950,22 @@
         }
       }
     },
+    "Couldn't create the playlist" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Playlist konnte nicht erstellt werden"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удалось создать плейлист"
+          }
+        }
+      }
+    },
     "Create" : {
       "localizations" : {
         "de" : {
@@ -963,6 +978,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Создать"
+          }
+        }
+      }
+    },
+    "Create a playlist" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Playlist erstellen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Создать плейлист"
           }
         }
       }
@@ -1595,9 +1626,7 @@
         }
       }
     },
-    "LIVE" : {
-
-    },
+    "LIVE" : {},
     "Live albums" : {
       "localizations" : {
         "ru" : {
@@ -1904,9 +1933,7 @@
         }
       }
     },
-    "Non-Stop" : {
-
-    },
+    "Non-Stop" : {},
     "Not Playing" : {
       "localizations" : {
         "de" : {
@@ -1929,6 +1956,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Оффлайн-режим"
+          }
+        }
+      }
+    },
+    "OK" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OK"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OK"
           }
         }
       }
@@ -2077,6 +2120,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Проигрыватель"
+          }
+        }
+      }
+    },
+    "Playlist name" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Name der Playlist"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Название плейлиста"
           }
         }
       }
@@ -2292,12 +2351,8 @@
         }
       }
     },
-    "Repeat" : {
-
-    },
-    "Repeat One" : {
-
-    },
+    "Repeat" : {},
+    "Repeat One" : {},
     "ReplayGain" : {
       "localizations" : {
         "de" : {
@@ -2528,9 +2583,7 @@
         }
       }
     },
-    "Shuffle" : {
-
-    },
+    "Shuffle" : {},
     "Singles" : {
       "localizations" : {
         "ru" : {
@@ -2955,6 +3008,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Год"
+          }
+        }
+      }
+    },
+    "New Playlist %lld" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neue Playlist %lld"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Новый плейлист %lld"
           }
         }
       }
