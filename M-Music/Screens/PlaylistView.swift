@@ -176,8 +176,25 @@ struct PlaylistView: View {
     /// Feeds `trackList()`'s `ForEach` directly — see `AlbumView.visibleSongs`'s identical doc
     /// comment for why a hidden track must never be constructed at all.
     private var visibleSongs: [Child] {
-        guard !networkMonitor.isOnline, !showUnavailableInPlaylists else { return songs }
-        return songs.filter { downloads.isDownloaded($0.id.raw) }
+        let numbered = numberedSongs
+        guard !networkMonitor.isOnline, !showUnavailableInPlaylists else { return numbered }
+        return numbered.filter { downloads.isDownloaded($0.id.raw) }
+    }
+
+    /// `songs` with each repeat of a song numbered — see `Child.occurrence`. A playlist can hold
+    /// one song several times; the numbering is what lets a row, and the queue entry played from
+    /// it, be told from its repeats. Counted over the whole playlist before anything is hidden, so
+    /// a row keeps its number whatever's filtered out. `songs` itself stays as loaded, so
+    /// `LibraryLoader` still compares it against what the server sent.
+    private var numberedSongs: [Child] {
+        var seen: [FlexibleID: Int] = [:]
+        return songs.map { song in
+            let occurrence = seen[song.id, default: 0]
+            seen[song.id] = occurrence + 1
+            var numbered = song
+            numbered.occurrence = occurrence
+            return numbered
+        }
     }
 
     func trackList() -> some View {
@@ -185,7 +202,7 @@ struct PlaylistView: View {
         // whole `songs` array) again below for the row-count checks — see
         // `AlbumView.trackList()`'s identical comment.
         let visibleSongs = self.visibleSongs
-        return ForEach(Array(visibleSongs.enumerated()), id: \.element.id) { index, track in
+        return ForEach(Array(visibleSongs.enumerated()), id: \.element.instanceID) { index, track in
             Button {
                 playTrack(at: index)
             } label: {
@@ -243,12 +260,17 @@ struct PlaylistView: View {
 
     /// See `AlbumView.playableSongs`'s identical doc comment.
     private var playableSongs: [Child] {
-        networkMonitor.isOnline ? songs : songs.filter { downloads.isDownloaded($0.id.raw) }
+        let numbered = numberedSongs
+        return networkMonitor.isOnline ? numbered : numbered.filter { downloads.isDownloaded($0.id.raw) }
     }
 
     private func playTrack(at index: Int) {
+        let visible = visibleSongs
+        guard visible.indices.contains(index) else { return }
         let queue = playableSongs
-        guard let startAt = queue.firstIndex(where: { $0.id == visibleSongs[index].id }) else { return }
+        // By `instanceID`, not `id`: with a song repeated in the playlist, the first repeat's
+        // position would be found for a tap on any of them.
+        guard let startAt = queue.firstIndex(where: { $0.instanceID == visible[index].instanceID }) else { return }
         player.play(queue: queue, startAt: startAt, fromPlaylist: true, sourceName: playlist.name, origin: .playlist(playlist.id.raw))
     }
 

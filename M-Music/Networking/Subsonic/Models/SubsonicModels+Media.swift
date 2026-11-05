@@ -72,6 +72,16 @@ struct Child: Codable, Identifiable, Hashable, Sendable {
     /// ReplayGain tags (OpenSubsonic extension) — track and album gain/peak, plus optional
     /// base/fallback values. `nil` if the file has no ReplayGain metadata at all.
     let replayGain: ReplayGain?
+    /// Which repeat of its song a playlist tracklist row — or the queue entry played from it — is:
+    /// `0` the first time the song appears in that playlist, `1` the second, and so on. A playlist
+    /// can hold one song several times, and `id` alone can't tell those apart. Not a server field:
+    /// `PlaylistView` sets it on the tracklist it shows and plays from, so the row that's playing
+    /// can be told from its repeats; `nil` everywhere else. Encoded, so the queue keeps it across
+    /// a relaunch.
+    var occurrence: Int? = nil
+
+    /// `id` plus `occurrence` — unique among a playlist's rows even where a song repeats.
+    var instanceID: String { "\(id.raw)#\(occurrence ?? 0)" }
 
     var isStarred: Bool { starred != nil }
 
@@ -83,7 +93,7 @@ struct Child: Codable, Identifiable, Hashable, Sendable {
         case id, parent, isDir, title, album, artist, track, year, genre, coverArt, size
         case contentType, suffix, duration, bitRate, path, isVideo, userRating, averageRating
         case playCount, discNumber, created, starred, albumId, artistId, type, bookmarkPosition
-        case albumVersion, replayGain
+        case albumVersion, replayGain, occurrence
     }
 
     init(from decoder: Decoder) throws {
@@ -117,6 +127,7 @@ struct Child: Codable, Identifiable, Hashable, Sendable {
         bookmarkPosition = try c.decodeIfPresent(Int.self, forKey: .bookmarkPosition)
         albumVersion = try c.decodeIfPresent(String.self, forKey: .albumVersion)
         replayGain = try c.decodeIfPresent(ReplayGain.self, forKey: .replayGain)
+        occurrence = try c.decodeIfPresent(Int.self, forKey: .occurrence)
     }
 
     /// Builds a `Child` directly rather than by decoding server JSON — used to turn a locally

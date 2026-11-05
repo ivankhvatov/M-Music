@@ -493,6 +493,9 @@ private struct SongListRow: View {
 /// ticks — `SongRow` itself no longer observes `player`, so its `Menu` stays stable while open.
 private struct SongNowPlayingOverlay: View {
     let trackId: Child.ID
+    /// Set in a playlist's tracklist, where one song can sit in several rows: the overlay then
+    /// only shows for the repeat the queue is actually on — see `Child.occurrence`.
+    var occurrence: Int?
     let rowArtworkSize: CGFloat
     /// Set in a playlist's tracklist: the overlay then only shows while the queue was started from
     /// that playlist (or somewhere that doesn't say). The songs list leaves it unset and always shows it.
@@ -500,8 +503,18 @@ private struct SongNowPlayingOverlay: View {
 
     @ObservedObject private var player = PlayerManager.shared
 
+    /// Whether this row is the queue's current entry. A row that can tell its repeats apart only
+    /// matches the exact one the queue is on; when the queue entry can't say which repeat it is
+    /// (it wasn't started from a playlist's tracklist), the song alone decides, as in the lists
+    /// that have no repeats.
+    private var isCurrentEntry: Bool {
+        guard let current = player.currentTrack, current.id == trackId else { return false }
+        guard let occurrence, let currentOccurrence = current.occurrence else { return true }
+        return occurrence == currentOccurrence
+    }
+
     var body: some View {
-        if player.currentTrack?.id == trackId, playlistId.map(player.queueOrigin.includesPlaylist) ?? true {
+        if isCurrentEntry, playlistId.map(player.queueOrigin.includesPlaylist) ?? true {
             RoundedRectangle(cornerRadius: 4)
                 .fill(Color.black.opacity(0.45))
                 .frame(width: rowArtworkSize, height: rowArtworkSize)
@@ -641,7 +654,7 @@ struct SongRow: View {
             .frame(width: rowArtworkSize, height: rowArtworkSize)
 
             if showsPlayingIndicator {
-                SongNowPlayingOverlay(trackId: track.id, rowArtworkSize: rowArtworkSize, playlistId: playlistId)
+                SongNowPlayingOverlay(trackId: track.id, occurrence: track.occurrence, rowArtworkSize: rowArtworkSize, playlistId: playlistId)
             }
         }
         .frame(width: rowArtworkSize, height: rowArtworkSize)
