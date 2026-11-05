@@ -154,7 +154,6 @@ struct MainView: View {
                 SearchView()
             }
         }
-        .tint(.red)
     }
 }
 

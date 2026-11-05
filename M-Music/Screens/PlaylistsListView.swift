@@ -260,7 +260,7 @@ struct PlaylistsListView: View {
                 isCreatingPlaylist = true
             } label: {
                 Image(systemName: "plus")
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(Color.accentColor)
             }
             .accessibilityLabel("Create")
         }
@@ -285,7 +285,7 @@ struct PlaylistsListView: View {
                 .pickerStyle(.inline)
             } label: {
                 Image(systemName: "arrow.up.arrow.down")
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(Color.accentColor)
             }
         }
     }

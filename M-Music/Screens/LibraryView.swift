@@ -282,7 +282,7 @@ struct LibraryView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {} label: {
                     Image(systemName: "plus")
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(Color.accentColor)
                 }
             }
         }
@@ -317,7 +317,7 @@ struct LibraryView: View {
                     }
                 } label: {
                     Image(systemName: "gear")
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(Color.accentColor)
                 }
             }
         }

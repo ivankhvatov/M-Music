@@ -165,7 +165,7 @@ struct RadioView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {} label: {
                     Image(systemName: "pencil")
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(Color.accentColor)
                 }
             }
         }
@@ -175,7 +175,7 @@ struct RadioView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {} label: {
                     Image(systemName: "gear")
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(Color.accentColor)
                 }
             }
         }

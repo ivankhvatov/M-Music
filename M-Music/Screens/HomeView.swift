@@ -545,7 +545,7 @@ struct HomeView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {} label: {
                     Image(systemName: "ellipsis")
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(Color.accentColor)
                 }
             }
         }
@@ -555,7 +555,7 @@ struct HomeView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {} label: {
                     Image(systemName: "gear")
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(Color.accentColor)
                 }
             }
         }

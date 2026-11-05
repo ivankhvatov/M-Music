@@ -33,7 +33,7 @@ struct SearchView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {} label: {
                     Image(systemName: "line.horizontal.3.decrease")
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(Color.accentColor)
                 }
             }
         }
@@ -43,7 +43,7 @@ struct SearchView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {} label: {
                     Image(systemName: "gear")
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(Color.accentColor)
                 }
             }
         }

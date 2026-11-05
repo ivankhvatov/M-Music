@@ -424,7 +424,7 @@ struct ArtistAlbumsView: View {
                 toggleStarred()
             } label: {
                 Image(systemName: isStarred ? "star.fill" : "star")
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(Color.accentColor)
             }
         }
     }
@@ -448,7 +448,7 @@ struct ArtistAlbumsView: View {
                 .pickerStyle(.inline)
             } label: {
                 Image(systemName: "arrow.up.arrow.down")
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(Color.accentColor)
             }
         }
     }

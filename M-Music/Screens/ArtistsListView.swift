@@ -242,7 +242,7 @@ struct ArtistsListView: View {
                 .pickerStyle(.inline)
             } label: {
                 Image(systemName: "line.3.horizontal.decrease")
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(Color.accentColor)
             }
         }
     }
@@ -259,7 +259,7 @@ struct ArtistsListView: View {
                 .pickerStyle(.inline)
             } label: {
                 Image(systemName: "arrow.up.arrow.down")
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(Color.accentColor)
             }
         }
     }

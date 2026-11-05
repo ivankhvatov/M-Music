@@ -421,7 +421,7 @@ struct AlbumsListView: View {
                 .pickerStyle(.inline)
             } label: {
                 Image(systemName: "line.horizontal.3.decrease")
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(Color.accentColor)
             }
         }
     }
@@ -445,7 +445,7 @@ struct AlbumsListView: View {
                 .pickerStyle(.inline)
             } label: {
                 Image(systemName: "arrow.up.arrow.down")
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(Color.accentColor)
             }
         }
     }
