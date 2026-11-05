@@ -223,31 +223,8 @@ struct PlaylistsListView: View {
         rememberFirstScreenful()
     }
 
-    /// Sorts by the stored field/order. The server's dates are ISO 8601 strings in one format, so
-    /// comparing them as strings orders them chronologically; playlists without a date sort as the
-    /// oldest, and ties keep their name order.
     private func sorted(_ list: [PlaylistSummary]) -> [PlaylistSummary] {
-        let ascending = sortOrder.wrappedValue == .ascending
-        let byName = list.sortedByLocalizedKey(ascending: true) { $0.name.sortKey }
-        switch sortField.wrappedValue {
-        case .name:
-            return ascending ? byName : byName.reversed()
-        case .creationDate:
-            return sortedByDate(byName, ascending: ascending) { $0.created }
-        case .updateDate:
-            return sortedByDate(byName, ascending: ascending) { $0.changed }
-        }
-    }
-
-    /// `byName` is already name-ordered; the index tie-breaker keeps that order among equal dates
-    /// (`sorted` itself makes no stability promise).
-    private func sortedByDate(_ byName: [PlaylistSummary], ascending: Bool, date: (PlaylistSummary) -> String?) -> [PlaylistSummary] {
-        byName.enumerated().sorted { lhs, rhs in
-            let l = date(lhs.element) ?? ""
-            let r = date(rhs.element) ?? ""
-            if l == r { return lhs.offset < rhs.offset }
-            return ascending ? l < r : l > r
-        }.map(\.element)
+        PlaylistOrdering.sorted(list, field: sortField.wrappedValue.storageKey, ascending: sortOrder.wrappedValue == .ascending)
     }
 
     /// "New Playlist N" (localized) with the smallest N no existing playlist already uses,
@@ -405,13 +382,43 @@ struct PlaylistsListView: View {
     }
 }
 
+/// How the playlists are ordered, from the stored sort field (`PlaylistSortField.storageKey`) and
+/// direction — shared by the playlists screen and the sheet that adds a song to one.
+enum PlaylistOrdering {
+    /// Sorts by the field and direction. The server's dates are ISO 8601 strings in one format, so
+    /// comparing them as strings orders them chronologically; playlists without a date sort as the
+    /// oldest, and ties keep their name order.
+    static func sorted(_ list: [PlaylistSummary], field: String, ascending: Bool) -> [PlaylistSummary] {
+        let byName = list.sortedByLocalizedKey(ascending: true) { $0.name.sortKey }
+        switch field {
+        case "creationDate": return sortedByDate(byName, ascending: ascending) { $0.created }
+        case "updateDate": return sortedByDate(byName, ascending: ascending) { $0.changed }
+        default: return ascending ? byName : byName.reversed()
+        }
+    }
+
+    /// `byName` is already name-ordered; the index tie-breaker keeps that order among equal dates
+    /// (`sorted` itself makes no stability promise).
+    private static func sortedByDate(_ byName: [PlaylistSummary], ascending: Bool, date: (PlaylistSummary) -> String?) -> [PlaylistSummary] {
+        byName.enumerated().sorted { lhs, rhs in
+            let l = date(lhs.element) ?? ""
+            let r = date(rhs.element) ?? ""
+            if l == r { return lhs.offset < rhs.offset }
+            return ascending ? l < r : l > r
+        }.map(\.element)
+    }
+}
+
 /// A single row for the "List"-style playlists browse — rounded-corner artwork on the leading
 /// edge (mirrors `PlaylistCardView.artwork`, but fit rather than cropped to a square — see
 /// `artwork` below), name/creator stacked next to it (mirrors `ArtistsListView.ArtistRow`, which
 /// uses a circular artwork with just a title).
-private struct PlaylistRow: View {
+struct PlaylistRow: View {
     let playlist: PlaylistSummary
     var zoomNamespace: Namespace.ID? = nil
+    /// Whether the row gets the playlist's own screen ready while it's on screen (its full-size
+    /// cover, and the images of its first songs). Not for a row that only picks a playlist.
+    var preparesPlaylistScreen = true
 
     /// Computed once, in `init` — not via `.task` — so an already-cached cover (e.g. already
     /// fetched by this same row earlier) renders on the very first frame instead of flashing the
@@ -433,9 +440,10 @@ private struct PlaylistRow: View {
     @ObservedObject private var libraryCacheStatus = LibraryCacheStatus.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
-    init(playlist: PlaylistSummary, zoomNamespace: Namespace.ID? = nil, displayScale: CGFloat) {
+    init(playlist: PlaylistSummary, zoomNamespace: Namespace.ID? = nil, preparesPlaylistScreen: Bool = true, displayScale: CGFloat) {
         self.playlist = playlist
         self.zoomNamespace = zoomNamespace
+        self.preparesPlaylistScreen = preparesPlaylistScreen
         _artworkURL = State(initialValue: ArtworkRequest.playlistRow(playlist.coverArt ?? playlist.id.raw, scale: displayScale).url)
     }
 
@@ -459,6 +467,7 @@ private struct PlaylistRow: View {
         // `playlist.id` so scrolling this row's cell to a different playlist (cell reuse)
         // cancels the stale prefetch and starts the right one.
         .task(id: playlist.id) {
+            guard preparesPlaylistScreen else { return }
             let artworkId = playlist.coverArt ?? playlist.id.raw
             await ImageCache.shared.prefetchOriginalData(ArtworkRequest.playlistHeader(artworkId).url)
             // And decoded (with the first songs' thumbnails), once the row has stayed on screen a

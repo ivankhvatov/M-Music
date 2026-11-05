@@ -506,6 +506,22 @@
         }
       }
     },
+    "Add once again" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erneut hinzufügen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Добавить ещё раз"
+          }
+        }
+      }
+    },
     "Add to Favorites" : {
       "localizations" : {
         "ru" : {
@@ -946,6 +962,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Конвертировать файлы Opus в .caf"
+          }
+        }
+      }
+    },
+    "Couldn't add the song to the playlist" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Titel konnte nicht zur Playlist hinzugefügt werden"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удалось добавить песню в плейлист"
           }
         }
       }
@@ -2642,6 +2674,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Стриминг"
+          }
+        }
+      }
+    },
+    "The song is already in this playlist" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Titel ist bereits in dieser Playlist"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Эта песня уже есть в этом плейлисте"
           }
         }
       }
