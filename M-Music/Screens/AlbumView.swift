@@ -394,7 +394,7 @@ struct AlbumView: View {
             Button {
                 playTrack(at: index)
             } label: {
-                TrackRow(track: track, albumArtist: album.artist)
+                TrackRow(track: track, albumArtist: album.artist, albumId: album.id.raw)
                     .padding(.horizontal, 4)
                     .padding(.vertical, 16)
                     .contentShape(Rectangle())
@@ -457,13 +457,13 @@ struct AlbumView: View {
     private func playTrack(at index: Int) {
         let queue = playableSongs
         guard let startAt = queue.firstIndex(where: { $0.id == visibleSongs[index].id }) else { return }
-        player.play(queue: queue, startAt: startAt, sourceName: album.name)
+        player.play(queue: queue, startAt: startAt, sourceName: album.name, origin: .album(album.id.raw))
     }
 
     private func shuffle() {
         let queue = playableSongs
         guard !queue.isEmpty else { return }
-        player.play(queue: queue.shuffled(), startAt: 0, sourceName: album.name)
+        player.play(queue: queue.shuffled(), startAt: 0, sourceName: album.name, origin: .album(album.id.raw))
     }
 
     private var trackCountAndDuration: String {
@@ -773,12 +773,15 @@ struct AlbumView: View {
 /// stays stable while open.
 private struct TrackLeadingGlyph: View {
     let track: Child
+    /// The album this tracklist belongs to: the indicator only shows while the queue was started
+    /// from it (or from somewhere that doesn't say), not from the songs list or a playlist.
+    let albumId: String
 
     @ObservedObject private var player = PlayerManager.shared
 
     var body: some View {
         Group {
-            if player.currentTrack?.id == track.id {
+            if player.currentTrack?.id == track.id, player.queueOrigin.includesAlbum(albumId) {
                 PlayingIndicator(isPlaying: player.isPlaying)
             } else {
                 Text(track.track.map(String.init) ?? "")
@@ -793,6 +796,7 @@ private struct TrackLeadingGlyph: View {
 private struct TrackRow: View {
     let track: Child
     let albumArtist: String?
+    let albumId: String
 
     /// Not `@ObservedObject`: `trackMenu` only ever calls a method on it (`playNext`/
     /// `addToQueue`), never reads a `@Published` property — observing it here would rebuild this
@@ -809,7 +813,7 @@ private struct TrackRow: View {
     var body: some View {
         HStack(spacing: 12) {
             HStack(spacing: 12) {
-                TrackLeadingGlyph(track: track)
+                TrackLeadingGlyph(track: track, albumId: albumId)
 
                 VStack(alignment: .leading) {
                     Text(track.title)

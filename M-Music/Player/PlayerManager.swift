@@ -15,6 +15,34 @@ import UIKit
 /// end-of-queue-track case (`PlayerEngine.preloadForGapless`, backed by an `AVQueuePlayer` that
 /// performs the handoff itself rather than a fresh item being swapped in after the fact), and
 /// persists the current queue, track, and position across launches.
+/// Where the current queue was started from, so a list showing one of its tracks only marks it as
+/// playing when it's the list the user actually played from — the same song can sit in the
+/// songs list, its album and a playlist at once.
+enum QueueOrigin: Codable, Equatable {
+    case songs
+    case album(String)
+    case playlist(String)
+    /// Anything else (an artist's Play/Shuffle, a queue from before this was recorded): every
+    /// list containing the track marks it, as they did before.
+    case other
+
+    func includesAlbum(_ albumId: String) -> Bool {
+        switch self {
+        case .songs, .playlist: return false
+        case .album(let id): return id == albumId
+        case .other: return true
+        }
+    }
+
+    func includesPlaylist(_ playlistId: String) -> Bool {
+        switch self {
+        case .songs, .album: return false
+        case .playlist(let id): return id == playlistId
+        case .other: return true
+        }
+    }
+}
+
 @MainActor
 final class PlayerManager: ObservableObject {
     static let shared = PlayerManager()
@@ -66,6 +94,9 @@ final class PlayerManager: ObservableObject {
     /// The album or playlist the current queue was started from, when the caller said — shown as
     /// "From …" above the queue list. Not persisted, so it's `nil` again after a relaunch.
     @Published private(set) var queueSourceName: String?
+    /// Which list the current queue was started from — see `QueueOrigin`. Only starting a new
+    /// queue replaces it; `playNext`/`addToQueue` leave it be.
+    @Published private(set) var queueOrigin: QueueOrigin = .other
     @Published private(set) var currentIndex: Int?
     @Published private(set) var isPlaying = false
     /// Not `@Published`: it changes twice a second during playback, and publishing it here made
@@ -462,8 +493,14 @@ final class PlayerManager: ObservableObject {
     /// `fromPlaylist` records that the queue came from a playlist, so "Scrobble from playlists"
     /// can exclude its plays. It describes the queue's origin and stays put through
     /// `playNext`/`addToQueue`; only starting a new queue replaces it. `sourceName` is the album or
-    /// playlist's name, for display.
-    func play(queue newQueue: [Child], startAt index: Int, fromPlaylist: Bool = false, sourceName: String? = nil) {
+    /// playlist's name, for display. `origin` is which list it was started from.
+    func play(
+        queue newQueue: [Child],
+        startAt index: Int,
+        fromPlaylist: Bool = false,
+        sourceName: String? = nil,
+        origin: QueueOrigin = .other
+    ) {
         guard newQueue.indices.contains(index) else { return }
         currentRadioStation = nil
         // With shuffle on, the new queue plays shuffled too: the track it starts from first, the
@@ -477,6 +514,7 @@ final class PlayerManager: ObservableObject {
         }
         isPlaylistQueue = fromPlaylist
         queueSourceName = sourceName
+        queueOrigin = origin
         currentIndex = index
         clearGaplessPreload()
         loadCurrentItem(autoplay: true)
@@ -721,6 +759,7 @@ final class PlayerManager: ObservableObject {
         scrobbleSongId = nil
         queue = []
         queueSourceName = nil
+        queueOrigin = .other
         currentIndex = nil
         isPlaylistQueue = false
         clearGaplessPreload()
@@ -1624,6 +1663,8 @@ final class PlayerManager: ObservableObject {
         let index: Int
         let currentTime: TimeInterval
         let isPlaylistQueue: Bool
+        /// Optional so a snapshot written before this existed still decodes.
+        let queueOrigin: QueueOrigin?
     }
 
     private static let snapshotKey = "PlayerManager.snapshot"
@@ -1642,7 +1683,8 @@ final class PlayerManager: ObservableObject {
             return
         }
         let snapshot = PersistedSnapshot(
-            track: queue[currentIndex], index: currentIndex, currentTime: currentTime, isPlaylistQueue: isPlaylistQueue
+            track: queue[currentIndex], index: currentIndex, currentTime: currentTime,
+            isPlaylistQueue: isPlaylistQueue, queueOrigin: queueOrigin
         )
         if let data = try? JSONEncoder().encode(snapshot) {
             UserDefaults.standard.set(data, forKey: Self.snapshotKey)
@@ -1672,6 +1714,7 @@ final class PlayerManager: ObservableObject {
             isApplyingRestoredQueue = false
             awaitingFullQueue = true
             isPlaylistQueue = snapshot.isPlaylistQueue
+            queueOrigin = snapshot.queueOrigin ?? .other
             currentIndex = 0
             currentTime = snapshot.currentTime
             duration = TimeInterval(snapshot.track.duration ?? 0)

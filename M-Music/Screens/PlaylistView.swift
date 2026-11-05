@@ -189,7 +189,7 @@ struct PlaylistView: View {
             Button {
                 playTrack(at: index)
             } label: {
-                SongRow(track: track, rowArtworkSize: rowArtworkSize, displayScale: displayScale)
+                SongRow(track: track, rowArtworkSize: rowArtworkSize, displayScale: displayScale, playlistId: playlist.id.raw)
                     .padding(.vertical, 8)
                     .contentShape(Rectangle())
             }
@@ -249,13 +249,13 @@ struct PlaylistView: View {
     private func playTrack(at index: Int) {
         let queue = playableSongs
         guard let startAt = queue.firstIndex(where: { $0.id == visibleSongs[index].id }) else { return }
-        player.play(queue: queue, startAt: startAt, fromPlaylist: true, sourceName: playlist.name)
+        player.play(queue: queue, startAt: startAt, fromPlaylist: true, sourceName: playlist.name, origin: .playlist(playlist.id.raw))
     }
 
     private func shuffle() {
         let queue = playableSongs
         guard !queue.isEmpty else { return }
-        player.play(queue: queue.shuffled(), startAt: 0, fromPlaylist: true, sourceName: playlist.name)
+        player.play(queue: queue.shuffled(), startAt: 0, fromPlaylist: true, sourceName: playlist.name, origin: .playlist(playlist.id.raw))
     }
 
     private var trackCountAndDuration: String {

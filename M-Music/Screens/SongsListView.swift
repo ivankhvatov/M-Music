@@ -205,19 +205,19 @@ struct SongsListView: View {
     private func play(_ track: Child) {
         let queue = playableSongs
         guard let index = queue.firstIndex(where: { $0.id == track.id }) else { return }
-        player.play(queue: queue, startAt: index)
+        player.play(queue: queue, startAt: index, origin: .songs)
     }
 
     private func playAll() {
         let queue = playableSongs
         guard !queue.isEmpty else { return }
-        player.play(queue: queue, startAt: 0)
+        player.play(queue: queue, startAt: 0, origin: .songs)
     }
 
     private func shuffleAll() {
         let queue = playableSongs.shuffled()
         guard !queue.isEmpty else { return }
-        player.play(queue: queue, startAt: 0)
+        player.play(queue: queue, startAt: 0, origin: .songs)
     }
 
     /// Same look as `ArtistAlbumsView.actionButtons`: two capsules sharing the row's width. They
@@ -494,11 +494,14 @@ private struct SongListRow: View {
 private struct SongNowPlayingOverlay: View {
     let trackId: Child.ID
     let rowArtworkSize: CGFloat
+    /// Set in a playlist's tracklist: the overlay then only shows while the queue was started from
+    /// that playlist (or somewhere that doesn't say). The songs list leaves it unset and always shows it.
+    var playlistId: String?
 
     @ObservedObject private var player = PlayerManager.shared
 
     var body: some View {
-        if player.currentTrack?.id == trackId {
+        if player.currentTrack?.id == trackId, playlistId.map(player.queueOrigin.includesPlaylist) ?? true {
             RoundedRectangle(cornerRadius: 4)
                 .fill(Color.black.opacity(0.45))
                 .frame(width: rowArtworkSize, height: rowArtworkSize)
@@ -524,6 +527,8 @@ struct SongRow: View {
     /// Whether the artwork is darkened and gets the playing indicator while this is the track
     /// that's playing. Not in the queue list, whose rows are what's still to play.
     var showsPlayingIndicator = true
+    /// The playlist whose tracklist this row is in, if any — see `SongNowPlayingOverlay`.
+    var playlistId: String?
 
     private let client = SubsonicClient.shared
     @ObservedObject private var downloads = DownloadStore.shared
@@ -543,7 +548,8 @@ struct SongRow: View {
         onReorderDragChanged: ((PanGesture.Value) -> Void)? = nil,
         onReorderDragEnded: (() -> Void)? = nil,
         onTap: (() -> Void)? = nil,
-        showsPlayingIndicator: Bool = true
+        showsPlayingIndicator: Bool = true,
+        playlistId: String? = nil
     ) {
         self.track = track
         self.rowArtworkSize = rowArtworkSize
@@ -553,6 +559,7 @@ struct SongRow: View {
         self.onReorderDragEnded = onReorderDragEnded
         self.onTap = onTap
         self.showsPlayingIndicator = showsPlayingIndicator
+        self.playlistId = playlistId
         _artworkURL = State(initialValue: ArtworkRequest.songRow(ArtworkRequest.artworkId(of: track), scale: displayScale).url)
     }
 
@@ -634,7 +641,7 @@ struct SongRow: View {
             .frame(width: rowArtworkSize, height: rowArtworkSize)
 
             if showsPlayingIndicator {
-                SongNowPlayingOverlay(trackId: track.id, rowArtworkSize: rowArtworkSize)
+                SongNowPlayingOverlay(trackId: track.id, rowArtworkSize: rowArtworkSize, playlistId: playlistId)
             }
         }
         .frame(width: rowArtworkSize, height: rowArtworkSize)
