@@ -146,8 +146,12 @@ struct HomeView: View {
     /// images the first frame waits for.
     @State private var partsSettled = false
     @State private var gateRequested = false
-    /// When the expensive requests last ran — see `HomeLoadingPolicy.shouldRunExpensiveRefresh`.
-    @State private var lastExpensiveRefresh: Date?
+    /// The server's `lastScan` as of the last load. Home is loaded once per session and only
+    /// loaded again when this changes, i.e. when the server has scanned in new music; `nil` if the
+    /// server didn't report it then.
+    @State private var loadedScanToken: String?
+    /// The carousels the last load covered, so one switched on later still gets its data.
+    @State private var loadedCarousels: Set<HomeCarouselKind> = []
     /// How many carousels are built so far — see `HomeReveal`.
     @State private var revealedCount = HomeReveal.initialCount
     @Environment(\.scenePhase) private var scenePhase
@@ -310,15 +314,28 @@ struct HomeView: View {
 
     // MARK: Loading
 
-    /// Runs from `.task` every time the tab becomes visible. Only the first load shows the
-    /// spinner — and only until the cached library, recently played and top playlists are in; the
-    /// network revalidation then updates the carousels in place. The four library-derived
-    /// carousels share one `allAlbums` load (cached, scan-gated), the others load alongside it,
-    /// and the expensive requests aren't repeated on every visit.
+    /// Runs from `.task` every time the tab becomes visible, but only loads when there's something
+    /// to load: the first time (app launch), after the server has scanned in new music (see
+    /// `libraryChanged`), or for a carousel switched on since. Otherwise Home keeps what it has for
+    /// the whole session, so the carousels don't change under the user. Only the first load shows
+    /// the spinner — and only until the cached library, recently played and top playlists are in;
+    /// the network revalidation then updates the carousels in place. The library-derived carousels
+    /// share one `allAlbums` load (cached, scan-gated), and the others load alongside it.
     private func refresh() async {
         isConnected = client.isConfigured
         guard isConnected else { return }
-        let runExpensive = HomeLoadingPolicy.shouldRunExpensiveRefresh(last: lastExpensiveRefresh)
+        let client = client
+        // Asked right away but not waited for on the first load, so a slow or unreachable server
+        // doesn't hold back the cached carousels.
+        let scan = Task { try? await client.getScanStatus() }
+        if hasLoadedOnce {
+            let covered = Set(visibleCarousels).isSubset(of: loadedCarousels)
+            let status = await scan.value
+            guard !covered || libraryChanged(status) else { return }
+            // The picked genres are re-checked against the new library; the pinned ones stay.
+            pickedGenres = []
+        }
+        let runExpensive = true
         if !hasLoadedOnce {
             isLoading = true
             pendingParts = HomeLoadingPolicy.parts(for: visibleCarousels)
@@ -343,10 +360,23 @@ struct HomeView: View {
         async let playlists: Void = loadTopPlaylists(runExpensive: runExpensive)
         await loadLibrary()
         _ = await (starred, played, playlists)
-        if runExpensive { lastExpensiveRefresh = Date() }
+        loadedCarousels = Set(visibleCarousels)
+        // Taken from a request issued before loading, so a scan that finished meanwhile still
+        // counts as new next time. Not while scanning: the token is still the previous scan's.
+        if let status = await scan.value, !status.scanning, let token = status.lastScan, !token.isEmpty {
+            loadedScanToken = token
+        }
         await pickGenres()
         // The favorite-artist carousel needs both the library and the starred set.
         rebuildSections(reshuffle: false)
+    }
+
+    /// Whether the server has scanned since Home was loaded (or Home was loaded without knowing,
+    /// e.g. launched offline, and the server now answers). Never while a scan is still running —
+    /// the library is in flux then.
+    private func libraryChanged(_ status: ScanStatus?) -> Bool {
+        guard let status, !status.scanning, let last = status.lastScan, !last.isEmpty else { return false }
+        return last != loadedScanToken
     }
 
     private func loadLibrary() async {
