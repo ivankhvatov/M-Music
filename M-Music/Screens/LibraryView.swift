@@ -257,7 +257,7 @@ struct LibraryView: View {
                 HStack(spacing: 16) {
                     Image(systemName: icon)
                         .font(.title3)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(Color.accentColor)
                         .frame(width: 24, alignment: .center)
 
                     Text(title)
@@ -318,6 +318,7 @@ struct LibraryView: View {
                     Image(systemName: "gear")
                         .foregroundStyle(Color.accentColor)
                 }
+                .tint(.accentColor)
             }
         }
 }
