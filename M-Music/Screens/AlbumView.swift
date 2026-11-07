@@ -63,6 +63,9 @@ struct AlbumView: View {
     @State private var showingRemoveDownloadConfirmation = false
     @State private var showingRefreshDownloadedConfirmation = false
     @State private var isRefreshing = false
+    @State private var showingAddToPlaylist = false
+    /// What went wrong adding the album to a playlist.
+    @State private var addToPlaylistError: String?
     /// The last tapped related-album card, drawn above its neighbors during the zoom transition.
     @State private var raisedCarouselAlbum: FlexibleID?
     /// Where the user last was in each related-albums carousel, to warm around on resume.
@@ -104,6 +107,31 @@ struct AlbumView: View {
         }
         .task {
             await loadRelatedAlbums()
+        }
+        .sheet(isPresented: $showingAddToPlaylist) {
+            AddAlbumToPlaylistSheet(songs: songs) { songsToAdd, playlist in
+                addToPlaylist(songsToAdd, playlist)
+            }
+        }
+        .alert("Couldn't add the songs to the playlist", isPresented: Binding(
+            get: { addToPlaylistError != nil },
+            set: { if !$0 { addToPlaylistError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(addToPlaylistError ?? "")
+        }
+    }
+
+    /// Adds to the end of the playlist, after the sheet has closed — so a failure (offline, say) is
+    /// reported here.
+    private func addToPlaylist(_ songsToAdd: [Child], _ playlist: PlaylistSummary) {
+        Task {
+            do {
+                try await PlaylistEditor.add(songsToAdd, to: playlist)
+            } catch {
+                addToPlaylistError = error.localizedDescription
+            }
         }
     }
 
@@ -727,6 +755,13 @@ struct AlbumView: View {
         private var moreButton: some ToolbarContent {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
+                    Button {
+                        showingAddToPlaylist = true
+                    } label: {
+                        Label("Add to playlist", systemImage: "text.badge.plus")
+                    }
+                    .disabled(songs.isEmpty)
+
                     Button {
                         if downloads.hasDownloadedSong(inAlbum: album.id.raw) {
                             showingRefreshDownloadedConfirmation = true

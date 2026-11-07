@@ -136,18 +136,27 @@ struct AddToPlaylistSheet: View {
 enum PlaylistEditor {
     /// Adds `song` to the end of `playlist` on the server, and brings what's cached of the
     /// playlist up to date, so the sheet's checkmarks and the playlist screens show it.
-    ///
-    /// The cache is written as soon as the server has taken the song — its song list with the song
-    /// at the end, and the playlist's entry in the list of playlists with one more song — rather
-    /// than only from what the server is asked for afterwards, which isn't certain to come (the
-    /// connection can drop in between) and takes a moment. What the server then says replaces it.
     @MainActor
     static func add(_ song: Child, to playlist: PlaylistSummary) async throws {
-        let client = SubsonicClient.shared
-        try await client.updatePlaylist(playlistId: playlist.id.raw, songIdsToAdd: [song.id.raw])
-        await recordAdded(song, to: playlist)
+        try await add([song], to: playlist)
+    }
 
-        // What the server has now, best-effort: the song is in the playlist either way.
+    /// Adds `songs`, in that order, to the end of `playlist` on the server, and brings what's
+    /// cached of the playlist up to date.
+    ///
+    /// The cache is written as soon as the server has taken the songs — its song list with them
+    /// at the end, and the playlist's entry in the list of playlists with that many more songs —
+    /// rather than only from what the server is asked for afterwards, which isn't certain to come
+    /// (the connection can drop in between) and takes a moment. What the server then says
+    /// replaces it.
+    @MainActor
+    static func add(_ songs: [Child], to playlist: PlaylistSummary) async throws {
+        guard !songs.isEmpty else { return }
+        let client = SubsonicClient.shared
+        try await client.updatePlaylist(playlistId: playlist.id.raw, songIdsToAdd: songs.map(\.id.raw))
+        await recordAdded(songs, to: playlist)
+
+        // What the server has now, best-effort: the songs are in the playlist either way.
         let database = LibraryCacheDatabase.shared
         if let full = try? await client.getPlaylist(id: playlist.id.raw) {
             await database.cachePlaylistSongs(full.entry ?? [], playlistId: playlist.id.raw)
@@ -157,23 +166,24 @@ enum PlaylistEditor {
         }
     }
 
-    /// Puts the song at the end of the playlist's cached song list, and counts it in the
+    /// Puts the songs at the end of the playlist's cached song list, and counts them in the
     /// playlist's cached entry.
-    static func recordAdded(_ song: Child, to playlist: PlaylistSummary) async {
+    static func recordAdded(_ songs: [Child], to playlist: PlaylistSummary) async {
         let database = LibraryCacheDatabase.shared
         // Only onto a song list that's cached whole; started from nothing it'd claim the playlist
-        // holds this song alone.
-        if let songs = await database.cachedPlaylistSongs(playlistId: playlist.id.raw) {
-            await database.cachePlaylistSongs(songs + [song], playlistId: playlist.id.raw)
+        // holds these songs alone.
+        if let cachedSongs = await database.cachedPlaylistSongs(playlistId: playlist.id.raw) {
+            await database.cachePlaylistSongs(cachedSongs + songs, playlistId: playlist.id.raw)
         }
         if let playlists = await database.cachedAllPlaylists() {
             let now = ISO8601DateFormatter().string(from: Date())
+            let addedDuration = songs.reduce(0) { $0 + ($1.duration ?? 0) }
             await database.cacheAllPlaylists(playlists.map { cached in
                 guard cached.id == playlist.id else { return cached }
                 return PlaylistSummary(
                     id: cached.id, name: cached.name, comment: cached.comment, owner: cached.owner,
-                    public: cached.public, songCount: cached.songCount + 1,
-                    duration: cached.duration + (song.duration ?? 0),
+                    public: cached.public, songCount: cached.songCount + songs.count,
+                    duration: cached.duration + addedDuration,
                     created: cached.created, changed: now, coverArt: cached.coverArt
                 )
             })

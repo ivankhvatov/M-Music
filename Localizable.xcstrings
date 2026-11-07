@@ -506,6 +506,38 @@
         }
       }
     },
+    "Add all songs" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alle Titel hinzufügen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Добавить все песни"
+          }
+        }
+      }
+    },
+    "Add missing songs" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fehlende Titel hinzufügen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Добавить недостающие песни"
+          }
+        }
+      }
+    },
     "Add once again" : {
       "localizations" : {
         "de" : {
@@ -692,6 +724,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Все песни"
+          }
+        }
+      }
+    },
+    "All songs are already in the playlist" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alle Titel sind bereits in der Playlist"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Все песни уже есть в плейлисте"
           }
         }
       }
@@ -978,6 +1026,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Не удалось добавить песню в плейлист"
+          }
+        }
+      }
+    },
+    "Couldn't add the songs to the playlist" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Titel konnten nicht zur Playlist hinzugefügt werden"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удалось добавить песни в плейлист"
           }
         }
       }
@@ -2622,6 +2686,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Синглы"
+          }
+        }
+      }
+    },
+    "Some of the songs are already in the playlist" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Einige der Titel sind bereits in der Playlist"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Некоторые песни уже есть в плейлисте"
           }
         }
       }
