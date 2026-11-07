@@ -181,8 +181,21 @@ private extension ExpandableNowPlaying {
                 // always mounted (unlike the artwork below): neither branch contains a
                 // `matchedGeometryEffect` descendant, so there's no risk of two simultaneous sources
                 // for the same id.
-                RegularChrome(size: size, colors: colors, onCollapse: collapse, marqueesActive: marqueesActive, marqueeRestartToken: marqueeRestartToken, panel: $panel)
-                    .environment(\.playerButtonSymbolTransitions, expanded)
+                // Laid out once, at the full-screen size it has once expanded, and merely revealed by
+                // the container growing around it (the stack's clip below), rather than being
+                // offered the pill's size as it grows and laid out again for every frame of an
+                // expand and a collapse — the title, the scrubber, the button rows and the panel
+                // area, with the reader that spreads them, which was a good part of what each
+                // frame of the morph cost. It's the clear base, not the chrome, that takes the
+                // container's size in this stack: the chrome overflows it (clipped, like all of
+                // this stack), so the stack still sizes and animates just as it did when the chrome
+                // filled it. Its content is faded by `chromeProgress` as before.
+                Color.clear
+                    .overlay(alignment: .top) {
+                        RegularChrome(size: size, colors: colors, onCollapse: collapse, marqueesActive: marqueesActive, marqueeRestartToken: marqueeRestartToken, panel: $panel)
+                            .environment(\.playerButtonSymbolTransitions, expanded)
+                            .frame(width: UIScreen.size.width, height: UIScreen.size.height)
+                    }
                     .opacity(chromeProgress)
                     .allowsHitTesting(expanded)
                 CompactChrome(marqueesActive: compactMarqueesActive, marqueeRestartToken: compactMarqueeRestartToken)

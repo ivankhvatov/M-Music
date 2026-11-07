@@ -4,10 +4,21 @@ import SwiftUI
 @Observable
 final class ColorfulBackgroundModel {
     static let animationDuration: Double = 40
+    /// How long after the player starts expanding the drift begins: the morph's own duration, so
+    /// the gradient holds still while the pill grows — it moves so slowly that nothing shows — and
+    /// the morph has that much less to do.
+    static let startDelay: Double = Animation.playerExpandAnimationDuration + 0.05
+
     var points: ColorPoints = .zero.shuffled
+    /// Identifies the gradient view in `ColorfulBackground`; bumped by `stop()`, since replacing
+    /// the view is what actually ends its animation (see there).
+    private(set) var generation = 0
 
     private var colors: [Color] = []
+    /// Whether the drift is running — from `start()` until `stop()`.
     private var isActive = false
+    /// The wait between `setActive(true)` and `start()`.
+    private var startTask: Task<Void, Never>?
     private var animatedData: ColorPoints = .zero
     private var animationTimerCancellable: AnyCancellable?
 
@@ -17,17 +28,28 @@ final class ColorfulBackgroundModel {
     /// for the whole life of the process, even while the player was collapsed and this whole
     /// layer sat at opacity 0. `NowPlayingBackground` mounts this permanently (so there's no
     /// first-show hitch), so the animation itself is what has to be switched off.
+    ///
+    /// Switching on waits `startDelay` (the morph into the expanded player), switching off is
+    /// at once.
     func setActive(_ active: Bool) {
-        guard active != isActive else { return }
-        isActive = active
         if active {
-            start()
+            guard !isActive, startTask == nil else { return }
+            startTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(Self.startDelay))
+                guard !Task.isCancelled, let self else { return }
+                self.startTask = nil
+                self.start()
+            }
         } else {
+            startTask?.cancel()
+            startTask = nil
+            guard isActive else { return }
             stop()
         }
     }
 
     private func start() {
+        isActive = true
         animate()
         animatedData = points
 
@@ -39,15 +61,22 @@ final class ColorfulBackgroundModel {
             }
     }
 
-    /// Freezes the gradient where it currently is: assigning the last animated position back
-    /// without an animation replaces the in-flight one, so nothing keeps ticking.
+    /// Freezes the gradient where it currently is. Assigning the last animated position back
+    /// without an animation is not enough to end the in-flight one: the view's animation went on
+    /// ticking, hidden, for a good while, and was still running when the next expand started a new
+    /// one over it — a ~100 ms frame, every time after the first. So the gradient view is also
+    /// replaced (`generation`), which takes the animation with it. (Only safe while the gradient
+    /// is out of sight: the new view draws nothing for a moment, so stopping it while it's shown —
+    /// at the start of a collapse — made it vanish from the shrinking pill.)
     private func stop() {
+        isActive = false
         animationTimerCancellable?.cancel()
         animationTimerCancellable = nil
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {
             points = animatedData
+            generation &+= 1
         }
     }
 
