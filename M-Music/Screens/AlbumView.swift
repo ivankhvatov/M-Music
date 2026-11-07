@@ -17,6 +17,7 @@ struct AlbumView: View {
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
     @Environment(\.displayScale) private var displayScale
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.screenToken) private var screenToken
 
     /// Zoom transition for the "Other versions" / "More by artist" cards below — separate from
     /// the incoming `zoomNamespace` param, which only matches this view's own entry transition.
@@ -96,6 +97,8 @@ struct AlbumView: View {
         .preferredColorScheme(.dark)
         .tint(.primary)
         .onAppResume { rewarmAfterResume() }
+        // So the player's "Go to album" can tell this is the screen it would open.
+        .onAppear { screenToken?.key = .album(album.id.raw) }
         .task {
             await loadSongs()
         }
@@ -583,11 +586,9 @@ struct AlbumView: View {
     }
 
     /// Opens the album artist's screen on top of this one, looked up from this album's id the same
-    /// way the expanded player's "go to artist" does (`RoutedArtistView`). A destination link, not
-    /// `NavigationLink(value: AppRoute.artist(...))`: the tab's stack shows screens pushed by
-    /// destination links above typed routes, so the latter left this screen on top of the
-    /// artist's. When this album was opened from that same artist's screen, it goes back to it
-    /// instead of stacking a second copy. Plain text when the album carries no artist id.
+    /// way the expanded player's "go to artist" does (`RoutedArtistView`). When this album was
+    /// opened from that same artist's screen, it goes back to it instead of stacking a second
+    /// copy. Plain text when the album carries no artist id.
     @ViewBuilder
     private func artistName() -> some View {
         let label = Text(album.artist ?? "Unknown Artist")

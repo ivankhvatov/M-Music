@@ -122,6 +122,7 @@ enum ArtistAlbumOrdering {
 
 struct ArtistAlbumsView: View {
     let artist: ArtistID3
+    @Environment(\.screenToken) private var screenToken
 
     private let client = SubsonicClient.shared
     private let player = PlayerManager.shared
@@ -200,6 +201,8 @@ struct ArtistAlbumsView: View {
             }
         }
         .onAppResume { rewarmAfterResume() }
+        // So the player's "Go to artist" can tell this is the screen it would open.
+        .onAppear { screenToken?.key = .artist(artist.id.raw) }
         .toolbar {
             starButton
             sortButton

@@ -9,10 +9,9 @@ import SwiftUI
 
 struct SearchView: View {
     @State var query = ""
-    @Bindable private var navigation = AppNavigation.shared
     
     var body: some View {
-        NavigationStack(path: $navigation.paths[AppNavigation.searchTab]) {
+        NavigationStack {
             VStack(alignment: .leading, spacing: 10) {
                 List {
                     
@@ -20,12 +19,13 @@ struct SearchView: View {
                 .navigationTitle("Search")
                 .searchable(text: $query, placement: .toolbar, prompt: "Search")
             }
-            .appRouteDestinations()
+            .screenOnStack()
             .toolbar {
                 filterButton
                 settingsButton
             }
         }
+        .environment(\.appTab, AppNavigation.searchTab)
     }
     
     @ToolbarContentBuilder

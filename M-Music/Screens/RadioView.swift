@@ -22,10 +22,9 @@ struct RadioView: View {
     @State private var lastSeen = LastSeenIndex()
 
     private let client = SubsonicClient.shared
-    @Bindable private var navigation = AppNavigation.shared
 
     var body: some View {
-        NavigationStack(path: $navigation.paths[AppNavigation.radioTab]) {
+        NavigationStack {
             Group {
                 if !client.isConfigured {
                     disconnectedContent
@@ -50,12 +49,13 @@ struct RadioView: View {
             }
             .onAppResume { warmAround(lastSeen.index) }
             .navigationTitle("Radio")
-            .appRouteDestinations()
+            .screenOnStack()
             .toolbar {
                 editButton
                 settingsButton
             }
         }
+        .environment(\.appTab, AppNavigation.radioTab)
         .task { await refresh() }
         .onReceive(PlayerManager.shared.$currentRadioStation.map { $0?.id }.removeDuplicates()) { id in
             playingStationId = id

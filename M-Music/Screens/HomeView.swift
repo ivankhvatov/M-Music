@@ -111,7 +111,6 @@ enum HomeLoadingPolicy {
 }
 
 struct HomeView: View {
-    @Bindable private var navigation = AppNavigation.shared
 
     private let client = SubsonicClient.shared
 
@@ -169,7 +168,7 @@ struct HomeView: View {
     }
 
     var body: some View {
-        NavigationStack(path: $navigation.paths[AppNavigation.homeTab]) {
+        NavigationStack {
             ScrollView {
                 if !isConnected {
                     Text("Connect to your Navidrome server to get started")
@@ -207,7 +206,7 @@ struct HomeView: View {
             }
             .onDisappear { ScrollActivity.shared.set(scrolling: false) }
             .navigationTitle("Home")
-            .appRouteDestinations()
+            .screenOnStack()
             .toolbar {
                 moreButton
                 settingsButton
@@ -241,6 +240,7 @@ struct HomeView: View {
                 if !availability.isOnline { refreshAvailability(isOnline: false) }
             }
         }
+        .environment(\.appTab, AppNavigation.homeTab)
     }
 
     // MARK: Layout
