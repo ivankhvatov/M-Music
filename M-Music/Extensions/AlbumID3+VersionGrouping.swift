@@ -1,5 +1,26 @@
 import Foundation
 
+extension AlbumID3 {
+    private func hasReleaseType(in candidates: Set<String>) -> Bool {
+        (releaseTypes ?? []).contains { tag in
+            candidates.contains(tag.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+        }
+    }
+
+    /// Tagged "Single" (RELEASETYPE), in singular or plural form.
+    var isSingleRelease: Bool { hasReleaseType(in: ["single", "singles"]) }
+
+    /// Tagged "Album" or "EP" (RELEASETYPE), in singular or plural form.
+    var isAlbumOrEPRelease: Bool { hasReleaseType(in: ["album", "albums", "ep", "eps"]) }
+
+    /// Whether `self` and `other` are a Single and an Album/EP — different releases even when they
+    /// share a title and artist, so never versions of one another. Only for an explicit tag on
+    /// each side; an untagged release is never told apart this way.
+    func isDistinctRelease(from other: AlbumID3) -> Bool {
+        (isSingleRelease && other.isAlbumOrEPRelease) || (isAlbumOrEPRelease && other.isSingleRelease)
+    }
+}
+
 extension Sequence where Element == AlbumID3 {
     /// Collapses multiple versions of the same release (same title and artist, different
     /// ALBUMVERSION tag — e.g. "Deluxe Edition", "Remastered") down to one representative per
@@ -16,20 +37,6 @@ extension Sequence where Element == AlbumID3 {
             "\(album.name.lowercased())|\(album.artistId?.raw ?? album.artist?.lowercased() ?? "")"
         }
 
-        func matchesAnyReleaseType(_ album: AlbumID3, _ candidates: Set<String>) -> Bool {
-            (album.releaseTypes ?? []).contains { tag in
-                candidates.contains(tag.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
-            }
-        }
-
-        func isSingle(_ album: AlbumID3) -> Bool {
-            matchesAnyReleaseType(album, ["single", "singles"])
-        }
-
-        func isAlbumOrEP(_ album: AlbumID3) -> Bool {
-            matchesAnyReleaseType(album, ["album", "albums", "ep", "eps"])
-        }
-
         // First pass: does each base (title, artist) group mix an explicit Single with an
         // explicit Album/EP? If so, that pairing is kept apart below rather than collapsed into
         // one representative.
@@ -37,15 +44,15 @@ extension Sequence where Element == AlbumID3 {
         var hasAlbumOrEPByBaseKey: [String: Bool] = [:]
         for album in albums {
             let key = baseKey(for: album)
-            if isSingle(album) { hasSingleByBaseKey[key] = true }
-            if isAlbumOrEP(album) { hasAlbumOrEPByBaseKey[key] = true }
+            if album.isSingleRelease { hasSingleByBaseKey[key] = true }
+            if album.isAlbumOrEPRelease { hasAlbumOrEPByBaseKey[key] = true }
         }
 
         func groupKey(for album: AlbumID3) -> String {
             let base = baseKey(for: album)
             let conflicts = (hasSingleByBaseKey[base] ?? false) && (hasAlbumOrEPByBaseKey[base] ?? false)
             guard conflicts else { return base }
-            return base + (isSingle(album) ? "|single" : "|other")
+            return base + (album.isSingleRelease ? "|single" : "|other")
         }
 
         // Grouped via `Dictionary`, but the result order follows each group's first appearance in

@@ -259,8 +259,15 @@ struct AlbumView: View {
             artistAlbums = await LibraryCacheDatabase.shared.fullyDownloadedAlbums(byArtist: artistId)
         }
         let albumName = album.name.lowercased()
-        let others = artistAlbums.filter { $0.id != album.id && $0.name.lowercased() == albumName }
-        var more = artistAlbums.filter { $0.name.lowercased() != albumName }
+        // A Single and an Album/EP sharing this album's title are separate releases, not versions
+        // of it — whatever "Group release versions" is set to. They aren't dropped, though: they
+        // go in "More by" instead.
+        let others = artistAlbums.filter {
+            $0.id != album.id && $0.name.lowercased() == albumName && !album.isDistinctRelease(from: $0)
+        }
+        var more = artistAlbums.filter {
+            $0.id != album.id && ($0.name.lowercased() != albumName || album.isDistinctRelease(from: $0))
+        }
         if groupVersions {
             more = more.groupedByPreferredVersion()
         }
