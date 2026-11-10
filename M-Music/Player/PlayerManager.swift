@@ -123,6 +123,10 @@ final class PlayerManager: ObservableObject {
     /// a transcode can change the actual codec regardless of the source file's own format.
     /// `nil` while that read is still in flight (briefly, on every track change) or unavailable.
     @Published private(set) var audioFormatInfo: PlayerEngine.AudioFormatInfo?
+    /// Whether that read is in flight for the current track. Unlike `audioFormatInfo == nil` it
+    /// ends when the read fails too, so the audio-info line can show a "Loading…" placeholder
+    /// that keeps the line's height instead of hiding it (and shifting the layout) per track change.
+    @Published private(set) var isLoadingAudioFormat = false
     /// Whether the current track is starred, kept in sync with the lock screen / Control
     /// Center's "favorite" toggle (`MPRemoteCommandCenter.likeCommand`) as well as `PlayerView`'s
     /// own star button — both call `toggleStarred()` below.
@@ -768,6 +772,7 @@ final class PlayerManager: ObservableObject {
         currentTime = 0
         playbackSource = nil
         audioFormatInfo = nil
+        isLoadingAudioFormat = false
         isBuffering = false
         startRadioStream(station)
         updateArtworkURL()
@@ -1016,12 +1021,14 @@ final class PlayerManager: ObservableObject {
     /// `nil`led out first so a stale reading doesn't linger on screen while the new one loads.
     private func refreshAudioFormatInfo(for track: Child, matching url: URL) {
         audioFormatInfo = nil
+        isLoadingAudioFormat = true
         let trackId = track.id.raw
         Task { [weak self] in
             guard let self else { return }
             let info = await self.engine.currentAudioFormat(matching: url)
             guard self.currentTrack?.id.raw == trackId else { return }
             self.audioFormatInfo = info
+            self.isLoadingAudioFormat = false
         }
     }
 
