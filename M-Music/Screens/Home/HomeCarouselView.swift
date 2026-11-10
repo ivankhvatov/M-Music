@@ -21,7 +21,8 @@ struct HomeCarouselView: View, Equatable {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             title
-                .font(.system(size: 20, weight: .bold))
+                .font(.title3)
+                .fontWeight(.semibold)
                 .padding(.horizontal, 16)
 
             ScrollView(.horizontal, showsIndicators: false) {

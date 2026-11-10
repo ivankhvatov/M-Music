@@ -67,7 +67,8 @@ struct LibraryView: View {
             .padding(.horizontal, 16)
 
             Text("Recently played")
-                .font(.system(size: 20))
+                .font(.title3)
+                .fontWeight(.semibold)
                 .padding(.horizontal, 16)
                 .padding(.top, 16)
                 .padding(.bottom, 18)

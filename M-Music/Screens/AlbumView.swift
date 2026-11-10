@@ -657,7 +657,7 @@ struct AlbumView: View {
                     .font(.caption)
                     .multilineTextAlignment(.center)
                     .foregroundColor(.secondary)
-                    .padding(.top, 1)
+                    .padding(.top, 2)
 
                 actionButtons()
                     .padding(.top, 16)
