@@ -82,6 +82,8 @@ struct PlayerQueueList: View, Equatable {
     /// moving the wrong track.
     @State private var dragOriginCurrentIndex: Int?
     @State private var dragSnapshotQueueCount: Int?
+    /// Where in the list the user last was, to warm the thumbnails around on resume.
+    @State private var lastSeen = LastSeenIndex()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -116,6 +118,10 @@ struct PlayerQueueList: View, Equatable {
                     .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
                         frames.rows[entry.id] = frame
                     }
+                    .onAppear {
+                        lastSeen.index = index
+                        warmThumbnails(around: index)
+                    }
                     .listRowInsets(rowInsets)
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
@@ -128,6 +134,7 @@ struct PlayerQueueList: View, Equatable {
                     }
                 }
             }
+            .onAppResume { warmThumbnails(around: lastSeen.index) }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .scrollIndicators(.hidden)
@@ -422,12 +429,23 @@ struct PlayerQueueList: View, Equatable {
         }
     }
 
-    /// The shuffle, repeat and non-stop buttons, sharing the row's width. They don't do anything yet.
+    /// The shuffle, repeat and non-stop buttons, sharing the row's width. The non-stop one doesn't
+    /// do anything yet.
     private var buttons: some View {
         HStack(spacing: 8) {
-            HeaderButton(symbol: "shuffle")
-            HeaderButton(symbol: "repeat")
-            HeaderButton(symbol: "infinity")
+            HeaderButton(symbol: "shuffle", isActive: player.isShuffled, label: "Shuffle") {
+                // The rows keep their ids, so the list moves them to their new places.
+                withAnimation(.smooth(duration: 0.5)) { player.toggleShuffle() }
+            }
+            // Off, then on for the queue, then on for the song — which has a symbol of its own.
+            HeaderButton(
+                symbol: player.repeatMode == .one ? "repeat.1" : "repeat",
+                isActive: player.repeatMode != .off,
+                label: player.repeatMode == .one ? "Repeat One" : "Repeat"
+            ) {
+                player.cycleRepeatMode()
+            }
+            HeaderButton(symbol: "infinity", label: "Non-Stop") {}
         }
         .padding(.horizontal, NowPlayingLayout.cardPaddings)
         .padding(.top, 8)
@@ -456,21 +474,61 @@ struct PlayerQueueList: View, Equatable {
         player.queueSourceName ?? player.currentTrack?.album
     }
 
-    /// A capsule-shaped, transparent gray button with a symbol, as wide as the row gives it.
+    /// A capsule-shaped button with a symbol, as wide as the row gives it: a transparent gray
+    /// capsule with the symbol in transparent white — or, while it's on, a capsule of transparent
+    /// white with the symbol cut out of it, so that what's behind shows through.
     private struct HeaderButton: View {
         let symbol: String
+        var isActive = false
+        let label: LocalizedStringKey
+        let action: () -> Void
+
+        private var glyph: some View {
+            Image(systemName: symbol)
+                .font(.system(size: 18, weight: .semibold))
+                // A different symbol (repeat, repeat that song) takes the place of the one before it at
+                // once, without a transition of its own.
+                .contentTransition(.identity)
+                .transaction { $0.animation = nil }
+        }
+
+        /// Dimmed while it's pressed and back to full the moment it's let go. With the plain style
+        /// the button came back from being pressed over half a second, so a symbol that changed
+        /// with the tap — repeat to repeat that song — was seen to fade in, dimmed, rather than
+        /// to change.
+        private struct PressStyle: ButtonStyle {
+            func makeBody(configuration: Configuration) -> some View {
+                configuration.label
+                    .opacity(configuration.isPressed ? 0.7 : 1)
+                    .animation(nil, value: configuration.isPressed)
+            }
+        }
 
         var body: some View {
-            Button {} label: {
-                Image(systemName: symbol)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(Color.transparentWhite)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 42)
-                    .background(Color.white.opacity(0.15), in: .capsule)
-                    .contentShape(.capsule)
+            Button(action: action) {
+                ZStack {
+                    Capsule()
+                        .fill(Color.white.opacity(0.15))
+                        .overlay { glyph.foregroundStyle(Color.transparentWhite) }
+                        .opacity(isActive ? 0 : 1)
+                    Capsule()
+                        .fill(Color.transparentWhite)
+                        // The mask is opaque but for the symbol, which is cut out of it.
+                        .mask {
+                            Rectangle()
+                                .overlay { glyph.blendMode(.destinationOut) }
+                                .compositingGroup()
+                        }
+                        .opacity(isActive ? 1 : 0)
+                }
+                .animation(.easeInOut(duration: 0.2), value: isActive)
+                .frame(maxWidth: .infinity)
+                .frame(height: 42)
+                .contentShape(.capsule)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
+            .accessibilityLabel(label)
+            .accessibilityAddTraits(isActive ? .isSelected : [])
         }
     }
 
@@ -536,6 +594,17 @@ struct PlayerQueueList: View, Equatable {
             seen[track.id.raw] = occurrence + 1
             return Entry(id: "\(track.id.raw)#\(occurrence)", track: track)
         }
+    }
+
+    /// Warms the thumbnails of the rows around `index` — a row appeared, or the app resumed — so
+    /// scrolling the queue finds them decoded.
+    private func warmThumbnails(around index: Int) {
+        let rows = displayedUpcoming
+        let scale = displayScale
+        let requests = ImageWarmer.neighbors(of: index, in: rows, count: ImageWarmer.scrollAheadCount)
+            .map { ArtworkRequest.songRow(ArtworkRequest.artworkId(of: $0.track), scale: scale) }
+        guard !requests.isEmpty else { return }
+        Task { await ImageWarmer.shared.warmAhead(requests, source: "nowPlaying.queue") }
     }
 
     /// `draftOrder` while a drag is in progress, so rows visually reorder in real time;

@@ -120,6 +120,8 @@ struct SongsListView: View {
     @State private var imageReadiness = ImageReadiness()
     /// Where each displayed row is, for warming the ones below a row that scrolls into view.
     @State private var rowPositions = RowPositions()
+    /// Where the user last was, to warm around on resume — see `onAppResume`.
+    @State private var lastSeen = LastSeenIndex()
     /// Sorts/filters off the main actor — see `OffMainDeriver`.
     @State private var deriver = OffMainDeriver()
 
@@ -170,6 +172,7 @@ struct SongsListView: View {
             }
         }
         .refreshable { await performRefresh(force: true) }
+        .onAppResume { warmAround(lastSeen.index) }
         .navigationTitle("Songs")
         .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
         .toolbar {
@@ -202,19 +205,19 @@ struct SongsListView: View {
     private func play(_ track: Child) {
         let queue = playableSongs
         guard let index = queue.firstIndex(where: { $0.id == track.id }) else { return }
-        player.play(queue: queue, startAt: index)
+        player.play(queue: queue, startAt: index, origin: .songs)
     }
 
     private func playAll() {
         let queue = playableSongs
         guard !queue.isEmpty else { return }
-        player.play(queue: queue, startAt: 0)
+        player.play(queue: queue, startAt: 0, origin: .songs)
     }
 
     private func shuffleAll() {
         let queue = playableSongs.shuffled()
         guard !queue.isEmpty else { return }
-        player.play(queue: queue, startAt: 0)
+        player.play(queue: queue, startAt: 0, origin: .songs)
     }
 
     /// Same look as `ArtistAlbumsView.actionButtons`: two capsules sharing the row's width. They
@@ -303,9 +306,16 @@ struct SongsListView: View {
     private func warmAhead(after track: Child) {
         guard let index = rowPositions.position(of: track.id.raw),
               displayedSongs.indices.contains(index), displayedSongs[index].id == track.id else { return }
-        let requests = artworkRequests(for: displayedSongs[(index + 1)...].prefix(ImageWarmer.scrollAheadCount))
+        lastSeen.index = index
+        warmAround(index)
+    }
+
+    /// Warms the images around `index` — also after the app resumes, where the user left off.
+    private func warmAround(_ index: Int) {
+        guard displayedSongs.indices.contains(index) else { return }
+        let requests = artworkRequests(for: ArraySlice(ImageWarmer.neighbors(of: index, in: displayedSongs, count: ImageWarmer.scrollAheadCount)))
         guard !requests.isEmpty else { return }
-        Task { await ImageWarmer.shared.warmAhead(requests) }
+        Task { await ImageWarmer.shared.warmAhead(requests, source: "songs") }
     }
 
     /// Tells `ImageWarmer` what this screen shows first, so its artwork is decoded ahead of the
@@ -421,7 +431,7 @@ struct SongsListView: View {
                 .pickerStyle(.inline)
             } label: {
                 Image(systemName: "line.horizontal.3.decrease")
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(Color.accentColor)
             }
         }
     }
@@ -445,7 +455,7 @@ struct SongsListView: View {
                 .pickerStyle(.inline)
             } label: {
                 Image(systemName: "arrow.up.arrow.down")
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(Color.accentColor)
             }
         }
     }
@@ -483,12 +493,28 @@ private struct SongListRow: View {
 /// ticks — `SongRow` itself no longer observes `player`, so its `Menu` stays stable while open.
 private struct SongNowPlayingOverlay: View {
     let trackId: Child.ID
+    /// Set in a playlist's tracklist, where one song can sit in several rows: the overlay then
+    /// only shows for the repeat the queue is actually on — see `Child.occurrence`.
+    var occurrence: Int?
     let rowArtworkSize: CGFloat
+    /// Set in a playlist's tracklist: the overlay then only shows while the queue was started from
+    /// that playlist (or somewhere that doesn't say). The songs list leaves it unset and always shows it.
+    var playlistId: String?
 
     @ObservedObject private var player = PlayerManager.shared
 
+    /// Whether this row is the queue's current entry. A row that can tell its repeats apart only
+    /// matches the exact one the queue is on; when the queue entry can't say which repeat it is
+    /// (it wasn't started from a playlist's tracklist), the song alone decides, as in the lists
+    /// that have no repeats.
+    private var isCurrentEntry: Bool {
+        guard let current = player.currentTrack, current.id == trackId else { return false }
+        guard let occurrence, let currentOccurrence = current.occurrence else { return true }
+        return occurrence == currentOccurrence
+    }
+
     var body: some View {
-        if player.currentTrack?.id == trackId {
+        if isCurrentEntry, playlistId.map(player.queueOrigin.includesPlaylist) ?? true {
             RoundedRectangle(cornerRadius: 4)
                 .fill(Color.black.opacity(0.45))
                 .frame(width: rowArtworkSize, height: rowArtworkSize)
@@ -514,6 +540,8 @@ struct SongRow: View {
     /// Whether the artwork is darkened and gets the playing indicator while this is the track
     /// that's playing. Not in the queue list, whose rows are what's still to play.
     var showsPlayingIndicator = true
+    /// The playlist whose tracklist this row is in, if any — see `SongNowPlayingOverlay`.
+    var playlistId: String?
 
     private let client = SubsonicClient.shared
     @ObservedObject private var downloads = DownloadStore.shared
@@ -533,7 +561,8 @@ struct SongRow: View {
         onReorderDragChanged: ((PanGesture.Value) -> Void)? = nil,
         onReorderDragEnded: (() -> Void)? = nil,
         onTap: (() -> Void)? = nil,
-        showsPlayingIndicator: Bool = true
+        showsPlayingIndicator: Bool = true,
+        playlistId: String? = nil
     ) {
         self.track = track
         self.rowArtworkSize = rowArtworkSize
@@ -543,6 +572,7 @@ struct SongRow: View {
         self.onReorderDragEnded = onReorderDragEnded
         self.onTap = onTap
         self.showsPlayingIndicator = showsPlayingIndicator
+        self.playlistId = playlistId
         _artworkURL = State(initialValue: ArtworkRequest.songRow(ArtworkRequest.artworkId(of: track), scale: displayScale).url)
     }
 
@@ -624,7 +654,7 @@ struct SongRow: View {
             .frame(width: rowArtworkSize, height: rowArtworkSize)
 
             if showsPlayingIndicator {
-                SongNowPlayingOverlay(trackId: track.id, rowArtworkSize: rowArtworkSize)
+                SongNowPlayingOverlay(trackId: track.id, occurrence: track.occurrence, rowArtworkSize: rowArtworkSize, playlistId: playlistId)
             }
         }
         .frame(width: rowArtworkSize, height: rowArtworkSize)
@@ -661,6 +691,8 @@ private struct SongTrailingActions: View {
     private let player = PlayerManager.shared
     @ObservedObject private var starStore = StarStore.shared
     @ObservedObject private var downloads = DownloadStore.shared
+    /// The only thing that re-renders on a download's progress ticks — see `DownloadProgressStore`.
+    @ObservedObject private var downloadProgress = DownloadProgressStore.shared
 
     var body: some View {
         DownloadStatusIndicator(state: downloads.state(for: track.id.raw))

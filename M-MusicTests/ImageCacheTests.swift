@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import CryptoKit
 import UIKit
 @testable import M_Music
 
@@ -53,10 +54,13 @@ private struct Directories {
     }
 
     /// A fresh `ImageCache` over these directories — and so an empty memory tier, like a relaunch.
-    func makeCache() -> ImageCache {
+    func makeCache(pinnedCostLimit: Int = 96 * 1024 * 1024) -> ImageCache {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [ImageStub.self]
-        return ImageCache(regularDirectory: regular, permanentDirectory: permanent, session: URLSession(configuration: config))
+        return ImageCache(
+            regularDirectory: regular, permanentDirectory: permanent,
+            session: URLSession(configuration: config), pinnedCostLimit: pinnedCostLimit
+        )
     }
 
     func fileCount(_ directory: URL) -> Int {
@@ -432,5 +436,362 @@ struct ImageReadinessTests {
         #expect(!readiness.isReady)
         readiness.require([])
         #expect(readiness.isReady)
+    }
+}
+
+extension ImageCacheTests {
+    @Test func theMemoizedKeyIsTheComputedKey() {
+        let cache = Directories().makeCache()
+        let url = coverURL("al-20", size: 192)
+        let computed = cache.computeStableKey(for: url)
+        #expect(cache.stableKey(for: url) == computed)
+        #expect(cache.stableKey(for: url) == computed)            // from the memo
+        #expect(cache.stableKey(for: coverURL("al-20", size: 192, token: "other")) == computed)
+        #expect(cache.stableKey(for: coverURL("al-20")) != computed)
+    }
+}
+
+/// An extension of `ImageCacheTests` for the same reason as the preload tests above: the stub's
+/// request counter is shared.
+extension ImageCacheTests {
+    private func warmer(_ dirs: Directories) -> (ImageWarmer, ImageCache) {
+        let cache = dirs.makeCache()
+        let suite = "WarmAheadTests-\(UUID().uuidString)"
+        return (ImageWarmer(defaults: UserDefaults(suiteName: suite)!, cache: cache, scale: { 3 }), cache)
+    }
+
+    private func waitUntil(_ condition: () -> Bool) async -> Bool {
+        for _ in 0..<200 {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return condition()
+    }
+
+    private func target(_ id: String) -> ImageWarmer.Target {
+        .init(url: coverURL(id), maxPixelSize: ImageCache.standardMaxPixelSize)
+    }
+
+    @Test func eachSourceFinishesItsOwnQueue() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        for id in ["a1", "a2", "b1", "b2"] { await dirs.makeCache().load(coverURL(id)) }
+        let (warmer, cache) = warmer(dirs)
+
+        await warmer.warmAhead(targets: [target("a1"), target("a2")], source: "A")
+        await warmer.warmAhead(targets: [target("b1"), target("b2")], source: "B")
+        let done = await waitUntil {
+            ["a1", "a2", "b1", "b2"].allSatisfy { cache.image(for: coverURL($0)) != nil }
+        }
+        #expect(done)
+    }
+
+    @Test func aNewCallFromTheSameSourceKeepsTheWorkerGoing() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        for id in ["c1", "c2", "c3", "c4"] { await dirs.makeCache().load(coverURL(id)) }
+        let (warmer, cache) = warmer(dirs)
+
+        await warmer.warmAhead(targets: [target("c1"), target("c2"), target("c3")], source: "S")
+        // The next card appears: the queue moves on, nothing already under way is cancelled.
+        await warmer.warmAhead(targets: [target("c2"), target("c3"), target("c4")], source: "S")
+        let done = await waitUntil {
+            ["c2", "c3", "c4"].allSatisfy { cache.image(for: coverURL($0)) != nil }
+        }
+        #expect(done)
+    }
+
+    @Test func aSourceCanBeWarmedAgainAfterItsQueueRanDry() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        for id in ["d1", "d2"] { await dirs.makeCache().load(coverURL(id)) }
+        let (warmer, cache) = warmer(dirs)
+
+        await warmer.warmAhead(targets: [target("d1")], source: "S")
+        #expect(await waitUntil { cache.image(for: coverURL("d1")) != nil })
+        await warmer.warmAhead(targets: [target("d2")], source: "S")
+        #expect(await waitUntil { cache.image(for: coverURL("d2")) != nil })
+    }
+}
+
+@MainActor
+struct DownloadProgressStoreTests {
+    @Test func progressTicksDoNotPublishFromTheDownloadStore() {
+        var downloadStorePublishes = 0
+        var progressPublishes = 0
+        let a = DownloadStore.shared.objectWillChange.sink { downloadStorePublishes += 1 }
+        let b = DownloadProgressStore.shared.objectWillChange.sink { progressPublishes += 1 }
+        defer { DownloadProgressStore.shared.set([:]); a.cancel(); b.cancel() }
+
+        DownloadProgressStore.shared.set(["song": 0.25])
+        DownloadProgressStore.shared.set(["song": 0.5])
+        DownloadProgressStore.shared.set(["song": 0.5])           // unchanged: not published
+
+        #expect(downloadStorePublishes == 0)
+        #expect(progressPublishes == 2)
+    }
+}
+
+struct AsyncLimiterTests {
+    private actor Order {
+        private(set) var entries: [String] = []
+        func add(_ name: String) { entries.append(name) }
+    }
+
+    @Test func highPriorityWaitersAreServedBeforeLowOnesWhateverTheArrivalOrder() async {
+        let limiter = AsyncLimiter(limit: 1)
+        let order = Order()
+        await limiter.acquire()                                   // the slot is taken
+
+        let low = Task { await limiter.acquire(priority: .low); await order.add("low"); await limiter.release() }
+        try? await Task.sleep(for: .milliseconds(50))             // low is queued first
+        let high = Task { await limiter.acquire(priority: .high); await order.add("high"); await limiter.release() }
+        try? await Task.sleep(for: .milliseconds(50))
+
+        await limiter.release()
+        await low.value
+        await high.value
+        #expect(await order.entries == ["high", "low"])
+    }
+
+    @Test func waitersOfOneClassKeepTheirArrivalOrder() async {
+        let limiter = AsyncLimiter(limit: 1)
+        let order = Order()
+        await limiter.acquire()
+        var tasks: [Task<Void, Never>] = []
+        for name in ["first", "second", "third"] {
+            tasks.append(Task { await limiter.acquire(priority: .low); await order.add(name); await limiter.release() })
+            try? await Task.sleep(for: .milliseconds(30))
+        }
+        await limiter.release()
+        for task in tasks { await task.value }
+        #expect(await order.entries == ["first", "second", "third"])
+    }
+}
+
+extension ImageCacheTests {
+    @Test func anImageIsDownloadedOnceHoweverManyLoadsAskForItAtTheSameTime() async {
+        ImageStub.reset()
+        let cache = Directories().makeCache()
+        let url = coverURL("al-31")
+
+        async let prefetch: Void = cache.prefetchOriginalData(url)
+        async let background = cache.load(url, priority: .background)
+        async let interactive = cache.load(url, priority: .interactive)
+        let (_, b, i) = await ((), background, interactive)
+        _ = await prefetch
+        #expect(b != nil)
+        #expect(i != nil)
+        #expect(ImageStub.requestCount == 1)
+    }
+
+    @Test func aBackgroundAndAnInteractiveLoadOfOneImageBothGetIt() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        let url = coverURL("al-30")
+        await dirs.makeCache().load(url)
+        let cache = dirs.makeCache()
+
+        async let background = cache.load(url, priority: .background)
+        async let interactive = cache.load(url, priority: .interactive)
+        let (b, i) = await (background, interactive)
+        #expect(b != nil)
+        #expect(i != nil)
+        #expect(cache.image(for: url) != nil)
+    }
+}
+
+extension ImageCacheTests {
+    @Test func aRecentlyUsedImageSurvivesTheSystemEmptyingTheCache() async {
+        ImageStub.reset()
+        let cache = Directories().makeCache()
+        let url = coverURL("al-40")
+        await cache.load(url)
+        #expect(cache.image(for: url) != nil)
+
+        cache.simulateSystemPurge()                    // what a pause and resume can do to an NSCache
+        #expect(cache.image(for: url) != nil)
+        #expect(ImageStub.requestCount == 1)
+    }
+
+    @Test func aMemoryWarningReleasesThePinnedImages() async {
+        ImageStub.reset()
+        let cache = Directories().makeCache()
+        let url = coverURL("al-41")
+        await cache.load(url)
+
+        NotificationCenter.default.post(name: UIApplication.didReceiveMemoryWarningNotification, object: nil)
+        cache.simulateSystemPurge()
+        #expect(cache.image(for: url) == nil)
+    }
+
+    @Test func onlyTheMostRecentlyUsedImagesStayPinnedWithinTheLimit() async {
+        ImageStub.reset()
+        // Room for two of the (tiny) test bitmaps, measured rather than assumed.
+        let dirs = Directories()
+        let probe = dirs.makeCache()
+        await probe.load(coverURL("probe"))
+        let one = probe.pinnedCostForTesting
+        #expect(one > 0)
+
+        let cache = dirs.makeCache(pinnedCostLimit: one * 2 + one / 2)
+        let urls = ["p1", "p2", "p3", "p4"].map { coverURL($0) }
+        for url in urls { await cache.load(url) }
+
+        cache.simulateSystemPurge()
+        #expect(cache.image(for: urls[0]) == nil)
+        #expect(cache.image(for: urls[3]) != nil)
+    }
+
+    @Test func removingAnImageAlsoUnpinsIt() async {
+        ImageStub.reset()
+        let cache = Directories().makeCache()
+        let url = coverURL("al-42")
+        await cache.load(url)
+        cache.remove(url)
+        cache.simulateSystemPurge()
+        #expect(cache.image(for: url) == nil)
+    }
+}
+
+struct Md5HexTests {
+    @Test func knownVectors() {
+        #expect(SubsonicClient.md5Hex("") == "d41d8cd98f00b204e9800998ecf8427e")
+        #expect(SubsonicClient.md5Hex("abc") == "900150983cd24fb0d6963f7d28e17f72")
+        #expect(SubsonicClient.md5Hex("The quick brown fox jumps over the lazy dog") == "9e107d9d372bb6826bd81d3542a419d6")
+    }
+
+    @Test func theFormatterBasedVersionGivesTheSameDigits() {
+        func slow(_ string: String) -> String {
+            Insecure.MD5.hash(data: Data(string.utf8)).map { String(format: "%02hhx", $0) }.joined()
+        }
+        for sample in ["a", "http://example.test/rest/getCoverArt?id=al-1&size=192", "ÅÄÖ 音楽", String(repeating: "x", count: 500)] {
+            #expect(SubsonicClient.md5Hex(sample) == slow(sample))
+        }
+    }
+}
+
+extension ImageCacheTests {
+    @Test func theMemoizedFileNameIsTheHashOfTheKey() {
+        let cache = Directories().makeCache()
+        let key = cache.stableKey(for: coverURL("al-50"))
+        #expect(cache.fileName(forKey: key) == SubsonicClient.md5Hex(key) + ".img")
+        #expect(cache.fileName(forKey: key) == SubsonicClient.md5Hex(key) + ".img")
+    }
+}
+
+extension ImageCacheTests {
+    private func jpegData(side: Int) -> Data {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format)
+        return renderer.jpegData(withCompressionQuality: 0.8) { context in
+            UIColor.orange.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: side, height: side))
+        }
+    }
+
+    @Test func aDecodedCoverIsNoBiggerThanItsTier() async {
+        ImageStub.reset(body: jpegData(side: 1400))
+        let cache = Directories().makeCache()
+        let url = coverURL("al-60")
+        let image = await cache.load(url, maxPixelSize: ImageCache.cardMaxPixelSize)
+        let longest = max(image?.cgImage?.width ?? 0, image?.cgImage?.height ?? 0)
+        #expect(longest > 0)
+        #expect(longest <= ImageCache.cardMaxPixelSize)
+    }
+
+    @Test func aSmallCoverIsNotScaledUp() async {
+        ImageStub.reset(body: jpegData(side: 300))
+        let cache = Directories().makeCache()
+        let image = await cache.load(coverURL("al-61"), maxPixelSize: ImageCache.cardMaxPixelSize)
+        #expect(image?.cgImage?.width == 300)
+    }
+
+    @Test func backgroundDecodesRunOneAtATime() async {
+        ImageStub.reset(body: jpegData(side: 900))
+        let dirs = Directories()
+        let urls = (0..<8).map { coverURL("bg-\($0)") }
+        for url in urls { await dirs.makeCache().load(url) }
+        let cache = dirs.makeCache()
+
+        let started = ContinuousClock.now
+        await withTaskGroup(of: Void.self) { group in
+            for url in urls { group.addTask { _ = await cache.load(url, maxPixelSize: 512, priority: .background) } }
+        }
+        let background = ContinuousClock.now - started
+        for url in urls { #expect(cache.image(for: url, maxPixelSize: 512) != nil) }
+
+        // The same eight as interactive loads (two at a time, no rest) finish faster.
+        let fast = dirs.makeCache()
+        let fastStart = ContinuousClock.now
+        await withTaskGroup(of: Void.self) { group in
+            for url in urls { group.addTask { _ = await fast.load(url, maxPixelSize: 512, priority: .interactive) } }
+        }
+        #expect(ContinuousClock.now - fastStart < background)
+    }
+}
+
+extension ImageCacheTests {
+    @Test func askingForTheSameNeighboursAgainStartsNoNewWork() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        let ids = (0..<12).map { "w\($0)" }
+        for id in ids { await dirs.makeCache().load(coverURL(id)) }
+        let cache = dirs.makeCache()
+        let warmer = ImageWarmer(defaults: UserDefaults(suiteName: "w-\(UUID().uuidString)")!, cache: cache, scale: { 3 })
+        let targets = ids.map { ImageWarmer.Target(url: coverURL($0), maxPixelSize: ImageCache.standardMaxPixelSize) }
+
+        await warmer.warmAhead(targets: targets, source: "S")
+        let first = await warmer.prefetchBatchesStarted
+        #expect(first == 1)
+
+        // The next card asks for nearly the same window, and then for exactly the same one.
+        await warmer.warmAhead(targets: Array(targets.dropFirst()), source: "S")
+        await warmer.warmAhead(targets: targets, source: "S")
+        #expect(await warmer.prefetchBatchesStarted == first)
+    }
+
+    @Test func aWindowThatMovesOnOnlyRequestsWhatIsNew() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        let ids = (0..<20).map { "m\($0)" }
+        for id in ids { await dirs.makeCache().load(coverURL(id)) }
+        let cache = dirs.makeCache()
+        let warmer = ImageWarmer(defaults: UserDefaults(suiteName: "w-\(UUID().uuidString)")!, cache: cache, scale: { 3 })
+        let targets = ids.map { ImageWarmer.Target(url: coverURL($0), maxPixelSize: ImageCache.standardMaxPixelSize) }
+
+        await warmer.warmAhead(targets: Array(targets[0..<10]), source: "S")
+        await warmer.warmAhead(targets: Array(targets[5..<15]), source: "S")        // five new ones
+        #expect(await warmer.prefetchBatchesStarted == 2)
+        // The window moved past the first five before they were reached: only the rest is warmed.
+        let done = await waitFor { ids[5..<15].allSatisfy { cache.image(for: coverURL($0)) != nil } }
+        #expect(done)
+    }
+
+    @Test func goingToTheBackgroundMakesEverythingRequestableAgain() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        await dirs.makeCache().load(coverURL("b1"))
+        let cache = dirs.makeCache(pinnedCostLimit: 0)           // nothing pinned: a purge loses it
+        let warmer = ImageWarmer(defaults: UserDefaults(suiteName: "w-\(UUID().uuidString)")!, cache: cache, scale: { 3 })
+        let targets = [ImageWarmer.Target(url: coverURL("b1"), maxPixelSize: ImageCache.standardMaxPixelSize)]
+
+        await warmer.warmAhead(targets: targets, source: "S")
+        _ = await waitFor { cache.image(for: coverURL("b1")) != nil }
+        await warmer.cancel()
+        cache.simulateSystemPurge()
+        await warmer.memoryWasPurged()
+
+        await warmer.warmAhead(targets: targets, source: "S")
+        #expect(await warmer.prefetchBatchesStarted == 2)
+    }
+
+    private func waitFor(_ condition: () -> Bool) async -> Bool {
+        for _ in 0..<300 {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return condition()
     }
 }

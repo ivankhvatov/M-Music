@@ -80,28 +80,10 @@ struct PlayerTrackTitle: View {
         return column * (1 / Self.queueScale - 1)
     }
 
-    /// "Stream · FLAC · 24-bit/96 kHz" or "Downloaded · AAC · 256 kbps" — `nil` while the "Show
-    /// audio info" setting is off, nothing's playing, or the codec read
-    /// (`PlayerManager.audioFormatInfo`) hasn't landed yet for the current track.
+    /// The audio-info line, or its "Loading…" placeholder while the next song's is read — see
+    /// `AudioInfoDisplaySettings.line(for:)`.
     private var audioInfoLine: String? {
-        guard AudioInfoDisplaySettings.isEnabled, player.currentTrack != nil,
-              let source = player.playbackSource, let format = player.audioFormatInfo
-        else { return nil }
-        var parts = [source.displayName, format.codec]
-        if let bitDepth = format.bitDepth, let sampleRateHz = format.sampleRateHz {
-            parts.append("\(bitDepth)-bit/\(Self.formattedSampleRate(sampleRateHz))")
-        } else if let bitrateKbps = format.bitrateKbps {
-            parts.append("\(bitrateKbps) kbps")
-        }
-        return parts.joined(separator: " · ")
-    }
-
-    private static func formattedSampleRate(_ hz: Double) -> String {
-        let khz = (hz / 1000 * 10).rounded() / 10
-        if khz == khz.rounded() {
-            return "\(Int(khz)) kHz"
-        }
-        return String(format: "%.1f kHz", khz)
+        AudioInfoDisplaySettings.line(for: player)
     }
 }
 

@@ -27,7 +27,7 @@ actor ImageWarmer {
 
     /// A screen that records what it shows first.
     enum Screen: String, CaseIterable, Sendable {
-        case library, albums, playlists, artists, songs
+        case home, library, albums, playlists, artists, songs
     }
 
     /// How many of a screen's first requests are remembered (and warmed): a screenful and a bit.
@@ -39,7 +39,31 @@ actor ImageWarmer {
     /// fits on a screen.
     static let gateLimit = 12
     /// How many rows below the one that just scrolled into view are warmed (see `warmAhead`).
-    static let scrollAheadCount = 24
+    /// More than a Home carousel holds (20), so the first card to appear queues the whole carousel.
+    static let scrollAheadCount = 40
+    /// Up to `count` items around `index`, nearest first, alternating after and before it. A
+    /// scrolling list or carousel needs the items on *both* sides warm: the ones ahead of the
+    /// scroll, and — after the cache was emptied while the app was away — the ones it scrolls back
+    /// to, which a look-ahead that only looks forward leaves cold.
+    static func neighbors<Element>(of index: Int, in items: [Element], count: Int) -> [Element] {
+        guard items.indices.contains(index) else { return [] }
+        var result: [Element] = []
+        var step = 1
+        while result.count < count, index + step < items.count || index - step >= 0 {
+            if index + step < items.count { result.append(items[index + step]) }
+            if result.count < count, index - step >= 0 { result.append(items[index - step]) }
+            step += 1
+        }
+        return result
+    }
+
+    /// How many cards around the one that appeared a carousel warms: about eight screens-worth on
+    /// each side is more than a swipe covers before the next card has asked again.
+    static let carouselAheadCount = 16
+    /// How many covers of each neighbouring Home carousel are warmed before it's reached.
+    static let neighborCarouselCards = 8
+    /// How many images a look-ahead worker decodes at the same time.
+    static let aheadParallelism = 2
     /// How many of a destination's own items (an artist's albums, a playlist's songs) are warmed.
     static let destinationItemLimit = 12
 
@@ -48,7 +72,18 @@ actor ImageWarmer {
     private let scaleProvider: @Sendable () async -> CGFloat
 
     private var warmPass: Task<Void, Never>?
-    private var scrollTask: Task<Void, Never>?
+    private struct AheadQueue {
+        var pending: [Target] = []
+        var isRunning = false
+    }
+    /// Each look-ahead source's queue — see `warmAhead`.
+    private var aheadQueues: [String: AheadQueue] = [:]
+    /// Everything a look-ahead has asked for since the cache may last have lost images — see
+    /// `warmAhead`. Bounded; cleared when the app goes to the background or memory is purged.
+    private var requested: Set<Target> = []
+    private static let requestedLimit = 4000
+    /// How many prefetch batches `warmAhead` has started, for tests.
+    private(set) var prefetchBatchesStarted = 0
     /// The warm-up of each screen's newly changed first screenful (see `remember`).
     private var refreshTasks: [Screen: Task<Void, Never>] = [:]
     /// Destinations already warmed since the memory layer was last (possibly) emptied.
@@ -117,12 +152,16 @@ actor ImageWarmer {
     /// gone, so the next row to ask warms its destination again.
     func memoryWasPurged() {
         warmedDestinations.removeAll()
+        requested.removeAll()
     }
 
     /// Stops a warm-up in progress (the app went to the background).
     func cancel() {
         warmPass?.cancel()
         warmPass = nil
+        for source in aheadQueues.keys { aheadQueues[source]?.pending = [] }
+        // The cache may lose images while the app is away: everything is up for requesting again.
+        requested.removeAll()
     }
 
     // MARK: - Now Playing
@@ -160,7 +199,8 @@ actor ImageWarmer {
                 }
                 for request in requests {
                     guard !Task.isCancelled else { return }
-                    await cache.preload(request, allowNetwork: true, paced: false)
+                    // A screen is waiting on these: ahead of any warm-up in the decode queue.
+                    await cache.preload(request, allowNetwork: true, paced: false, priority: .interactive)
                 }
             }
             group.addTask { try? await Task.sleep(for: timeout) }
@@ -171,22 +211,98 @@ actor ImageWarmer {
 
     // MARK: - Scrolling
 
-    /// Warms the images of the rows just below one that scrolled into view, so a fast scroll
-    /// finds them already decoded instead of starting each load as its row appears. Only the
-    /// latest request counts — a newer row appearing replaces the previous one, which is by then
-    /// further up the list. Fetches whatever isn't on disk, a few at a time, then decodes.
-    func warmAhead(_ requests: [ArtworkRequest]) {
-        scrollTask?.cancel()
-        let cache = self.cache
-        scrollTask = Task(priority: .userInitiated) {
-            let missing = requests.filter { !cache.isCached($0) }
-            guard !missing.isEmpty else { return }
-            await withTaskGroup(of: Void.self) { downloads in
-                for request in missing { downloads.addTask { await cache.prefetchOriginalData(request.url) } }
+    /// Warms the images of the rows or cards just after one that scrolled into view, so a fast
+    /// scroll finds them already decoded instead of starting each load as its row appears.
+    ///
+    /// Each `source` (a carousel, a list) has its own queue and its own worker. A call replaces
+    /// what that source still has queued — the newest position is the one that matters — but never
+    /// cancels what the worker is decoding right now, and never touches another source's queue:
+    /// cancelling on every call meant that during a steady swipe (a new card appears every few
+    /// tens of milliseconds) each run was cut off before its first image was done, and carousels
+    /// cancelled each other's. The worker fetches what isn't on disk, then decodes, one image at a
+    /// time (the cache's decode gate bounds the CPU).
+    func warmAhead(_ requests: [ArtworkRequest], source: String) {
+        warmAhead(targets: requests.compactMap { request in
+            request.url.map { Target(url: $0, maxPixelSize: request.maxPixelSize) }
+        }, source: source)
+    }
+
+    /// One image to decode: a URL and the tier it's shown at.
+    struct Target: Sendable, Hashable {
+        let url: URL
+        let maxPixelSize: Int?
+    }
+
+    func warmAhead(targets: [Target], source: String) {
+        var queue = aheadQueues[source] ?? AheadQueue()
+
+        // A card appearing asks for the neighbours of its position, and the previous card asked
+        // for nearly the same ones: only what hasn't been requested since the cache was last
+        // emptied is looked at — no cache lookups, file-system checks or tasks for the rest. (The
+        // repeats used to cost more CPU than decoding the images did.)
+        let fresh = targets.filter { !requested.contains($0) }
+        let freshSet = Set(fresh)
+        let stillPending = Set(queue.pending)
+        let window = Set(targets)
+        // What the previous call queued but this window has moved past is up for requesting again.
+        for dropped in queue.pending where !window.contains(dropped) { requested.remove(dropped) }
+        if requested.count > Self.requestedLimit { requested.removeAll() }
+        requested.formUnion(fresh)
+
+        let missing = targets.filter { target in
+            if stillPending.contains(target) { return true }
+            guard freshSet.contains(target) else { return false }
+            return cache.image(for: target.url, maxPixelSize: target.maxPixelSize) == nil
+        }
+        // Bytes first (the cache's prefetch gate keeps a few downloads running at a time, in this
+        // order): a worker that downloaded each image only when its turn to decode came couldn't
+        // keep up with a swipe. One task for the call's new targets, not one per target.
+        let missingSet = Set(missing)
+        let toFetch = fresh.filter { missingSet.contains($0) }
+        if !toFetch.isEmpty {
+            prefetchBatchesStarted += 1
+            Task(priority: .utility) { [cache] in
+                _ = await BoundedConcurrency.map(toFetch, limit: 4) { target -> Bool in
+                    await cache.prefetchOriginalData(target.url)
+                    return true
+                }
             }
-            for request in missing {
-                guard !Task.isCancelled else { return }
-                await cache.preload(request, allowNetwork: true)
+        }
+        queue.pending = missing
+        let start = !queue.isRunning && !missing.isEmpty
+        if start { queue.isRunning = true }
+        aheadQueues[source] = queue
+        guard start else { return }
+        Task(priority: .userInitiated) { await self.runAheadWorker(source) }
+    }
+
+    /// The next few targets of `source`'s queue, nearest first; empty — and the worker marked as
+    /// stopped — once it has run dry.
+    private func takeAhead(_ source: String, count: Int) -> [Target] {
+        guard var queue = aheadQueues[source], !queue.pending.isEmpty else {
+            aheadQueues[source]?.isRunning = false
+            return []
+        }
+        let batch = Array(queue.pending.prefix(count))
+        queue.pending.removeFirst(batch.count)
+        aheadQueues[source] = queue
+        return batch
+    }
+
+    private func runAheadWorker(_ source: String) async {
+        let cache = self.cache
+        // No suspension between `takeAhead` finding the queue empty and clearing `isRunning`, so a
+        // call can never slip in between and be left without a worker.
+        while true {
+            let batch = takeAhead(source, count: Self.aheadParallelism)
+            if batch.isEmpty { return }
+            await withTaskGroup(of: Void.self) { group in
+                for target in batch {
+                    group.addTask {
+                        if cache.image(for: target.url, maxPixelSize: target.maxPixelSize) != nil { return }
+                        await cache.preload(target.url, maxPixelSize: target.maxPixelSize, allowNetwork: true, paced: false)
+                    }
+                }
             }
         }
     }

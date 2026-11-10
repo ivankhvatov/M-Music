@@ -62,6 +62,8 @@ struct ArtistsListView: View {
     @State private var imageReadiness = ImageReadiness()
     /// Where each displayed row is, for warming the ones below a row that scrolls into view.
     @State private var rowPositions = RowPositions()
+    /// Where the user last was, to warm around on resume — see `onAppResume`.
+    @State private var lastSeen = LastSeenIndex()
 
     @AppStorage("artistsList.filterOption") private var filterOptionStorage = ArtistFilterOption.all.storageKey
     @AppStorage("artistsList.sortOrder") private var sortOrderStorage = ArtistSortOrder.ascending.storageKey
@@ -121,6 +123,7 @@ struct ArtistsListView: View {
             }
         }
         .refreshable { await performRefresh(force: true) }
+        .onAppResume { warmAround(lastSeen.index) }
         .navigationTitle("Artists")
         .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
         .toolbar {
@@ -188,9 +191,16 @@ struct ArtistsListView: View {
     private func warmAhead(after artist: ArtistID3) {
         guard let index = rowPositions.position(of: artist.id.raw),
               displayedArtists.indices.contains(index), displayedArtists[index].id == artist.id else { return }
-        let requests = artworkRequests(for: displayedArtists[(index + 1)...].prefix(ImageWarmer.scrollAheadCount))
+        lastSeen.index = index
+        warmAround(index)
+    }
+
+    /// Warms the images around `index` — also after the app resumes, where the user left off.
+    private func warmAround(_ index: Int) {
+        guard displayedArtists.indices.contains(index) else { return }
+        let requests = artworkRequests(for: ArraySlice(ImageWarmer.neighbors(of: index, in: displayedArtists, count: ImageWarmer.scrollAheadCount)))
         guard !requests.isEmpty else { return }
-        Task { await ImageWarmer.shared.warmAhead(requests) }
+        Task { await ImageWarmer.shared.warmAhead(requests, source: "artists") }
     }
 
     /// Tells `ImageWarmer` what this screen shows first, so its artwork is decoded ahead of the
@@ -232,7 +242,7 @@ struct ArtistsListView: View {
                 .pickerStyle(.inline)
             } label: {
                 Image(systemName: "line.3.horizontal.decrease")
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(Color.accentColor)
             }
         }
     }
@@ -249,7 +259,7 @@ struct ArtistsListView: View {
                 .pickerStyle(.inline)
             } label: {
                 Image(systemName: "arrow.up.arrow.down")
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(Color.accentColor)
             }
         }
     }
@@ -338,7 +348,7 @@ private struct ArtistRow: View {
 
     var body: some View {
         HStack(spacing: 16) {
-            CachedAsyncImage(url: artworkURL, maxPixelSize: ImageCache.avatarMaxPixelSize, loadDelay: .milliseconds(50)) { image in
+            CachedAsyncImage(url: artworkURL, maxPixelSize: ImageCache.avatarMaxPixelSize) { image in
                 image
                     .resizable()
                     .aspectRatio(contentMode: .fill)

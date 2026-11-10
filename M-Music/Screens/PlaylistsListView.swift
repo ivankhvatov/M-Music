@@ -7,6 +7,40 @@
 
 import SwiftUI
 
+private enum PlaylistSortField: LocalizedStringKey, CaseIterable {
+    case name = "Name"
+    case creationDate = "Creation date"
+    case updateDate = "Update date"
+
+    var storageKey: String {
+        switch self {
+        case .name: return "name"
+        case .creationDate: return "creationDate"
+        case .updateDate: return "updateDate"
+        }
+    }
+
+    init(storageKey: String) {
+        self = Self.allCases.first { $0.storageKey == storageKey } ?? .name
+    }
+}
+
+private enum PlaylistSortOrder: LocalizedStringKey, CaseIterable {
+    case ascending = "Ascending"
+    case descending = "Descending"
+
+    var storageKey: String {
+        switch self {
+        case .ascending: return "ascending"
+        case .descending: return "descending"
+        }
+    }
+
+    init(storageKey: String) {
+        self = Self.allCases.first { $0.storageKey == storageKey } ?? .ascending
+    }
+}
+
 struct PlaylistsListView: View {
     @Namespace private var playlistZoomNamespace
     @Environment(\.displayScale) private var displayScale
@@ -23,19 +57,41 @@ struct PlaylistsListView: View {
     @State private var loadError: String?
     @State private var hasLoadedOnce = false
 
+    @State private var isCreatingPlaylist = false
+    @State private var newPlaylistName = ""
+    @State private var createError: String?
+
     @AppStorage("library.playlistsDisplayStyle") private var displayStyleStorage = LibraryDisplayStyle.grid.storageKey
+    @AppStorage("playlistsList.sortField") private var sortFieldStorage = PlaylistSortField.name.storageKey
+    @AppStorage("playlistsList.sortOrder") private var sortOrderStorage = PlaylistSortOrder.ascending.storageKey
     @AppStorage(OfflineModeSettings.Keys.showUnavailableInLists) private var showUnavailableInLists = true
 
     /// Keeps the content hidden on first open until the first screenful's images are in memory.
     @State private var imageReadiness = ImageReadiness()
     /// Where each displayed row is, for warming the ones below a row that scrolls into view.
     @State private var rowPositions = RowPositions()
+    /// Where the user last was, to warm around on resume — see `onAppResume`.
+    @State private var lastSeen = LastSeenIndex()
     @ObservedObject private var downloads = DownloadStore.shared
     @ObservedObject private var libraryCacheStatus = LibraryCacheStatus.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
     private var displayStyle: LibraryDisplayStyle {
         LibraryDisplayStyle(storageKey: displayStyleStorage)
+    }
+
+    private var sortField: Binding<PlaylistSortField> {
+        Binding(
+            get: { PlaylistSortField(storageKey: sortFieldStorage) },
+            set: { sortFieldStorage = $0.storageKey }
+        )
+    }
+
+    private var sortOrder: Binding<PlaylistSortOrder> {
+        Binding(
+            get: { PlaylistSortOrder(storageKey: sortOrderStorage) },
+            set: { sortOrderStorage = $0.storageKey }
+        )
     }
 
     private let gridColumns = [
@@ -77,9 +133,29 @@ struct PlaylistsListView: View {
             }
         }
         .refreshable { await performRefresh() }
+        .onAppResume { warmAround(lastSeen.index) }
         .navigationTitle("Playlists")
         .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
+        .toolbar {
+            createButton
+            sortButton
+        }
+        .alert("Create a playlist", isPresented: $isCreatingPlaylist) {
+            TextField("Playlist name", text: $newPlaylistName)
+            Button("Cancel", role: .cancel) {}
+            Button("Create") { createPlaylist(named: newPlaylistName) }
+        }
+        .alert("Couldn't create the playlist", isPresented: Binding(
+            get: { createError != nil },
+            set: { if !$0 { createError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(createError ?? "")
+        }
         .task { await refresh() }
+        .onChange(of: sortFieldStorage) { updateDisplayedPlaylists() }
+        .onChange(of: sortOrderStorage) { updateDisplayedPlaylists() }
         .onChange(of: searchText) { updateDisplayedPlaylists() }
         .onChange(of: showUnavailableInLists) { updateDisplayedPlaylists() }
         .onChange(of: networkMonitor.isOnline) { updateDisplayedPlaylists() }
@@ -143,8 +219,75 @@ struct PlaylistsListView: View {
         if !networkMonitor.isOnline, !showUnavailableInLists {
             result = result.filter { isFullyDownloaded($0) }
         }
-        displayedPlaylists = result
+        displayedPlaylists = sorted(result)
         rememberFirstScreenful()
+    }
+
+    private func sorted(_ list: [PlaylistSummary]) -> [PlaylistSummary] {
+        PlaylistOrdering.sorted(list, field: sortField.wrappedValue.storageKey, ascending: sortOrder.wrappedValue == .ascending)
+    }
+
+    /// "New Playlist N" (localized) with the smallest N no existing playlist already uses,
+    /// ignoring case.
+    private func defaultPlaylistName() -> String {
+        let taken = Set(playlists.map { $0.name.lowercased() })
+        var number = 1
+        while taken.contains(String(localized: "New Playlist \(number)").lowercased()) {
+            number += 1
+        }
+        return String(localized: "New Playlist \(number)")
+    }
+
+    /// Creates an empty playlist on the server, then force-refreshes so it shows up.
+    private func createPlaylist(named name: String) {
+        var name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.isEmpty { name = defaultPlaylistName() }
+        Task {
+            do {
+                try await client.createPlaylist(name: name)
+                await performRefresh(force: true)
+            } catch {
+                createError = error.localizedDescription
+            }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var createButton: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            Button {
+                newPlaylistName = ""
+                isCreatingPlaylist = true
+            } label: {
+                Image(systemName: "plus")
+                    .foregroundStyle(Color.accentColor)
+            }
+            .accessibilityLabel("Create")
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var sortButton: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            Menu {
+                Picker("Sort by", selection: sortField) {
+                    ForEach(PlaylistSortField.allCases, id: \.self) { field in
+                        Text(field.rawValue).tag(field)
+                    }
+                }
+                .pickerStyle(.inline)
+
+                Picker("Order", selection: sortOrder) {
+                    ForEach(PlaylistSortOrder.allCases, id: \.self) { order in
+                        Text(order.rawValue).tag(order)
+                    }
+                }
+                .pickerStyle(.inline)
+            } label: {
+                Image(systemName: "arrow.up.arrow.down")
+                    .foregroundStyle(Color.accentColor)
+            }
+        }
     }
 
     /// The requests the screen's cards or rows make for `playlists`, in the current display style.
@@ -161,9 +304,16 @@ struct PlaylistsListView: View {
     private func warmAhead(after playlist: PlaylistSummary) {
         guard let index = rowPositions.position(of: playlist.id.raw),
               displayedPlaylists.indices.contains(index), displayedPlaylists[index].id == playlist.id else { return }
-        let requests = artworkRequests(for: displayedPlaylists[(index + 1)...].prefix(ImageWarmer.scrollAheadCount))
+        lastSeen.index = index
+        warmAround(index)
+    }
+
+    /// Warms the images around `index` — also after the app resumes, where the user left off.
+    private func warmAround(_ index: Int) {
+        guard displayedPlaylists.indices.contains(index) else { return }
+        let requests = artworkRequests(for: ArraySlice(ImageWarmer.neighbors(of: index, in: displayedPlaylists, count: ImageWarmer.scrollAheadCount)))
         guard !requests.isEmpty else { return }
-        Task { await ImageWarmer.shared.warmAhead(requests) }
+        Task { await ImageWarmer.shared.warmAhead(requests, source: "playlists") }
     }
 
     /// Tells `ImageWarmer` what this screen shows first, so its artwork is decoded ahead of the
@@ -232,13 +382,43 @@ struct PlaylistsListView: View {
     }
 }
 
+/// How the playlists are ordered, from the stored sort field (`PlaylistSortField.storageKey`) and
+/// direction — shared by the playlists screen and the sheet that adds a song to one.
+enum PlaylistOrdering {
+    /// Sorts by the field and direction. The server's dates are ISO 8601 strings in one format, so
+    /// comparing them as strings orders them chronologically; playlists without a date sort as the
+    /// oldest, and ties keep their name order.
+    static func sorted(_ list: [PlaylistSummary], field: String, ascending: Bool) -> [PlaylistSummary] {
+        let byName = list.sortedByLocalizedKey(ascending: true) { $0.name.sortKey }
+        switch field {
+        case "creationDate": return sortedByDate(byName, ascending: ascending) { $0.created }
+        case "updateDate": return sortedByDate(byName, ascending: ascending) { $0.changed }
+        default: return ascending ? byName : byName.reversed()
+        }
+    }
+
+    /// `byName` is already name-ordered; the index tie-breaker keeps that order among equal dates
+    /// (`sorted` itself makes no stability promise).
+    private static func sortedByDate(_ byName: [PlaylistSummary], ascending: Bool, date: (PlaylistSummary) -> String?) -> [PlaylistSummary] {
+        byName.enumerated().sorted { lhs, rhs in
+            let l = date(lhs.element) ?? ""
+            let r = date(rhs.element) ?? ""
+            if l == r { return lhs.offset < rhs.offset }
+            return ascending ? l < r : l > r
+        }.map(\.element)
+    }
+}
+
 /// A single row for the "List"-style playlists browse — rounded-corner artwork on the leading
 /// edge (mirrors `PlaylistCardView.artwork`, but fit rather than cropped to a square — see
 /// `artwork` below), name/creator stacked next to it (mirrors `ArtistsListView.ArtistRow`, which
 /// uses a circular artwork with just a title).
-private struct PlaylistRow: View {
+struct PlaylistRow: View {
     let playlist: PlaylistSummary
     var zoomNamespace: Namespace.ID? = nil
+    /// Whether the row gets the playlist's own screen ready while it's on screen (its full-size
+    /// cover, and the images of its first songs). Not for a row that only picks a playlist.
+    var preparesPlaylistScreen = true
 
     /// Computed once, in `init` — not via `.task` — so an already-cached cover (e.g. already
     /// fetched by this same row earlier) renders on the very first frame instead of flashing the
@@ -260,9 +440,10 @@ private struct PlaylistRow: View {
     @ObservedObject private var libraryCacheStatus = LibraryCacheStatus.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
-    init(playlist: PlaylistSummary, zoomNamespace: Namespace.ID? = nil, displayScale: CGFloat) {
+    init(playlist: PlaylistSummary, zoomNamespace: Namespace.ID? = nil, preparesPlaylistScreen: Bool = true, displayScale: CGFloat) {
         self.playlist = playlist
         self.zoomNamespace = zoomNamespace
+        self.preparesPlaylistScreen = preparesPlaylistScreen
         _artworkURL = State(initialValue: ArtworkRequest.playlistRow(playlist.coverArt ?? playlist.id.raw, scale: displayScale).url)
     }
 
@@ -286,6 +467,7 @@ private struct PlaylistRow: View {
         // `playlist.id` so scrolling this row's cell to a different playlist (cell reuse)
         // cancels the stale prefetch and starts the right one.
         .task(id: playlist.id) {
+            guard preparesPlaylistScreen else { return }
             let artworkId = playlist.coverArt ?? playlist.id.raw
             await ImageCache.shared.prefetchOriginalData(ArtworkRequest.playlistHeader(artworkId).url)
             // And decoded (with the first songs' thumbnails), once the row has stayed on screen a

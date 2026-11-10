@@ -4,12 +4,32 @@ import SwiftUI
 /// UI-facing wrapper around `DownloadService` — mirrors the shape of Shelv's `DownloadStore`
 /// (`Shelv/ViewModels/DownloadStore.swift`) minus everything server-scoped, since M-Music only
 /// ever talks to one server.
+/// The progress of the downloads in flight, kept apart from `DownloadStore` on purpose: it changes
+/// several times a second while anything downloads, and `DownloadStore` is observed by every card,
+/// row and header that shows availability — each tick used to re-render all of them. Only the song
+/// rows with a `DownloadStatusIndicator` observe this.
+@MainActor
+final class DownloadProgressStore: ObservableObject {
+    static let shared = DownloadProgressStore()
+
+    @Published private(set) var progressBySongId: [String: Double] = [:]
+
+    func set(_ progress: [String: Double]) {
+        if progress != progressBySongId { progressBySongId = progress }
+    }
+}
+
 @MainActor
 final class DownloadStore: ObservableObject {
     static let shared = DownloadStore()
 
     @Published private(set) var downloadedSongIds: Set<String> = []
-    @Published private(set) var progressBySongId: [String: Double] = [:]
+    /// Reads and writes go to `DownloadProgressStore`, so a progress tick doesn't publish from
+    /// this object.
+    private var progressBySongId: [String: Double] {
+        get { DownloadProgressStore.shared.progressBySongId }
+        set { DownloadProgressStore.shared.set(newValue) }
+    }
     @Published private(set) var downloadedRecords: [DownloadRecord] = []
     @Published private(set) var totalBytes: Int64 = 0
     /// Bumped whenever the downloaded set changed. Views that only need "did the downloads

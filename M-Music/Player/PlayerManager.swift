@@ -15,6 +15,34 @@ import UIKit
 /// end-of-queue-track case (`PlayerEngine.preloadForGapless`, backed by an `AVQueuePlayer` that
 /// performs the handoff itself rather than a fresh item being swapped in after the fact), and
 /// persists the current queue, track, and position across launches.
+/// Where the current queue was started from, so a list showing one of its tracks only marks it as
+/// playing when it's the list the user actually played from — the same song can sit in the
+/// songs list, its album and a playlist at once.
+enum QueueOrigin: Codable, Equatable {
+    case songs
+    case album(String)
+    case playlist(String)
+    /// Anything else (an artist's Play/Shuffle, a queue from before this was recorded): every
+    /// list containing the track marks it, as they did before.
+    case other
+
+    func includesAlbum(_ albumId: String) -> Bool {
+        switch self {
+        case .songs, .playlist: return false
+        case .album(let id): return id == albumId
+        case .other: return true
+        }
+    }
+
+    func includesPlaylist(_ playlistId: String) -> Bool {
+        switch self {
+        case .songs, .album: return false
+        case .playlist(let id): return id == playlistId
+        case .other: return true
+        }
+    }
+}
+
 @MainActor
 final class PlayerManager: ObservableObject {
     static let shared = PlayerManager()
@@ -47,9 +75,28 @@ final class PlayerManager: ObservableObject {
             if !isApplyingRestoredQueue { awaitingFullQueue = false }
         }
     }
+    /// What happens when the queue (or the song) ends — see `cycleRepeatMode()`.
+    enum RepeatMode: Int, Sendable {
+        case off
+        /// The queue starts over after its last track.
+        case all
+        /// The current track plays again after it ends.
+        case one
+    }
+
+    /// Whether the up-next part of the queue was shuffled with `toggleShuffle()` — the queue as it
+    /// was before is in `unshuffledQueue`.
+    @Published private(set) var isShuffled = false
+    @Published private(set) var repeatMode: RepeatMode = .off
+    /// The queue as it was when it was shuffled, to put it back in order again.
+    private var unshuffledQueue: [Child] = []
+
     /// The album or playlist the current queue was started from, when the caller said — shown as
     /// "From …" above the queue list. Not persisted, so it's `nil` again after a relaunch.
     @Published private(set) var queueSourceName: String?
+    /// Which list the current queue was started from — see `QueueOrigin`. Only starting a new
+    /// queue replaces it; `playNext`/`addToQueue` leave it be.
+    @Published private(set) var queueOrigin: QueueOrigin = .other
     @Published private(set) var currentIndex: Int?
     @Published private(set) var isPlaying = false
     /// Not `@Published`: it changes twice a second during playback, and publishing it here made
@@ -76,6 +123,10 @@ final class PlayerManager: ObservableObject {
     /// a transcode can change the actual codec regardless of the source file's own format.
     /// `nil` while that read is still in flight (briefly, on every track change) or unavailable.
     @Published private(set) var audioFormatInfo: PlayerEngine.AudioFormatInfo?
+    /// Whether that read is in flight for the current track. Unlike `audioFormatInfo == nil` it
+    /// ends when the read fails too, so the audio-info line can show a "Loading…" placeholder
+    /// that keeps the line's height instead of hiding it (and shifting the layout) per track change.
+    @Published private(set) var isLoadingAudioFormat = false
     /// Whether the current track is starred, kept in sync with the lock screen / Control
     /// Center's "favorite" toggle (`MPRemoteCommandCenter.likeCommand`) as well as `PlayerView`'s
     /// own star button — both call `toggleStarred()` below.
@@ -113,6 +164,12 @@ final class PlayerManager: ObservableObject {
     private let client: SubsonicClient
     private let engine = PlayerEngine()
 
+    /// Where the song is right now: the player's own clock, which a view drawn on every frame can
+    /// ask for, and the last reported position while that isn't there (nothing loaded yet, or a
+    /// seek under way — `PlayerEngine.exactTime` is `nil` then). `currentTime` itself changes only
+    /// twice a second.
+    var livePosition: TimeInterval { engine.exactTime ?? currentTime }
+
     /// Whether the song is advancing: playing as asked, and past loading, buffering, seeking and the
     /// other waits between asking and hearing it. `isPlaying` is the request, and runs ahead of the
     /// audio by however long those take — for anything following the song's position by carrying
@@ -144,6 +201,10 @@ final class PlayerManager: ObservableObject {
     /// the gapless handoff to it internally (nothing further to load) or whether it needs a fresh
     /// `engine.play(url:)` call (nothing was ready in time, or the queue changed since).
     private var gaplessPreloadedIndex: Int?
+    /// The track that was preloaded, which the handoff checks as well as the index: the queue can
+    /// change under an index (a shuffle) without anything being done to what's preloaded, when that
+    /// is put off (see `refreshNextItem()`).
+    private var gaplessPreloadedTrackID: String?
 
     /// The source of whatever `engine.preloadForGapless(url:)` was last called with, paired with
     /// `gaplessPreloadedIndex` — applied to `playbackSource` once `handleTrackFinishedNaturally()`
@@ -385,9 +446,7 @@ final class PlayerManager: ObservableObject {
         // itself only kicks off the download (see its doc comment).
         GaplessCacheStatus.shared.$cachedEntries
             .sink { [weak self] entries in
-                guard let self, let currentIndex else { return }
-                let nextIndex = currentIndex + 1
-                guard queue.indices.contains(nextIndex) else { return }
+                guard let self, let nextIndex = upcomingIndex(afterFinishing: true) else { return }
                 let nextTrack = queue[nextIndex]
                 guard let entry = entries[nextTrack.id.raw] else { return }
                 if gaplessCachingSongId == nextTrack.id.raw {
@@ -395,7 +454,7 @@ final class PlayerManager: ObservableObject {
                 }
                 guard gaplessPreloadedIndex == nil, isGaplessCacheEntry(entry, validFor: nextTrack) else { return }
                 guard engine.preloadForGapless(url: entry.url) else { return }
-                gaplessPreloadedIndex = nextIndex
+                notePreloaded(at: nextIndex)
                 gaplessPreloadedSource = .gaplessCache
             }
             .store(in: &subscriptions)
@@ -438,13 +497,28 @@ final class PlayerManager: ObservableObject {
     /// `fromPlaylist` records that the queue came from a playlist, so "Scrobble from playlists"
     /// can exclude its plays. It describes the queue's origin and stays put through
     /// `playNext`/`addToQueue`; only starting a new queue replaces it. `sourceName` is the album or
-    /// playlist's name, for display.
-    func play(queue newQueue: [Child], startAt index: Int, fromPlaylist: Bool = false, sourceName: String? = nil) {
+    /// playlist's name, for display. `origin` is which list it was started from.
+    func play(
+        queue newQueue: [Child],
+        startAt index: Int,
+        fromPlaylist: Bool = false,
+        sourceName: String? = nil,
+        origin: QueueOrigin = .other
+    ) {
         guard newQueue.indices.contains(index) else { return }
         currentRadioStation = nil
-        queue = newQueue
+        // With shuffle on, the new queue plays shuffled too: the track it starts from first, the
+        // rest of it in a random order.
+        if isShuffled {
+            unshuffledQueue = newQueue
+            queue = Self.shuffledUpcoming(of: newQueue, after: index)
+            persistShuffle()
+        } else {
+            queue = newQueue
+        }
         isPlaylistQueue = fromPlaylist
         queueSourceName = sourceName
+        queueOrigin = origin
         currentIndex = index
         clearGaplessPreload()
         loadCurrentItem(autoplay: true)
@@ -455,15 +529,26 @@ final class PlayerManager: ObservableObject {
     }
 
     func next() {
-        guard let currentIndex else { return }
-        let nextIndex = currentIndex + 1
-        guard queue.indices.contains(nextIndex) else {
+        guard currentIndex != nil else { return }
+        guard let nextIndex = upcomingIndex(afterFinishing: false) else {
             finishQueue()
             return
         }
         moveCurrent(to: nextIndex)
         clearGaplessPreload()
         loadCurrentItem(autoplay: true)
+    }
+
+    /// Where the queue goes on from the current track: the next one, and — with the queue set to
+    /// repeat — back to the first one after the last. `afterFinishing`: the track has played to
+    /// its end (rather than being skipped), when repeating the track means playing it again. `nil`
+    /// when the queue is over.
+    private func upcomingIndex(afterFinishing: Bool) -> Int? {
+        guard let currentIndex else { return nil }
+        if afterFinishing, repeatMode == .one { return currentIndex }
+        let next = currentIndex + 1
+        if queue.indices.contains(next) { return next }
+        return repeatMode == .all && !queue.isEmpty ? 0 : nil
     }
 
     func previous() {
@@ -494,8 +579,7 @@ final class PlayerManager: ObservableObject {
         // Whatever was preloaded (if anything) was built for whatever used to sit at
         // `currentIndex + 1`, which has now shifted one slot later — rebuild it against the
         // newly-inserted track.
-        clearGaplessPreload()
-        prepareNextItem()
+        refreshNextItem()
         persistState()
     }
 
@@ -508,9 +592,11 @@ final class PlayerManager: ObservableObject {
         }
         queue.append(track)
         // The queue may have just been exhausted (nothing left to prepare), in which case this
-        // newly-appended track is now the one that should be buffering ahead of time.
-        if gaplessPreloadedIndex == nil {
-            prepareNextItem()
+        // newly-appended track is now the one that should be buffering ahead of time — or, with
+        // the queue repeating, what was buffering (the queue's first track) isn't what plays next
+        // any more.
+        if gaplessPreloadedIndex != upcomingIndex(afterFinishing: true) {
+            refreshNextItem()
         }
         persistState()
     }
@@ -534,8 +620,7 @@ final class PlayerManager: ObservableObject {
         newQueue.insert(track, at: destinationIndex)
         queue = newQueue
         if source == 0 || destination == 0 {
-            clearGaplessPreload()
-            prepareNextItem()
+            refreshNextItem()
         }
         persistState()
     }
@@ -562,10 +647,112 @@ final class PlayerManager: ObservableObject {
         guard queue.indices.contains(queueIndex) else { return }
         queue.remove(at: queueIndex)
         if index == 0 {
-            clearGaplessPreload()
-            prepareNextItem()
+            refreshNextItem()
         }
         persistState()
+    }
+
+    // MARK: - Shuffle and repeat
+
+    /// Shuffles the up-next part of the queue — the tracks after the current one, which plays on —
+    /// or, if it's shuffled already, puts the queue back in the order it was in.
+    func toggleShuffle() {
+        // Only the current track is in the queue until the rest has been read back (see
+        // `restorePersistedState()`).
+        guard !awaitingFullQueue else { return }
+        if isShuffled {
+            unshuffleQueue()
+        } else {
+            shuffleQueue()
+        }
+        persistShuffle()
+    }
+
+    /// Off, then the queue repeating, then the current track repeating, then off again.
+    func cycleRepeatMode() {
+        repeatMode = switch repeatMode {
+        case .off: .all
+        case .all: .one
+        case .one: .off
+        }
+        UserDefaults.standard.set(repeatMode.rawValue, forKey: Self.repeatModeKey)
+        // What plays after the current track is not what was preloaded.
+        refreshNextItem()
+    }
+
+    private func shuffleQueue() {
+        unshuffledQueue = queue
+        isShuffled = true
+        guard let currentIndex else { return }
+        let shuffled = Self.shuffledUpcoming(of: queue, after: currentIndex)
+        guard shuffled != queue else { return }
+        queue = shuffled
+        refreshNextItem()
+        persistState()
+    }
+
+    /// The queue as it was before it was shuffled, from where the current track now is in it: the
+    /// tracks that are still in the queue in their old order, and any that were added since after
+    /// them. The track that's playing keeps playing.
+    private func unshuffleQueue() {
+        let original = unshuffledQueue
+        unshuffledQueue = []
+        isShuffled = false
+        guard let currentIndex, !original.isEmpty else { return }
+        // Each track of the queue takes the first place that's left for its id in the old order —
+        // a track in the queue twice has two.
+        var places: [String: [Int]] = [:]
+        for (place, track) in original.enumerated() { places[track.id.raw, default: []].append(place) }
+        var placed: [(place: Int, index: Int)] = []
+        var added: [Int] = []
+        for (index, track) in queue.enumerated() {
+            if var open = places[track.id.raw], !open.isEmpty {
+                placed.append((open.removeFirst(), index))
+                places[track.id.raw] = open
+            } else {
+                added.append(index)
+            }
+        }
+        placed.sort { $0.place < $1.place }
+        let order = placed.map(\.index) + added
+        guard let newCurrent = order.firstIndex(of: currentIndex) else { return }
+        let restored = order.map { queue[$0] }
+        guard restored != queue else { return }
+        queue = restored
+        self.currentIndex = newCurrent
+        refreshNextItem()
+        persistState()
+    }
+
+    /// `queue` with the tracks after `index` in a random order (a different one, if there's a
+    /// choice).
+    private static func shuffledUpcoming(of queue: [Child], after index: Int) -> [Child] {
+        guard queue.indices.contains(index) else { return queue }
+        let upcoming = Array(queue[(index + 1)...])
+        guard upcoming.count > 1 else { return queue }
+        var shuffled = upcoming.shuffled()
+        if shuffled == upcoming { shuffled = upcoming.shuffled() }
+        return Array(queue[...index]) + shuffled
+    }
+
+    private static let shuffleKey = "PlayerManager.isShuffled"
+    private static let repeatModeKey = "PlayerManager.repeatMode"
+    /// The queue as it was before shuffling, for putting it back after a relaunch.
+    private static let unshuffledQueueStore = QueueStore(
+        fileURL: QueueStore.defaultFileURL.deletingLastPathComponent().appendingPathComponent("PlayerQueueUnshuffled.json")
+    )
+
+    private func persistShuffle() {
+        UserDefaults.standard.set(isShuffled, forKey: Self.shuffleKey)
+        let original = unshuffledQueue
+        let shuffled = isShuffled
+        Task(priority: .utility) {
+            if shuffled {
+                await Self.unshuffledQueueStore.save(queue: original)
+            } else {
+                await Self.unshuffledQueueStore.clear()
+            }
+        }
     }
 
     /// Starts streaming `station` live, replacing whatever was playing. Radio has no queue,
@@ -576,6 +763,7 @@ final class PlayerManager: ObservableObject {
         scrobbleSongId = nil
         queue = []
         queueSourceName = nil
+        queueOrigin = .other
         currentIndex = nil
         isPlaylistQueue = false
         clearGaplessPreload()
@@ -584,6 +772,7 @@ final class PlayerManager: ObservableObject {
         currentTime = 0
         playbackSource = nil
         audioFormatInfo = nil
+        isLoadingAudioFormat = false
         isBuffering = false
         startRadioStream(station)
         updateArtworkURL()
@@ -679,6 +868,7 @@ final class PlayerManager: ObservableObject {
     /// `cacheThenPlay(...)` instead, since that setting means the engine is never handed a live
     /// network URL at all: everything it plays has to already be a real local file.
     private func loadCurrentItem(autoplay: Bool, startTime: TimeInterval = 0) {
+        nextItemRefreshTask?.cancel()
         configureAudioSessionIfNeeded()
         guard let track = currentTrack else {
             isPlaying = false
@@ -831,12 +1021,14 @@ final class PlayerManager: ObservableObject {
     /// `nil`led out first so a stale reading doesn't linger on screen while the new one loads.
     private func refreshAudioFormatInfo(for track: Child, matching url: URL) {
         audioFormatInfo = nil
+        isLoadingAudioFormat = true
         let trackId = track.id.raw
         Task { [weak self] in
             guard let self else { return }
             let info = await self.engine.currentAudioFormat(matching: url)
             guard self.currentTrack?.id.raw == trackId else { return }
             self.audioFormatInfo = info
+            self.isLoadingAudioFormat = false
         }
     }
 
@@ -852,17 +1044,18 @@ final class PlayerManager: ObservableObject {
             updateNowPlayingPlaybackState()
             return
         }
-        guard let currentIndex else { return }
+        guard currentIndex != nil else { return }
+        nextItemRefreshTask?.cancel()
         finishScrobbleTracking()
-        let nextIndex = currentIndex + 1
-        guard queue.indices.contains(nextIndex) else {
+        guard let nextIndex = upcomingIndex(afterFinishing: true) else {
             finishQueue()
             return
         }
         moveCurrent(to: nextIndex)
 
-        if handedOffGapless, gaplessPreloadedIndex == nextIndex {
+        if handedOffGapless, gaplessPreloadedIndex == nextIndex, gaplessPreloadedTrackID == queue[nextIndex].id.raw {
             gaplessPreloadedIndex = nil
+            gaplessPreloadedTrackID = nil
             let track = queue[nextIndex]
             duration = TimeInterval(track.duration ?? 0)
             currentTime = 0
@@ -1065,13 +1258,13 @@ final class PlayerManager: ObservableObject {
     /// same terms as before that workaround existed — accepting the occasional live-transcode
     /// glitch as the cost of staying gapless rather than silently degrading every transition.
     private func prepareNextItem() {
-        guard let currentIndex else { return }
-        let nextIndex = currentIndex + 1
-        guard queue.indices.contains(nextIndex), gaplessPreloadedIndex != nextIndex else { return }
+        guard let currentIndex, let nextIndex = upcomingIndex(afterFinishing: true),
+              gaplessPreloadedIndex != nextIndex
+        else { return }
         let nextTrack = queue[nextIndex]
 
         if GaplessCacheSettings.isEnabled {
-            prepareNextItemViaGaplessCache(nextTrack)
+            prepareNextItemViaGaplessCache(nextTrack, at: nextIndex)
             return
         }
 
@@ -1080,7 +1273,7 @@ final class PlayerManager: ObservableObject {
 
         guard let url = try? streamURL(for: nextTrack) else { return }
         if engine.preloadForGapless(url: url) {
-            gaplessPreloadedIndex = nextIndex
+            notePreloaded(at: nextIndex)
             gaplessPreloadedSource = downloadFileURL != nil ? .downloaded : .stream
         }
 
@@ -1104,7 +1297,7 @@ final class PlayerManager: ObservableObject {
     /// prefetch. Only kicks off the download here; the `GaplessCacheStatus.$cachedEntries`
     /// subscription in `subscribeToEngine()` is what actually calls `engine.preloadForGapless`
     /// once it lands, since there's no safe URL to preload until then.
-    private func prepareNextItemViaGaplessCache(_ nextTrack: Child) {
+    private func prepareNextItemViaGaplessCache(_ nextTrack: Child, at nextIndex: Int) {
         if let downloadFileURL = downloadURL(for: nextTrack) {
             // This track may have started (or even finished) gapless-caching before its real
             // download landed — now that it's confirmed downloaded, that copy is redundant.
@@ -1115,13 +1308,13 @@ final class PlayerManager: ObservableObject {
                 Task { await GaplessCacheService.shared.removeIfPresent(songId: nextTrack.id.raw) }
             }
             guard engine.preloadForGapless(url: downloadFileURL) else { return }
-            gaplessPreloadedIndex = currentIndex.map { $0 + 1 }
+            notePreloaded(at: nextIndex)
             gaplessPreloadedSource = .downloaded
             return
         }
         if let entry = GaplessCacheStatus.shared.entry(for: nextTrack.id.raw), isGaplessCacheEntry(entry, validFor: nextTrack) {
             guard engine.preloadForGapless(url: entry.url) else { return }
-            gaplessPreloadedIndex = currentIndex.map { $0 + 1 }
+            notePreloaded(at: nextIndex)
             gaplessPreloadedSource = .gaplessCache
             return
         }
@@ -1159,7 +1352,61 @@ final class PlayerManager: ObservableObject {
 
     private func clearGaplessPreload() {
         gaplessPreloadedIndex = nil
+        gaplessPreloadedTrackID = nil
         gaplessPreloadedSource = nil
+    }
+
+    private func notePreloaded(at index: Int) {
+        gaplessPreloadedIndex = index
+        gaplessPreloadedTrackID = queue[index].id.raw
+    }
+
+    /// How long before the end of a track `AVQueuePlayer` is already preparing the one queued
+    /// after it. Taking that one out or putting another in then is not free: it blocks the main
+    /// thread for a good part of a tenth of a second, and playback stops for about as long — heard,
+    /// and seen in the position, as the song jumping back. A little more than the longest of it
+    /// that's been measured.
+    private static let nextItemPrepareWindow: TimeInterval = 6
+    /// How long before the end of the track a swap that's been put off is made: late enough that
+    /// the stop falls on the end of the song, early enough for what's put in to be ready.
+    private static let nextItemSwapLead: TimeInterval = 0.45
+    private var nextItemRefreshTask: Task<Void, Never>?
+
+    /// The track that plays next has changed (the queue was reordered, the repeat mode changed):
+    /// what was preloaded is taken back, and what's now next is preloaded.
+    ///
+    /// Not while it'd be heard: with the track in its last seconds (see `nextItemPrepareWindow`)
+    /// the swap is put off until just before it ends, and with the track that's already preloaded
+    /// still the next one — a repeat turned on in the middle of the queue, or a shuffle that
+    /// happens to keep it — nothing is touched at all.
+    private func refreshNextItem() {
+        nextItemRefreshTask?.cancel()
+        if let next = upcomingIndex(afterFinishing: true), gaplessPreloadedIndex != nil,
+           gaplessPreloadedTrackID == queue[next].id.raw {
+            gaplessPreloadedIndex = next
+            return
+        }
+        let remaining = duration - livePosition
+        guard isPlaying, remaining < Self.nextItemPrepareWindow, remaining > Self.nextItemSwapLead else {
+            swapNextItem()
+            return
+        }
+        nextItemRefreshTask = Task { @MainActor [weak self] in
+            // Checked again after each wait: the song may have been paused, or sought, meanwhile.
+            while let self, !Task.isCancelled, self.isPlaying {
+                let remaining = self.duration - self.livePosition
+                guard remaining < Self.nextItemPrepareWindow, remaining > Self.nextItemSwapLead else { break }
+                try? await Task.sleep(for: .seconds(remaining - Self.nextItemSwapLead))
+            }
+            guard !Task.isCancelled, let self else { return }
+            self.swapNextItem()
+        }
+    }
+
+    private func swapNextItem() {
+        engine.cancelGaplessPreload()
+        clearGaplessPreload()
+        prepareNextItem()
     }
 
     // MARK: - Scrobbling
@@ -1423,6 +1670,8 @@ final class PlayerManager: ObservableObject {
         let index: Int
         let currentTime: TimeInterval
         let isPlaylistQueue: Bool
+        /// Optional so a snapshot written before this existed still decodes.
+        let queueOrigin: QueueOrigin?
     }
 
     private static let snapshotKey = "PlayerManager.snapshot"
@@ -1441,7 +1690,8 @@ final class PlayerManager: ObservableObject {
             return
         }
         let snapshot = PersistedSnapshot(
-            track: queue[currentIndex], index: currentIndex, currentTime: currentTime, isPlaylistQueue: isPlaylistQueue
+            track: queue[currentIndex], index: currentIndex, currentTime: currentTime,
+            isPlaylistQueue: isPlaylistQueue, queueOrigin: queueOrigin
         )
         if let data = try? JSONEncoder().encode(snapshot) {
             UserDefaults.standard.set(data, forKey: Self.snapshotKey)
@@ -1462,6 +1712,8 @@ final class PlayerManager: ObservableObject {
     /// rest of the queue is read and decoded off the main thread and swapped in afterwards.
     private func restorePersistedState() {
         let defaults = UserDefaults.standard
+        repeatMode = RepeatMode(rawValue: defaults.integer(forKey: Self.repeatModeKey)) ?? .off
+        isShuffled = defaults.bool(forKey: Self.shuffleKey)
         if let data = defaults.data(forKey: Self.snapshotKey),
            let snapshot = try? JSONDecoder().decode(PersistedSnapshot.self, from: data) {
             isApplyingRestoredQueue = true
@@ -1469,6 +1721,7 @@ final class PlayerManager: ObservableObject {
             isApplyingRestoredQueue = false
             awaitingFullQueue = true
             isPlaylistQueue = snapshot.isPlaylistQueue
+            queueOrigin = snapshot.queueOrigin ?? .other
             currentIndex = 0
             currentTime = snapshot.currentTime
             duration = TimeInterval(snapshot.track.duration ?? 0)
@@ -1498,6 +1751,8 @@ final class PlayerManager: ObservableObject {
 
     private func restoreFullQueue(matching snapshot: PersistedSnapshot) async {
         guard let full = await QueueStore.shared.load() else { return }
+        // Shuffled when it was last run: the order it was shuffled from comes back with the queue.
+        let unshuffled = isShuffled ? await Self.unshuffledQueueStore.load() : nil
         // Skip if the user already started something else, or the file doesn't line up.
         guard awaitingFullQueue, currentTrack?.id == snapshot.track.id,
               full.indices.contains(snapshot.index), full[snapshot.index].id == snapshot.track.id
@@ -1507,6 +1762,14 @@ final class PlayerManager: ObservableObject {
         isApplyingRestoredQueue = false
         currentIndex = snapshot.index
         awaitingFullQueue = false
+        if isShuffled {
+            // Or, if that's gone, the queue stays as it is and isn't shuffled any more.
+            unshuffledQueue = unshuffled ?? []
+            if unshuffledQueue.isEmpty {
+                isShuffled = false
+                persistShuffle()
+            }
+        }
         // What's on disk is exactly this queue.
         persistedQueueVersion = queueVersion
     }

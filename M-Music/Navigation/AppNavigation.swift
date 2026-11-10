@@ -10,7 +10,28 @@ enum AppRoute: Hashable {
     case artist(ofAlbum: String)
 }
 
-/// Which tab is showing and what's pushed on each tab's stack — held here, rather than in the
+/// Which of the screens a route leads to a screen on a tab's stack is. Only for these screens: the
+/// others are never what a route leads to, so nothing needs to know them apart.
+enum ScreenKey: Hashable {
+    case album(String)
+    /// By the artist's own id.
+    case artist(String)
+}
+
+/// A screen on a tab's stack, as `AppNavigation` knows it — see `View.screenOnStack()`.
+final class ScreenToken {
+    /// Which screen it is, when it's one a route can lead to.
+    var key: ScreenKey?
+}
+
+/// A route to be pushed, on top of what's on the tab's stack.
+struct PushRequest: Equatable {
+    let id: Int
+    let tab: Int
+    let route: AppRoute
+}
+
+/// Which tab is showing, and where the app has been asked to go — held here, rather than in the
 /// views, so that the player's menu can send the app somewhere.
 @Observable
 final class AppNavigation {
@@ -22,8 +43,17 @@ final class AppNavigation {
     static let searchTab = 3
 
     var selectedTab = AppNavigation.homeTab
-    /// The routes pushed on each tab, on top of whatever its own links have pushed.
-    var paths: [[AppRoute]] = Array(repeating: [], count: 4)
+    /// The screen the app is asked to push, until the screen on top of the tab's stack has taken it.
+    private(set) var request: PushRequest?
+    private var requestCount = 0
+
+    /// What's on each tab's stack, bottom to top, as the screens report it (`ScreenHost`). Held
+    /// weakly: a screen that has been popped is gone from it by itself.
+    @ObservationIgnored private var stacks: [[WeakScreen]] = Array(repeating: [], count: 4)
+
+    private struct WeakScreen {
+        weak var token: ScreenToken?
+    }
 
     private var openTask: Task<Void, Never>?
 
@@ -34,9 +64,10 @@ final class AppNavigation {
     private(set) var artists: [String: ArtistID3] = [:]
 
     /// Takes the app to `route` in the tab that is open: the menu it was chosen from goes first,
-    /// then the player collapses, then — once that has settled — the screen is pushed. Each is an
-    /// animation that keeps the CPU busy for as long as it lasts, and they were far costlier
-    /// run together than one after another. What the screen shows is looked up meanwhile.
+    /// then the player collapses, then — once that has settled — the screen is pushed on top of
+    /// whatever is open there, or, if that is the screen already, nothing more is done. Each is an
+    /// animation that keeps the CPU busy for as long as it lasts, and they were far costlier run
+    /// together than one after another. What the screen shows is looked up meanwhile.
     func open(_ route: AppRoute) {
         openTask?.cancel()
         let tab = selectedTab
@@ -49,8 +80,46 @@ final class AppNavigation {
             try? await Task.sleep(for: .seconds(Self.collapseSettling))
             await lookup
             guard !Task.isCancelled else { return }
-            paths[tab].append(route)
+            if let key = key(of: route), topScreenKey(inTab: tab) == key { return }
+            requestCount += 1
+            request = PushRequest(id: requestCount, tab: tab, route: route)
         }
+    }
+
+    /// Which screen `route` leads to. The artist's, for the album artist of an album, is only known
+    /// once it's been looked up.
+    private func key(of route: AppRoute) -> ScreenKey? {
+        switch route {
+        case .album(let id): .album(id)
+        case .artist(let albumID): artists[albumID].map { .artist($0.id.raw) }
+        }
+    }
+
+    // MARK: - The screens on the stacks
+
+    func screenAppeared(_ token: ScreenToken, tab: Int) {
+        guard stacks.indices.contains(tab) else { return }
+        stacks[tab].removeAll { $0.token == nil || $0.token === token }
+        stacks[tab].append(WeakScreen(token: token))
+    }
+
+    func screenDisappeared(_ token: ScreenToken, tab: Int) {
+        guard stacks.indices.contains(tab) else { return }
+        stacks[tab].removeAll { $0.token == nil || $0.token === token }
+    }
+
+    func isTopScreen(_ token: ScreenToken, tab: Int) -> Bool {
+        stacks.indices.contains(tab) && stacks[tab].last(where: { $0.token != nil })?.token === token
+    }
+
+    private func topScreenKey(inTab tab: Int) -> ScreenKey? {
+        guard stacks.indices.contains(tab) else { return nil }
+        return stacks[tab].last(where: { $0.token != nil })?.token?.key
+    }
+
+    /// The screen on top has taken `request` and is pushing it.
+    func consume(_ request: PushRequest) {
+        if self.request == request { self.request = nil }
     }
 
     private func prefetch(_ route: AppRoute) async {
@@ -68,15 +137,52 @@ final class AppNavigation {
     private static let collapseSettling = 0.3
 }
 
+extension EnvironmentValues {
+    /// The tab whose stack a screen is on, set on each tab's `NavigationStack`; -1 outside them.
+    @Entry var appTab = -1
+    /// The screen's own entry in `AppNavigation`'s view of its tab's stack (see `screenOnStack`).
+    @Entry var screenToken: ScreenToken?
+}
+
 extension View {
-    /// What a tab's stack shows for the routes `AppNavigation` pushes onto it.
-    func appRouteDestinations() -> some View {
-        navigationDestination(for: AppRoute.self) { route in
-            switch route {
-            case .album(let id): RoutedAlbumView(id: id)
-            case .artist(let albumID): RoutedArtistView(albumID: albumID)
+    /// Makes this a screen on its tab's stack that `AppNavigation` knows of — the root of a tab, or
+    /// a screen pushed on it, by a link or by a route. The one that's on top is the one that pushes
+    /// what the player's menu asks for, so that it arrives on top of whatever is open, however it
+    /// got there: pushed from a typed path of its own, a route took the place of the screens the
+    /// links had pushed.
+    func screenOnStack() -> some View {
+        modifier(ScreenHost())
+    }
+}
+
+private struct ScreenHost: ViewModifier {
+    @Environment(\.appTab) private var tab
+    @State private var token = ScreenToken()
+    @State private var pushed: AppRoute?
+    private let navigation = AppNavigation.shared
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.screenToken, token)
+            .onAppear {
+                navigation.screenAppeared(token, tab: tab)
+                take(navigation.request)
             }
-        }
+            .onDisappear { navigation.screenDisappeared(token, tab: tab) }
+            .onChange(of: navigation.request) { _, request in take(request) }
+            .navigationDestination(item: $pushed) { route in
+                switch route {
+                case .album(let id): RoutedAlbumView(id: id)
+                case .artist(let albumID): RoutedArtistView(albumID: albumID)
+                }
+            }
+    }
+
+    /// Pushes the route asked for, if this is the screen on top of the stack it's asked for in.
+    private func take(_ request: PushRequest?) {
+        guard let request, request.tab == tab, navigation.isTopScreen(token, tab: tab) else { return }
+        navigation.consume(request)
+        pushed = request.route
     }
 }
 
@@ -109,6 +215,7 @@ struct RoutedAlbumView: View {
                 ProgressView()
             }
         }
+        .screenOnStack()
         .task {
             guard album == nil else { return }
             if let detail = await RouteLookup.albumDetail(id: id) {
@@ -141,6 +248,7 @@ struct RoutedArtistView: View {
                 ProgressView()
             }
         }
+        .screenOnStack()
         .task {
             guard artist == nil else { return }
             if let found = await RouteLookup.albumArtist(ofAlbum: albumID) {

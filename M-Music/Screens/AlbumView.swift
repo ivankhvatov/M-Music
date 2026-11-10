@@ -3,6 +3,9 @@ import SwiftUI
 struct AlbumView: View {
     let album: AlbumID3
     var zoomNamespace: Namespace.ID? = nil
+    /// The artist whose screen this album was opened from, when it was — so tapping the artist's
+    /// name can simply close this screen instead of stacking a second copy of that artist's.
+    var openedFromArtistID: String? = nil
 
     private let client = SubsonicClient.shared
     /// Not `@ObservedObject`: this view only ever calls a method on it (`playTrack(at:)` below),
@@ -13,6 +16,8 @@ struct AlbumView: View {
     @ObservedObject private var downloads = DownloadStore.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.screenToken) private var screenToken
 
     /// Zoom transition for the "Other versions" / "More by artist" cards below — separate from
     /// the incoming `zoomNamespace` param, which only matches this view's own entry transition.
@@ -58,6 +63,13 @@ struct AlbumView: View {
     @State private var showingRemoveDownloadConfirmation = false
     @State private var showingRefreshDownloadedConfirmation = false
     @State private var isRefreshing = false
+    @State private var showingAddToPlaylist = false
+    /// What went wrong adding the album to a playlist.
+    @State private var addToPlaylistError: String?
+    /// The last tapped related-album card, drawn above its neighbors during the zoom transition.
+    @State private var raisedCarouselAlbum: FlexibleID?
+    /// Where the user last was in each related-albums carousel, to warm around on resume.
+    @State private var lastSeen = LastSeenIndex()
 
     /// `init` runs for every `AlbumView(...)` a parent constructs — including one per card in the
     /// related-album carousels, on every parent re-render — and these two go through `UIColor`'s
@@ -65,9 +77,10 @@ struct AlbumView: View {
     private static let placeholderDarkenedBackground = Color(.systemBackground).darkened()
     private static let placeholderDarkenedRelatedSectionBackground = Color(.systemBackground).darkened().darkened(by: 0.8)
 
-    init(album: AlbumID3, zoomNamespace: Namespace.ID? = nil) {
+    init(album: AlbumID3, zoomNamespace: Namespace.ID? = nil, openedFromArtistID: String? = nil) {
         self.album = album
         self.zoomNamespace = zoomNamespace
+        self.openedFromArtistID = openedFromArtistID
         _isStarred = State(initialValue: album.isStarred)
         _backgroundColor = State(initialValue: Color(.systemBackground))
         _darkenedBackgroundColor = State(initialValue: Self.placeholderDarkenedBackground)
@@ -86,11 +99,39 @@ struct AlbumView: View {
         }
         .preferredColorScheme(.dark)
         .tint(.primary)
+        .onAppResume { rewarmAfterResume() }
+        // So the player's "Go to album" can tell this is the screen it would open.
+        .onAppear { screenToken?.key = .album(album.id.raw) }
         .task {
             await loadSongs()
         }
         .task {
             await loadRelatedAlbums()
+        }
+        .sheet(isPresented: $showingAddToPlaylist) {
+            AddAlbumToPlaylistSheet(songs: songs) { songsToAdd, playlist in
+                addToPlaylist(songsToAdd, playlist)
+            }
+        }
+        .alert("Couldn't add the songs to the playlist", isPresented: Binding(
+            get: { addToPlaylistError != nil },
+            set: { if !$0 { addToPlaylistError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(addToPlaylistError ?? "")
+        }
+    }
+
+    /// Adds to the end of the playlist, after the sheet has closed — so a failure (offline, say) is
+    /// reported here.
+    private func addToPlaylist(_ songsToAdd: [Child], _ playlist: PlaylistSummary) {
+        Task {
+            do {
+                try await PlaylistEditor.add(songsToAdd, to: playlist)
+            } catch {
+                addToPlaylistError = error.localizedDescription
+            }
         }
     }
 
@@ -249,8 +290,15 @@ struct AlbumView: View {
             artistAlbums = await LibraryCacheDatabase.shared.fullyDownloadedAlbums(byArtist: artistId)
         }
         let albumName = album.name.lowercased()
-        let others = artistAlbums.filter { $0.id != album.id && $0.name.lowercased() == albumName }
-        var more = artistAlbums.filter { $0.name.lowercased() != albumName }
+        // A Single and an Album/EP sharing this album's title are separate releases, not versions
+        // of it — whatever "Group release versions" is set to. They aren't dropped, though: they
+        // go in "More by" instead.
+        let others = artistAlbums.filter {
+            $0.id != album.id && $0.name.lowercased() == albumName && !album.isDistinctRelease(from: $0)
+        }
+        var more = artistAlbums.filter {
+            $0.id != album.id && ($0.name.lowercased() != albumName || album.isDistinctRelease(from: $0))
+        }
         if groupVersions {
             more = more.groupedByPreferredVersion()
         }
@@ -288,10 +336,42 @@ struct AlbumView: View {
                                 .frame(width: 160)
                         }
                         .buttonStyle(.plain)
+                        .simultaneousGesture(TapGesture().onEnded { raisedCarouselAlbum = relatedAlbum.id })
+                        .zIndex(raisedCarouselAlbum == relatedAlbum.id ? 1 : 0)
+                        .onAppear { warmAhead(after: relatedAlbum, in: albums) }
                     }
                 }
                 .padding(.horizontal, 16)
             }
+                // The zoom transition's source is a card inside this scroll view; with clipping on,
+                // the artwork is cut off at the scroll view's bounds while it flies in and out.
+                .scrollClipDisabled()
+        }
+    }
+
+    /// A related-albums card scrolled into view: warm the cards around it, so a fast swipe finds
+    /// them ready.
+    private func warmAhead(after album: AlbumID3, in albums: [AlbumID3]) {
+        guard let index = albums.firstIndex(where: { $0.id == album.id }) else { return }
+        lastSeen.byKey[Self.carouselSource(for: albums)] = index
+        warmAround(index, in: albums)
+    }
+
+    private static func carouselSource(for albums: [AlbumID3]) -> String {
+        "albumRelated.\(albums.first?.id.raw ?? "")"
+    }
+
+    private func warmAround(_ index: Int, in albums: [AlbumID3]) {
+        let requests = ImageWarmer.neighbors(of: index, in: albums, count: ImageWarmer.carouselAheadCount)
+            .map { ArtworkRequest.albumCard($0.coverArt ?? $0.id.raw) }
+        guard !requests.isEmpty else { return }
+        Task { await ImageWarmer.shared.warmAhead(requests, source: Self.carouselSource(for: albums)) }
+    }
+
+    /// The app resumed: warm both carousels again around where they were left.
+    private func rewarmAfterResume() {
+        for albums in [otherVersions, moreByArtist] where !albums.isEmpty {
+            warmAround(lastSeen.byKey[Self.carouselSource(for: albums)] ?? 0, in: albums)
         }
     }
 
@@ -352,7 +432,7 @@ struct AlbumView: View {
             Button {
                 playTrack(at: index)
             } label: {
-                TrackRow(track: track, albumArtist: album.artist)
+                TrackRow(track: track, albumArtist: album.artist, albumId: album.id.raw)
                     .padding(.horizontal, 4)
                     .padding(.vertical, 16)
                     .contentShape(Rectangle())
@@ -415,13 +495,13 @@ struct AlbumView: View {
     private func playTrack(at index: Int) {
         let queue = playableSongs
         guard let startAt = queue.firstIndex(where: { $0.id == visibleSongs[index].id }) else { return }
-        player.play(queue: queue, startAt: startAt, sourceName: album.name)
+        player.play(queue: queue, startAt: startAt, sourceName: album.name, origin: .album(album.id.raw))
     }
 
     private func shuffle() {
         let queue = playableSongs
         guard !queue.isEmpty else { return }
-        player.play(queue: queue.shuffled(), startAt: 0, sourceName: album.name)
+        player.play(queue: queue.shuffled(), startAt: 0, sourceName: album.name, origin: .album(album.id.raw))
     }
 
     private var trackCountAndDuration: String {
@@ -527,10 +607,38 @@ struct AlbumView: View {
     }
 
     func albumDetails() -> Text {
-        let parts = [album.genre, album.year.map(String.init), albumCodec].compactMap { $0 }
+        let parts = [album.genre.map(GenreLocalizer.shared.localized), album.year.map(String.init), albumCodec].compactMap { $0 }
         return Text(parts.joined(separator: " • "))
             .font(.caption)
             .foregroundColor(.secondary)
+    }
+
+    /// Opens the album artist's screen on top of this one, looked up from this album's id the same
+    /// way the expanded player's "go to artist" does (`RoutedArtistView`). When this album was
+    /// opened from that same artist's screen, it goes back to it instead of stacking a second
+    /// copy. Plain text when the album carries no artist id.
+    @ViewBuilder
+    private func artistName() -> some View {
+        let label = Text(album.artist ?? "Unknown Artist")
+            .font(.title3)
+            .multilineTextAlignment(.center)
+        if let artistId = album.artistId?.raw {
+            if openedFromArtistID == artistId {
+                Button {
+                    dismiss()
+                } label: {
+                    label
+                }
+                .buttonStyle(.plain)
+            } else {
+                NavigationLink(destination: LazyDestination { RoutedArtistView(albumID: album.id.raw) }) {
+                    label
+                }
+                .buttonStyle(.plain)
+            }
+        } else {
+            label
+        }
     }
 
     func albumHeader() -> some View {
@@ -544,9 +652,7 @@ struct AlbumView: View {
                     .font(.system(size: 24, weight: .semibold))
                     .multilineTextAlignment(.center)
                     .padding(.top, 15)
-                Text(album.artist ?? "Unknown Artist")
-                    .font(.title3)
-                    .multilineTextAlignment(.center)
+                artistName()
                 albumDetails()
                     .font(.caption)
                     .multilineTextAlignment(.center)
@@ -650,6 +756,13 @@ struct AlbumView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button {
+                        showingAddToPlaylist = true
+                    } label: {
+                        Label("Add to playlist", systemImage: "text.badge.plus")
+                    }
+                    .disabled(songs.isEmpty)
+
+                    Button {
                         if downloads.hasDownloadedSong(inAlbum: album.id.raw) {
                             showingRefreshDownloadedConfirmation = true
                         } else {
@@ -703,12 +816,15 @@ struct AlbumView: View {
 /// stays stable while open.
 private struct TrackLeadingGlyph: View {
     let track: Child
+    /// The album this tracklist belongs to: the indicator only shows while the queue was started
+    /// from it (or from somewhere that doesn't say), not from the songs list or a playlist.
+    let albumId: String
 
     @ObservedObject private var player = PlayerManager.shared
 
     var body: some View {
         Group {
-            if player.currentTrack?.id == track.id {
+            if player.currentTrack?.id == track.id, player.queueOrigin.includesAlbum(albumId) {
                 PlayingIndicator(isPlaying: player.isPlaying)
             } else {
                 Text(track.track.map(String.init) ?? "")
@@ -723,6 +839,7 @@ private struct TrackLeadingGlyph: View {
 private struct TrackRow: View {
     let track: Child
     let albumArtist: String?
+    let albumId: String
 
     /// Not `@ObservedObject`: `trackMenu` only ever calls a method on it (`playNext`/
     /// `addToQueue`), never reads a `@Published` property — observing it here would rebuild this
@@ -732,12 +849,14 @@ private struct TrackRow: View {
     private let player = PlayerManager.shared
     @ObservedObject private var starStore = StarStore.shared
     @ObservedObject private var downloads = DownloadStore.shared
+    /// The only thing that re-renders on a download's progress ticks — see `DownloadProgressStore`.
+    @ObservedObject private var downloadProgress = DownloadProgressStore.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
     var body: some View {
         HStack(spacing: 12) {
             HStack(spacing: 12) {
-                TrackLeadingGlyph(track: track)
+                TrackLeadingGlyph(track: track, albumId: albumId)
 
                 VStack(alignment: .leading) {
                     Text(track.title)

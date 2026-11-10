@@ -122,6 +122,7 @@ enum ArtistAlbumOrdering {
 
 struct ArtistAlbumsView: View {
     let artist: ArtistID3
+    @Environment(\.screenToken) private var screenToken
 
     private let client = SubsonicClient.shared
     private let player = PlayerManager.shared
@@ -135,7 +136,11 @@ struct ArtistAlbumsView: View {
     /// Keeps the content hidden on first open until the header picture and the first screenful of
     /// album covers are in memory.
     @State private var imageReadiness = ImageReadiness()
+    /// Where the user last was in each grid or carousel, to warm around on resume — see `onAppResume`.
+    @State private var lastSeen = LastSeenIndex()
     @State private var isLoadingQueue = false
+    /// The last tapped carousel card, drawn above its neighbors during the zoom transition.
+    @State private var raisedCarouselAlbum: FlexibleID?
     @State private var isStarred: Bool
 
     @ObservedObject private var downloads = DownloadStore.shared
@@ -195,6 +200,9 @@ struct ArtistAlbumsView: View {
                     .padding(.top, 120)
             }
         }
+        .onAppResume { rewarmAfterResume() }
+        // So the player's "Go to artist" can tell this is the screen it would open.
+        .onAppear { screenToken?.key = .artist(artist.id.raw) }
         .toolbar {
             starButton
             sortButton
@@ -285,7 +293,7 @@ struct ArtistAlbumsView: View {
             let ordered = sortedAlbums
             LazyVGrid(columns: gridColumns, spacing: 16) {
                 ForEach(ordered) { album in
-                    NavigationLink(destination: LazyDestination { AlbumView(album: album, zoomNamespace: albumZoomNamespace) }) {
+                    NavigationLink(destination: LazyDestination { AlbumView(album: album, zoomNamespace: albumZoomNamespace, openedFromArtistID: artist.id.raw) }) {
                         AlbumCardView(album: album, zoomNamespace: albumZoomNamespace, subtitle: .year)
                     }
                     .buttonStyle(.plain)
@@ -347,17 +355,22 @@ struct ArtistAlbumsView: View {
                 // their artwork) — an eager `HStack` started every card's image load at once.
                 LazyHStack(alignment: .top, spacing: 16) {
                     ForEach(albums) { album in
-                        NavigationLink(destination: LazyDestination { AlbumView(album: album, zoomNamespace: albumZoomNamespace) }) {
+                        NavigationLink(destination: LazyDestination { AlbumView(album: album, zoomNamespace: albumZoomNamespace, openedFromArtistID: artist.id.raw) }) {
                             AlbumCardView(album: album, zoomNamespace: albumZoomNamespace, subtitle: .year)
                                 .frame(width: 160)
                         }
                         .buttonStyle(.plain)
+                        .simultaneousGesture(TapGesture().onEnded { raisedCarouselAlbum = album.id })
+                        .zIndex(raisedCarouselAlbum == album.id ? 1 : 0)
                         .disabled(!isAvailable(album))
                         .onAppear { warmAhead(after: album, in: albums) }
                     }
                 }
                 .padding(.horizontal, 16)
             }
+                // The zoom transition's source is a card inside this scroll view; with clipping on,
+                // the artwork is cut off at the scroll view's bounds while it flies in and out.
+                .scrollClipDisabled()
         }
     }
 
@@ -375,10 +388,30 @@ struct ArtistAlbumsView: View {
     /// scroll finds them ready.
     private func warmAhead(after album: AlbumID3, in ordered: [AlbumID3]) {
         guard let index = ordered.firstIndex(where: { $0.id == album.id }) else { return }
-        let requests = ordered[(index + 1)...].prefix(ImageWarmer.scrollAheadCount)
+        lastSeen.byKey[Self.source(for: ordered)] = index
+        warmAround(index, in: ordered)
+    }
+
+    /// Each grid or carousel is its own source, so they don't cancel each other's queue.
+    private static func source(for list: [AlbumID3]) -> String {
+        "artistAlbums.\(list.first?.id.raw ?? "")"
+    }
+
+    private func warmAround(_ index: Int, in ordered: [AlbumID3]) {
+        let requests = ImageWarmer.neighbors(of: index, in: ordered, count: ImageWarmer.carouselAheadCount)
             .map { ArtworkRequest.albumCard($0.coverArt ?? $0.id.raw) }
         guard !requests.isEmpty else { return }
-        Task { await ImageWarmer.shared.warmAhead(requests) }
+        Task { await ImageWarmer.shared.warmAhead(requests, source: Self.source(for: ordered)) }
+    }
+
+    /// The app resumed: warm every grid or carousel again around where it was left.
+    private func rewarmAfterResume() {
+        let lists = separateReleaseTypesEnabled && hasMultipleReleaseTypes
+            ? releaseTypeGroups.map(\.albums)
+            : [sortedAlbums]
+        for list in lists {
+            warmAround(lastSeen.byKey[Self.source(for: list)] ?? 0, in: list)
+        }
     }
 
     /// Same expression `AlbumCardView` computes internally for its own dimming — this is the
@@ -394,7 +427,7 @@ struct ArtistAlbumsView: View {
                 toggleStarred()
             } label: {
                 Image(systemName: isStarred ? "star.fill" : "star")
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(Color.accentColor)
             }
         }
     }
@@ -418,7 +451,7 @@ struct ArtistAlbumsView: View {
                 .pickerStyle(.inline)
             } label: {
                 Image(systemName: "arrow.up.arrow.down")
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(Color.accentColor)
             }
         }
     }

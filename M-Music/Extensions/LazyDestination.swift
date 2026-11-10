@@ -12,6 +12,7 @@ struct LazyDestination<Content: View>: View {
     let build: () -> Content
 
     var body: some View {
-        build()
+        // A screen on its tab's stack, which the player's menu can push others on top of.
+        build().screenOnStack()
     }
 }

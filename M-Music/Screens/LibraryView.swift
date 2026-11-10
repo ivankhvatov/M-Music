@@ -4,8 +4,6 @@ struct LibraryView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Namespace private var albumZoomNamespace
 
-    @Bindable private var navigation = AppNavigation.shared
-
     private let client = SubsonicClient.shared
 
     @State private var isConnected = SubsonicClient.shared.isConfigured
@@ -17,12 +15,14 @@ struct LibraryView: View {
     @State private var imageReadiness = ImageReadiness()
     /// Where each album is in the grid, for warming the ones below a card that scrolls into view.
     @State private var rowPositions = RowPositions()
+    /// Where the user last was, to warm around on resume — see `onAppResume`.
+    @State private var lastSeen = LastSeenIndex()
 
     @ObservedObject private var downloads = DownloadStore.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
     var body: some View {
-            NavigationStack(path: $navigation.paths[AppNavigation.libraryTab]) {
+            NavigationStack {
                 ScrollView {
                     if isConnected {
                         libraryContent
@@ -31,14 +31,16 @@ struct LibraryView: View {
                     }
                 }
                 .environment(\.colorScheme, colorScheme)
+                .onAppResume { warmAround(lastSeen.index) }
                 .navigationTitle("Library")
-                .appRouteDestinations()
+                .screenOnStack()
                 .toolbar {
                     plusButton
                     settingsButton
                 }
                 .task { await refresh() }
             }
+            .environment(\.appTab, AppNavigation.libraryTab)
             .environment(\.colorScheme, colorScheme)
         }
 
@@ -172,9 +174,16 @@ struct LibraryView: View {
     private func warmAhead(after album: AlbumID3) {
         guard let index = rowPositions.position(of: album.id.raw),
               recentAlbums.indices.contains(index), recentAlbums[index].id == album.id else { return }
-        let requests = artworkRequests(for: recentAlbums[(index + 1)...].prefix(ImageWarmer.scrollAheadCount))
+        lastSeen.index = index
+        warmAround(index)
+    }
+
+    /// Warms the images around `index` — also after the app resumes, where the user left off.
+    private func warmAround(_ index: Int) {
+        guard recentAlbums.indices.contains(index) else { return }
+        let requests = artworkRequests(for: ArraySlice(ImageWarmer.neighbors(of: index, in: recentAlbums, count: ImageWarmer.scrollAheadCount)))
         guard !requests.isEmpty else { return }
-        Task { await ImageWarmer.shared.warmAhead(requests) }
+        Task { await ImageWarmer.shared.warmAhead(requests, source: "library") }
     }
 
     /// Downloads each album's original cover to disk (no decoding) so opening it from here
@@ -248,7 +257,7 @@ struct LibraryView: View {
                 HStack(spacing: 16) {
                     Image(systemName: icon)
                         .font(.title3)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(Color.accentColor)
                         .frame(width: 24, alignment: .center)
 
                     Text(title)
@@ -272,7 +281,7 @@ struct LibraryView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {} label: {
                     Image(systemName: "plus")
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(Color.accentColor)
                 }
             }
         }
@@ -307,8 +316,9 @@ struct LibraryView: View {
                     }
                 } label: {
                     Image(systemName: "gear")
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(Color.accentColor)
                 }
+                .tint(.accentColor)
             }
         }
 }

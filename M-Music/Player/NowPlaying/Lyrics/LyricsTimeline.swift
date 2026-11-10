@@ -21,19 +21,6 @@ struct BreakTimings: Equatable, Sendable {
     var lead: TimeInterval { grow + exit + scroll }
 }
 
-/// A break whose dots are leaving.
-struct BreakEnding: Equatable, Sendable {
-    let index: Int
-    let since: Date
-    /// The song's time at which the dots began to leave, when it's the song's own progress that
-    /// moves them — so that they stop when it does. `nil` when they're sent away by a tap, which
-    /// they leave in their own time, playing or not.
-    let songTime: TimeInterval?
-    /// The song's time by which the dots' pulse is worked out, for the size they leave from.
-    let pulseTime: TimeInterval
-    let timings: BreakTimings
-}
-
 /// Synced lyrics, with everything about their timing worked out once, off the main thread, when
 /// they're loaded — so that nothing on screen has to derive it again for every line change.
 struct LyricsTimeline: Equatable, Sendable {
