@@ -64,11 +64,9 @@ struct PlayerBottomRow: View {
 private extension PlayerBottomRow {
     /// "Set timer" — or, while the timer runs, what's left of it, which asks whether to stop it.
     @ViewBuilder
-    func timerButton(at date: Date) -> some View {
+    var timerButton: some View {
         if sleepTimer.isRunning {
-            Button(SleepTimer.formatted(sleepTimer.remaining(at: date)), systemImage: "timer") {
-                showsStopTimerAlert = true
-            }
+            SleepTimerMenuItem(countdown: sleepTimer.countdown) { showsStopTimerAlert = true }
         } else {
             Button("Set timer", systemImage: "timer") { showsTimerSheet = true }
         }
@@ -77,20 +75,7 @@ private extension PlayerBottomRow {
     /// Where the song is from: its album, and the album's artist; then what else can be done with
     /// it. The ids are read when a button is tapped, so the menu doesn't follow the player's every
     /// tick.
-    @ViewBuilder
     var moreMenu: some View {
-        // While a timer runs, the menu is rebuilt every second so its item shows what's left
-        // when it's opened, rather than what was left when the timer started.
-        if sleepTimer.isRunning {
-            TimelineView(.periodic(from: .now, by: 1)) { context in
-                moreMenu(at: context.date)
-            }
-        } else {
-            moreMenu(at: .now)
-        }
-    }
-
-    func moreMenu(at date: Date) -> some View {
         Menu {
             Button("Go to album", systemImage: "opticaldisc") {
                 guard let albumID = PlayerManager.shared.currentTrack?.albumId?.raw else { return }
@@ -103,7 +88,7 @@ private extension PlayerBottomRow {
             Button("Add to playlist", systemImage: "text.badge.plus") {
                 songToAdd = PlayerManager.shared.currentTrack
             }
-            timerButton(at: date)
+            timerButton
             Button("Open lyrics", systemImage: "quote.closing") {}
         } label: {
             PlayerBottomGlyph(symbol: "ellipsis", isOn: false)
@@ -114,6 +99,17 @@ private extension PlayerBottomRow {
         .menuStyle(.button)
         .menuIndicator(.hidden)
         .menuOrder(.fixed)
+    }
+}
+
+/// The menu's timer item while a timer runs: what's left, which stops the timer when tapped. It alone
+/// follows the countdown, so as it ticks only this item's number changes, not the rest of the menu.
+private struct SleepTimerMenuItem: View {
+    @ObservedObject var countdown: SleepTimerCountdown
+    let action: () -> Void
+
+    var body: some View {
+        Button(SleepTimer.formatted(TimeInterval(countdown.seconds)), systemImage: "timer", action: action)
     }
 }
 
