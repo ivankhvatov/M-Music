@@ -837,7 +837,8 @@ final class PlayerManager: ObservableObject {
         persistState()
     }
 
-    private func pause() {
+    /// Pauses playback; the sleep timer's end too (`SleepTimer`).
+    func pause() {
         guard hasLoadedItem, isPlaying else { return }
         // Where the song really is, not where it was at the last update: a pause is where it's
         // picked up from — the lyrics' dots too — including after a relaunch.

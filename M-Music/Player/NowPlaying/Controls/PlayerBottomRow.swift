@@ -4,12 +4,17 @@ import SwiftUI
 /// The queue and lyrics toggles each replace the big artwork with their panel (see
 /// `RegularChrome`); the two are mutually exclusive — `panel` can only be one of them — so turning
 /// either on turns the other off. "More" opens a menu to go to the song's album or artist, add it
-/// to a playlist, set a timer or open its lyrics (the last two do nothing yet).
+/// to a playlist, set a sleep timer (while one runs, the item shows what's left and asks whether to
+/// stop it) or open its lyrics (which does nothing yet).
 struct PlayerBottomRow: View {
     @Binding var panel: PlayerPanel
     /// The song the "Add to playlist" sheet is open for, and what went wrong adding it.
     @State private var songToAdd: Child?
     @State private var addError: String?
+    /// Whether the "Set timer" sheet, or the "Stop the timer?" alert, is up.
+    @State private var showsTimerSheet = false
+    @State private var showsStopTimerAlert = false
+    @ObservedObject private var sleepTimer = SleepTimer.shared
 
     var body: some View {
         HStack {
@@ -25,6 +30,13 @@ struct PlayerBottomRow: View {
         }
         .sheet(item: $songToAdd) { song in
             AddToPlaylistSheet(song: song) { playlist in addToPlaylist(song, playlist) }
+        }
+        .sheet(isPresented: $showsTimerSheet) {
+            SetTimerSheet { seconds in sleepTimer.start(seconds: seconds) }
+        }
+        .alert("Stop the timer?", isPresented: $showsStopTimerAlert) {
+            Button("Stop", role: .destructive) { sleepTimer.stop() }
+            Button("Cancel", role: .cancel) {}
         }
         .alert("Couldn't add the song to the playlist", isPresented: Binding(
             get: { addError != nil },
@@ -50,10 +62,35 @@ struct PlayerBottomRow: View {
 }
 
 private extension PlayerBottomRow {
+    /// "Set timer" — or, while the timer runs, what's left of it, which asks whether to stop it.
+    @ViewBuilder
+    func timerButton(at date: Date) -> some View {
+        if sleepTimer.isRunning {
+            Button(SleepTimer.formatted(sleepTimer.remaining(at: date)), systemImage: "timer") {
+                showsStopTimerAlert = true
+            }
+        } else {
+            Button("Set timer", systemImage: "timer") { showsTimerSheet = true }
+        }
+    }
+
     /// Where the song is from: its album, and the album's artist; then what else can be done with
     /// it. The ids are read when a button is tapped, so the menu doesn't follow the player's every
     /// tick.
+    @ViewBuilder
     var moreMenu: some View {
+        // While a timer runs, the menu is rebuilt every second so its item shows what's left
+        // when it's opened, rather than what was left when the timer started.
+        if sleepTimer.isRunning {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                moreMenu(at: context.date)
+            }
+        } else {
+            moreMenu(at: .now)
+        }
+    }
+
+    func moreMenu(at date: Date) -> some View {
         Menu {
             Button("Go to album", systemImage: "opticaldisc") {
                 guard let albumID = PlayerManager.shared.currentTrack?.albumId?.raw else { return }
@@ -66,8 +103,7 @@ private extension PlayerBottomRow {
             Button("Add to playlist", systemImage: "text.badge.plus") {
                 songToAdd = PlayerManager.shared.currentTrack
             }
-            // Not wired up yet.
-            Button("Set timer", systemImage: "timer") {}
+            timerButton(at: date)
             Button("Open lyrics", systemImage: "quote.closing") {}
         } label: {
             PlayerBottomGlyph(symbol: "ellipsis", isOn: false)
