@@ -761,7 +761,7 @@ private struct SongTrailingActions: View {
                 Button(role: .destructive) {
                     onRemoveFromPlaylist()
                 } label: {
-                    Label("Remove from playlist", systemImage: "text.badge.xmark")
+                    Label { Text("Remove from playlist") } icon: { redMenuSymbol("text.badge.xmark") }
                 }
             }
 
@@ -770,7 +770,7 @@ private struct SongTrailingActions: View {
                 Button(role: .destructive) {
                     downloads.remove(songId: track.id.raw)
                 } label: {
-                    Label("Remove Download", systemImage: "checkmark.circle.fill")
+                    Label { Text("Remove Download") } icon: { redMenuSymbol("checkmark.circle.fill") }
                 }
             case .queued, .downloading:
                 Label("Downloading…", systemImage: "arrow.down.circle")

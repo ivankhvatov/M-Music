@@ -777,7 +777,7 @@ struct AlbumView: View {
                         Button(role: .destructive) {
                             showingRemoveDownloadConfirmation = true
                         } label: {
-                            Label("Remove Download", systemImage: "checkmark.circle.fill")
+                            Label { Text("Remove Download") } icon: { redMenuSymbol("checkmark.circle.fill") }
                         }
                     }
                 } label: {
@@ -917,7 +917,7 @@ private struct TrackRow: View {
                 Button(role: .destructive) {
                     downloads.remove(songId: track.id.raw)
                 } label: {
-                    Label("Remove Download", systemImage: "checkmark.circle.fill")
+                    Label { Text("Remove Download") } icon: { redMenuSymbol("checkmark.circle.fill") }
                 }
             case .queued, .downloading:
                 Label("Downloading…", systemImage: "arrow.down.circle")
