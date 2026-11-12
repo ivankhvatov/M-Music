@@ -1720,7 +1720,8 @@ final class PlayerManager: ObservableObject {
     }
 
     /// Everything about the current session except the queue itself: small enough (one track) to
-    /// read synchronously at launch and rewrite every few seconds.
+    /// read synchronously at launch and rewrite every few seconds — as a file, see
+    /// `PlayerSnapshotStore`.
     private struct PersistedSnapshot: Codable {
         let track: Child
         let index: Int
@@ -1730,8 +1731,18 @@ final class PlayerManager: ObservableObject {
         let queueOrigin: QueueOrigin?
     }
 
+    /// Where the snapshot was kept before `PlayerSnapshotStore`; only read to migrate.
     private static let snapshotKey = "PlayerManager.snapshot"
     private static let legacyPersistenceKey = "PlayerManager.state"
+
+    /// Takes the old `UserDefaults` copies of the saved state out — only the ones that are there,
+    /// since even removing a key that isn't announces a change to every `@AppStorage` view.
+    private static func removeLegacyDefaults() {
+        let defaults = UserDefaults.standard
+        for key in [snapshotKey, legacyPersistenceKey] where defaults.object(forKey: key) != nil {
+            defaults.removeObject(forKey: key)
+        }
+    }
 
     private func persistState() {
         // Radio leaves the last real queue on disk untouched, so it's restored next launch.
@@ -1739,8 +1750,8 @@ final class PlayerManager: ObservableObject {
         // See `awaitingFullQueue`.
         guard !awaitingFullQueue else { return }
         guard let currentIndex, queue.indices.contains(currentIndex) else {
-            UserDefaults.standard.removeObject(forKey: Self.snapshotKey)
-            UserDefaults.standard.removeObject(forKey: Self.legacyPersistenceKey)
+            PlayerSnapshotStore.clear()
+            Self.removeLegacyDefaults()
             persistedQueueVersion = queueVersion
             Task(priority: .utility) { await QueueStore.shared.clear() }
             return
@@ -1750,7 +1761,7 @@ final class PlayerManager: ObservableObject {
             isPlaylistQueue: isPlaylistQueue, queueOrigin: queueOrigin
         )
         if let data = try? JSONEncoder().encode(snapshot) {
-            UserDefaults.standard.set(data, forKey: Self.snapshotKey)
+            PlayerSnapshotStore.save(data)
         }
         if queueVersion != persistedQueueVersion {
             persistedQueueVersion = queueVersion
@@ -1770,8 +1781,14 @@ final class PlayerManager: ObservableObject {
         let defaults = UserDefaults.standard
         repeatMode = RepeatMode(rawValue: defaults.integer(forKey: Self.repeatModeKey)) ?? .off
         isShuffled = defaults.bool(forKey: Self.shuffleKey)
-        if let data = defaults.data(forKey: Self.snapshotKey),
+        let fileData = PlayerSnapshotStore.load()
+        // A snapshot from before it was a file is moved over, once.
+        if let data = fileData ?? defaults.data(forKey: Self.snapshotKey),
            let snapshot = try? JSONDecoder().decode(PersistedSnapshot.self, from: data) {
+            if fileData == nil {
+                PlayerSnapshotStore.save(data)
+                Self.removeLegacyDefaults()
+            }
             isApplyingRestoredQueue = true
             queue = [snapshot.track]
             isApplyingRestoredQueue = false
@@ -1801,7 +1818,7 @@ final class PlayerManager: ObservableObject {
         currentTime = state.currentTime
         duration = TimeInterval(state.queue[state.currentIndex].duration ?? 0)
         updateArtworkURL()
-        defaults.removeObject(forKey: Self.legacyPersistenceKey)
+        Self.removeLegacyDefaults()
         persistState()
     }
 
