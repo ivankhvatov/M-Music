@@ -22,7 +22,7 @@ struct SearchView: View {
             .screenOnStack()
             .toolbar {
                 filterButton
-                settingsButton
+                SettingsToolbarItem()
             }
         }
         .environment(\.appTab, AppNavigation.searchTab)
@@ -33,16 +33,6 @@ struct SearchView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {} label: {
                     Image(systemName: "line.horizontal.3.decrease")
-                        .foregroundStyle(Color.accentColor)
-                }
-            }
-        }
-    
-    @ToolbarContentBuilder
-        private var settingsButton: some ToolbarContent {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {} label: {
-                    Image(systemName: "gear")
                         .foregroundStyle(Color.accentColor)
                 }
             }

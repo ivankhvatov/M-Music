@@ -52,7 +52,7 @@ struct RadioView: View {
             .screenOnStack()
             .toolbar {
                 editButton
-                settingsButton
+                SettingsToolbarItem()
             }
         }
         .environment(\.appTab, AppNavigation.radioTab)
@@ -165,16 +165,6 @@ struct RadioView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {} label: {
                     Image(systemName: "pencil")
-                        .foregroundStyle(Color.accentColor)
-                }
-            }
-        }
-
-    @ToolbarContentBuilder
-        private var settingsButton: some ToolbarContent {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {} label: {
-                    Image(systemName: "gear")
                         .foregroundStyle(Color.accentColor)
                 }
             }
