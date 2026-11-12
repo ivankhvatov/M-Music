@@ -549,7 +549,7 @@ struct SongRow: View {
     var onRemoveFromPlaylist: (() -> Void)?
     /// Adds "Go to album" and "Go to artist" to the song menu.
     var showsGoToActions = false
-    /// Adds "Add to playlist" to the song menu, after the "Go to" actions.
+    /// Adds "Add to playlist" to the song menu, between "Add to queue" and the "Go to" actions.
     var showsAddToPlaylist = false
 
     private let client = SubsonicClient.shared
@@ -779,6 +779,13 @@ private struct SongTrailingActions: View {
             } label: {
                 Label("Add to queue", systemImage: "text.line.last.and.arrowtriangle.forward")
             }
+            if showsAddToPlaylist {
+                Button {
+                    songToAdd = track
+                } label: {
+                    Label("Add to playlist", systemImage: "text.badge.plus")
+                }
+            }
             if showsGoToActions {
                 // From the song's own ids, read when tapped: pushed on top of this screen, by
                 // `AppNavigation`, which every screen on the tab's stack takes part in.
@@ -796,13 +803,6 @@ private struct SongTrailingActions: View {
                     } label: {
                         Label("Go to artist", systemImage: AppRoute.artistSymbol)
                     }
-                }
-            }
-            if showsAddToPlaylist {
-                Button {
-                    songToAdd = track
-                } label: {
-                    Label("Add to playlist", systemImage: "text.badge.plus")
                 }
             }
             if let onRemoveFromPlaylist {

@@ -88,7 +88,7 @@ struct AddToPlaylistSheet: View {
                 Spacer(minLength: 0)
                 Image(systemName: contains ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 22))
-                    .foregroundStyle(contains ? Color.accentColor : Color.secondary.opacity(0.5))
+                    .foregroundStyle(contains ? Color.appAccent : Color.secondary.opacity(0.5))
             }
             .contentShape(.rect)
         }

@@ -120,7 +120,7 @@ struct AddAlbumToPlaylistSheet: View {
                 Spacer(minLength: 0)
                 Image(systemName: coverage.symbol)
                     .font(.system(size: 22))
-                    .foregroundStyle(coverage == .absent ? Color.secondary.opacity(0.5) : Color.accentColor)
+                    .foregroundStyle(coverage == .absent ? Color.secondary.opacity(0.5) : Color.appAccent)
             }
             .contentShape(.rect)
         }
