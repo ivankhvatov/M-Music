@@ -226,7 +226,8 @@ struct PlaylistView: View {
                 SongRow(
                     track: track, rowArtworkSize: rowArtworkSize, displayScale: displayScale,
                     playlistId: playlist.id.raw,
-                    onRemoveFromPlaylist: { removeFromPlaylist(track) }
+                    onRemoveFromPlaylist: { removeFromPlaylist(track) },
+                    showsGoToActions: true
                 )
                     .padding(.vertical, 8)
                     .contentShape(Rectangle())

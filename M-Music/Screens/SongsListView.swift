@@ -544,6 +544,8 @@ struct SongRow: View {
     var playlistId: String?
     /// Adds "Remove from playlist" to the song menu; set by a playlist's tracklist.
     var onRemoveFromPlaylist: (() -> Void)?
+    /// Adds "Go to album" and "Go to artist" to the song menu.
+    var showsGoToActions = false
 
     private let client = SubsonicClient.shared
     @ObservedObject private var downloads = DownloadStore.shared
@@ -565,7 +567,8 @@ struct SongRow: View {
         onTap: (() -> Void)? = nil,
         showsPlayingIndicator: Bool = true,
         playlistId: String? = nil,
-        onRemoveFromPlaylist: (() -> Void)? = nil
+        onRemoveFromPlaylist: (() -> Void)? = nil,
+        showsGoToActions: Bool = false
     ) {
         self.track = track
         self.rowArtworkSize = rowArtworkSize
@@ -577,6 +580,7 @@ struct SongRow: View {
         self.showsPlayingIndicator = showsPlayingIndicator
         self.playlistId = playlistId
         self.onRemoveFromPlaylist = onRemoveFromPlaylist
+        self.showsGoToActions = showsGoToActions
         _artworkURL = State(initialValue: ArtworkRequest.songRow(ArtworkRequest.artworkId(of: track), scale: displayScale).url)
     }
 
@@ -627,7 +631,7 @@ struct SongRow: View {
                         )
                     )
             } else {
-                SongTrailingActions(track: track, onRemoveFromPlaylist: onRemoveFromPlaylist)
+                SongTrailingActions(track: track, showsGoToActions: showsGoToActions, onRemoveFromPlaylist: onRemoveFromPlaylist)
             }
         }
     }
@@ -691,6 +695,7 @@ private struct TapIfAvailable: ViewModifier {
 /// what it reads.
 private struct SongTrailingActions: View {
     let track: Child
+    var showsGoToActions = false
     var onRemoveFromPlaylist: (() -> Void)?
 
     private let player = PlayerManager.shared
@@ -702,6 +707,12 @@ private struct SongTrailingActions: View {
     var body: some View {
         DownloadStatusIndicator(state: downloads.state(for: track.id.raw))
         songMenu
+    }
+
+    private var artistRoute: AppRoute? {
+        if let artistID = track.artistId?.raw { return .artistWithID(artistID) }
+        if let albumID = track.albumId?.raw { return .artist(ofAlbum: albumID) }
+        return nil
     }
 
     private var songMenu: some View {
@@ -726,6 +737,25 @@ private struct SongTrailingActions: View {
                 player.addToQueue(track)
             } label: {
                 Label("Add to queue", systemImage: "text.line.last.and.arrowtriangle.forward")
+            }
+            if showsGoToActions {
+                // From the song's own ids, read when tapped: pushed on top of this screen, by
+                // `AppNavigation`, which every screen on the tab's stack takes part in.
+                if let albumID = track.albumId?.raw {
+                    Button {
+                        AppNavigation.shared.open(.album(id: albumID), fromPlayer: false)
+                    } label: {
+                        Label("Go to album", systemImage: "opticaldisc")
+                    }
+                }
+                // The song's own artist; the album's, for a song that doesn't name one.
+                if let route = artistRoute {
+                    Button {
+                        AppNavigation.shared.open(route, fromPlayer: false)
+                    } label: {
+                        Label("Go to artist", systemImage: AppRoute.artistSymbol)
+                    }
+                }
             }
             if let onRemoveFromPlaylist {
                 Button(role: .destructive) {
