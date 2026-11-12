@@ -18,6 +18,7 @@ struct PlaylistView: View {
     @ObservedObject private var downloads = DownloadStore.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.dismiss) private var dismiss
     @AppStorage(OfflineModeSettings.Keys.showUnavailableInPlaylists) private var showUnavailableInPlaylists = true
 
     @State private var songs: [Child] = []
@@ -37,6 +38,16 @@ struct PlaylistView: View {
     @State private var artworkURL: URL?
 
     @State private var showingRemoveDownloadConfirmation = false
+    @State private var showingDeleteConfirmation = false
+    @State private var showingAddToPlaylist = false
+    @State private var isRefreshing = false
+    @State private var isDeleting = false
+    /// What went wrong adding the playlist's songs to another playlist, or deleting this one.
+    @State private var addToPlaylistError: String?
+    @State private var deleteError: String?
+    /// The playlist as the server last said it is, after "Refresh" — its song count, length and
+    /// changed time replace the ones of the `playlist` this screen was opened with.
+    @State private var refreshedPlaylist: PlaylistSummary?
     /// "Remove from playlist" is on its way to the server — a second one waits for it, since each
     /// is a position in the list the first one is changing.
     @State private var isRemovingSong = false
@@ -76,6 +87,27 @@ struct PlaylistView: View {
         }
         .preferredColorScheme(.dark)
         .onAppResume { warmAround(lastSeen.index, in: visibleSongs) }
+        .sheet(isPresented: $showingAddToPlaylist) {
+            AddAlbumToPlaylistSheet(songs: songs) { songsToAdd, target in
+                addToPlaylist(songsToAdd, target)
+            }
+        }
+        .alert("Couldn't add the songs to the playlist", isPresented: Binding(
+            get: { addToPlaylistError != nil },
+            set: { if !$0 { addToPlaylistError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(addToPlaylistError ?? "")
+        }
+        .alert("Couldn't delete the playlist", isPresented: Binding(
+            get: { deleteError != nil },
+            set: { if !$0 { deleteError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(deleteError ?? "")
+        }
         .alert("Couldn't remove the song from the playlist", isPresented: Binding(
             get: { removeError != nil },
             set: { if !$0 { removeError = nil } }
@@ -318,6 +350,78 @@ struct PlaylistView: View {
         }
     }
 
+    /// Adds to the end of the playlist, after the sheet has closed — so a failure (offline, say) is
+    /// reported here.
+    private func addToPlaylist(_ songsToAdd: [Child], _ target: PlaylistSummary) {
+        Task {
+            do {
+                try await PlaylistEditor.add(songsToAdd, to: target)
+            } catch {
+                addToPlaylistError = error.localizedDescription
+            }
+        }
+    }
+
+    /// Replaces what this screen and the caches hold for the playlist with a fresh copy from the
+    /// server — its songs, and the artwork of the playlist and its songs. Fetches *first* and only
+    /// touches anything on success, like `AlbumView.refreshAlbum`. Unlike an album's, it leaves
+    /// downloads alone: a playlist's songs are the albums' own, which have their own "Refresh".
+    private func refreshPlaylist() async {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
+
+        guard let fresh = try? await PlaylistEditor.refresh(playlist) else { return }
+        let freshSongs = fresh.entry ?? []
+
+        // Ids from both the old and new copy, in case a cover changed server-side.
+        var artworkIds: Set<String> = [playlist.coverArt ?? playlist.id.raw, fresh.coverArt ?? playlist.id.raw]
+        for song in songs + freshSongs { artworkIds.insert(ArtworkRequest.artworkId(of: song)) }
+        // Full size, plus the row-thumbnail sizes song rows and playlist rows request.
+        let pixelSizes: [Int?] = [
+            nil,
+            ImageCache.RowArtwork.pixels(ImageCache.RowArtwork.song, scale: displayScale),
+            ImageCache.RowArtwork.pixels(ImageCache.RowArtwork.playlist, scale: displayScale),
+        ]
+        let artworkURLs = artworkIds.flatMap { id in
+            pixelSizes.compactMap { try? client.coverArtURL(forId: id, size: $0) }
+        }
+        await Task.detached(priority: .userInitiated) {
+            for url in artworkURLs { ImageCache.shared.remove(url) }
+        }.value
+
+        songs = freshSongs
+        isLoadingSongs = false
+        loadError = nil
+        refreshedPlaylist = PlaylistSummary(
+            id: fresh.id, name: fresh.name, comment: fresh.comment, owner: fresh.owner,
+            public: fresh.public, songCount: fresh.songCount, duration: fresh.duration,
+            created: fresh.created, changed: fresh.changed, coverArt: fresh.coverArt
+        )
+        removedSongCount = 0
+        removedDuration = 0
+        changedAfterRemoval = nil
+        // A newly signed URL is what makes `CachedAsyncImage` reload; its stable cache key was just
+        // purged, so this refetches the header artwork from the server.
+        artworkURL = try? client.coverArtURL(forId: fresh.coverArt ?? playlist.coverArt ?? playlist.id.raw)
+        await DownloadedArtwork.shared.requestSync()
+    }
+
+    /// Deletes the playlist on the server, then leaves its screen.
+    private func deletePlaylist() {
+        guard !isDeleting else { return }
+        isDeleting = true
+        Task {
+            defer { isDeleting = false }
+            do {
+                try await PlaylistEditor.delete(playlist)
+                dismiss()
+            } catch {
+                deleteError = error.localizedDescription
+            }
+        }
+    }
+
     private func shuffle() {
         let queue = playableSongs
         guard !queue.isEmpty else { return }
@@ -325,8 +429,9 @@ struct PlaylistView: View {
     }
 
     private var trackCountAndDuration: String {
-        let totalMinutes = max(0, playlist.duration - removedDuration) / 60
-        let songsText = String(localized: "\(max(0, playlist.songCount - removedSongCount)) songs")
+        let summary = refreshedPlaylist ?? playlist
+        let totalMinutes = max(0, summary.duration - removedDuration) / 60
+        let songsText = String(localized: "\(max(0, summary.songCount - removedSongCount)) songs")
         let minutesText = String(localized: "\(totalMinutes) minutes")
         return "\(songsText), \(minutesText)"
     }
@@ -370,7 +475,7 @@ struct PlaylistView: View {
     /// without fractional seconds depending on the field.
     private var updatedDate: Date? {
         if let changedAfterRemoval { return changedAfterRemoval }
-        guard let changed = playlist.changed else { return nil }
+        guard let changed = (refreshedPlaylist ?? playlist).changed else { return nil }
         return Self.iso8601Fractional.date(from: changed) ?? Self.iso8601.date(from: changed)
     }
 
@@ -519,9 +624,47 @@ struct PlaylistView: View {
     @ToolbarContentBuilder
     private var moreButton: some ToolbarContent {
         ToolbarItem(placement: .topBarTrailing) {
-            Button {} label: {
+            Menu {
+                Button {
+                    showingAddToPlaylist = true
+                } label: {
+                    Label("Add to playlist", systemImage: "text.badge.plus")
+                }
+                .disabled(songs.isEmpty)
+
+                Button {
+                    Task { await refreshPlaylist() }
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .disabled(isRefreshing || !networkMonitor.isOnline)
+
+                if isPlaylistDownloaded {
+                    Button(role: .destructive) {
+                        showingRemoveDownloadConfirmation = true
+                    } label: {
+                        Label { Text("Remove Download") } icon: { redMenuSymbol("checkmark.circle.fill") }
+                    }
+                }
+
+                Button(role: .destructive) {
+                    showingDeleteConfirmation = true
+                } label: {
+                    Label { Text("Delete playlist") } icon: { redMenuSymbol("trash") }
+                }
+                .disabled(isDeleting || !networkMonitor.isOnline)
+            } label: {
                 Image(systemName: "ellipsis")
                     .foregroundStyle(.primary)
+            }
+            .confirmationDialog(
+                "Delete the playlist?",
+                isPresented: $showingDeleteConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Delete", role: .destructive) { deletePlaylist() }
+            } message: {
+                Text("It will be deleted from your server for good.")
             }
         }
     }

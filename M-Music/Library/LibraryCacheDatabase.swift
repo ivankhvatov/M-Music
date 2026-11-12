@@ -350,6 +350,10 @@ extension LibraryCacheDatabase {
         await DownloadedArtwork.shared.requestSync()
     }
 
+    nonisolated func removeCachedPlaylistSongs(playlistId: String) async {
+        await remove(category: LibraryCacheCategory.playlistSongs, key: playlistId)
+    }
+
     nonisolated func cachedPlaylistSongs(playlistId: String) async -> [Child]? {
         await get([Child].self, category: LibraryCacheCategory.playlistSongs, key: playlistId)
     }

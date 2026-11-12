@@ -1078,6 +1078,22 @@
         }
       }
     },
+    "Couldn't delete the playlist" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Playlist konnte nicht gelöscht werden"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удалось удалить плейлист"
+          }
+        }
+      }
+    },
     "Create" : {
       "localizations" : {
         "de" : {
@@ -1202,6 +1218,22 @@
         }
       }
     },
+    "Delete playlist" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Playlist löschen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удалить плейлист"
+          }
+        }
+      }
+    },
     "Delete the album from this device?" : {
       "localizations" : {
         "ru" : {
@@ -1224,6 +1256,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Удалить плейлист с этого устройства?"
+          }
+        }
+      }
+    },
+    "Delete the playlist?" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Playlist löschen?"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удалить плейлист?"
           }
         }
       }
@@ -1676,6 +1724,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Инструменталы"
+          }
+        }
+      }
+    },
+    "It will be deleted from your server for good." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sie wird endgültig von deinem Server gelöscht."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Он будет безвозвратно удалён с вашего сервера."
           }
         }
       }

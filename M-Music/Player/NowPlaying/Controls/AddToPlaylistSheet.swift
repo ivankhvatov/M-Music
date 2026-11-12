@@ -166,6 +166,34 @@ enum PlaylistEditor {
         }
     }
 
+    /// Deletes `playlist` on the server, and takes it out of what's cached — its entry in the list
+    /// of playlists and its songs — so the playlists screen it returns to doesn't show it until
+    /// the server has been asked again.
+    @MainActor
+    static func delete(_ playlist: PlaylistSummary) async throws {
+        try await SubsonicClient.shared.deletePlaylist(id: playlist.id.raw)
+        let database = LibraryCacheDatabase.shared
+        await database.removeCachedPlaylistSongs(playlistId: playlist.id.raw)
+        if let playlists = await database.cachedAllPlaylists() {
+            await database.cacheAllPlaylists(playlists.filter { $0.id != playlist.id })
+        }
+    }
+
+    /// The playlist as the server has it now, with its songs, written over what's cached of it —
+    /// its song list and its entry in the list of playlists. Throws before touching anything if
+    /// the server can't be reached.
+    @MainActor
+    static func refresh(_ playlist: PlaylistSummary) async throws -> PlaylistWithSongs {
+        let client = SubsonicClient.shared
+        let database = LibraryCacheDatabase.shared
+        let fresh = try await client.getPlaylist(id: playlist.id.raw)
+        await database.cachePlaylistSongs(fresh.entry ?? [], playlistId: playlist.id.raw)
+        if let playlists = try? await client.getPlaylists() {
+            await database.cacheAllPlaylists(playlists)
+        }
+        return fresh
+    }
+
     /// What `remove(_:from:)` left the playlist with.
     struct Removal {
         /// The playlist's songs as the server has them now.
