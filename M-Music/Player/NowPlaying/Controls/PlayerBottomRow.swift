@@ -109,8 +109,37 @@ private struct SleepTimerMenuItem: View {
     let action: () -> Void
 
     var body: some View {
-        Button(SleepTimer.formatted(TimeInterval(countdown.seconds)), systemImage: "timer", action: action)
+        Button(action: action) {
+            Label {
+                Text(SleepTimer.formatted(TimeInterval(countdown.seconds)))
+            } icon: {
+                Image(uiImage: Self.activeSymbol)
+            }
+        }
     }
+
+    /// The timer symbol knocked out of a filled circle, as the lyrics and queue buttons draw
+    /// themselves when on (`PlayerBottomGlyph`) — as a template image, so the menu tints it like
+    /// its other symbols. The symbol is the size the menu draws its own symbols at (the inactive timer
+    /// item's), so the circle grows around it.
+    private static let activeSymbol: UIImage = {
+        let pointSize: CGFloat = 17
+        let configuration = UIImage.SymbolConfiguration(pointSize: pointSize, weight: .regular)
+        guard let symbol = UIImage(systemName: "timer", withConfiguration: configuration) else { return UIImage() }
+        // The menu shows an image at 30 pt at most, so no bigger, or the symbol would shrink with it.
+        let side: CGFloat = 30
+        let size = CGSize(width: side, height: side)
+        let image = UIGraphicsImageRenderer(size: size).image { _ in
+            UIColor.black.setFill()
+            UIBezierPath(ovalIn: CGRect(origin: .zero, size: size)).fill()
+            let frame = CGRect(
+                x: (side - symbol.size.width) / 2, y: (side - symbol.size.height) / 2,
+                width: symbol.size.width, height: symbol.size.height
+            )
+            symbol.withTintColor(.black, renderingMode: .alwaysOriginal).draw(in: frame, blendMode: .destinationOut, alpha: 1)
+        }
+        return image.withRenderingMode(.alwaysTemplate)
+    }()
 }
 
 /// A glyph button in `PlayerBottomRow`. Off, it's a plain transparent-white symbol; on, the symbol
