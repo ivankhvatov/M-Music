@@ -475,7 +475,10 @@ private struct SongListRow: View {
 
     var body: some View {
         Button(action: onPlay) {
-            SongRow(track: track, rowArtworkSize: rowArtworkSize, displayScale: displayScale, showsGoToActions: true)
+            SongRow(
+                track: track, rowArtworkSize: rowArtworkSize, displayScale: displayScale,
+                showsGoToActions: true, showsAddToPlaylist: true
+            )
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -546,6 +549,8 @@ struct SongRow: View {
     var onRemoveFromPlaylist: (() -> Void)?
     /// Adds "Go to album" and "Go to artist" to the song menu.
     var showsGoToActions = false
+    /// Adds "Add to playlist" to the song menu, after the "Go to" actions.
+    var showsAddToPlaylist = false
 
     private let client = SubsonicClient.shared
     @ObservedObject private var downloads = DownloadStore.shared
@@ -568,7 +573,8 @@ struct SongRow: View {
         showsPlayingIndicator: Bool = true,
         playlistId: String? = nil,
         onRemoveFromPlaylist: (() -> Void)? = nil,
-        showsGoToActions: Bool = false
+        showsGoToActions: Bool = false,
+        showsAddToPlaylist: Bool = false
     ) {
         self.track = track
         self.rowArtworkSize = rowArtworkSize
@@ -581,6 +587,7 @@ struct SongRow: View {
         self.playlistId = playlistId
         self.onRemoveFromPlaylist = onRemoveFromPlaylist
         self.showsGoToActions = showsGoToActions
+        self.showsAddToPlaylist = showsAddToPlaylist
         _artworkURL = State(initialValue: ArtworkRequest.songRow(ArtworkRequest.artworkId(of: track), scale: displayScale).url)
     }
 
@@ -631,7 +638,10 @@ struct SongRow: View {
                         )
                     )
             } else {
-                SongTrailingActions(track: track, showsGoToActions: showsGoToActions, onRemoveFromPlaylist: onRemoveFromPlaylist)
+                SongTrailingActions(
+                    track: track, showsGoToActions: showsGoToActions, showsAddToPlaylist: showsAddToPlaylist,
+                    onRemoveFromPlaylist: onRemoveFromPlaylist
+                )
             }
         }
     }
@@ -696,7 +706,13 @@ private struct TapIfAvailable: ViewModifier {
 private struct SongTrailingActions: View {
     let track: Child
     var showsGoToActions = false
+    var showsAddToPlaylist = false
     var onRemoveFromPlaylist: (() -> Void)?
+
+    /// The song the "Add to playlist" sheet is open for, and what went wrong adding it — as in
+    /// `PlayerBottomRow`.
+    @State private var songToAdd: Child?
+    @State private var addError: String?
 
     private let player = PlayerManager.shared
     @ObservedObject private var starStore = StarStore.shared
@@ -705,8 +721,33 @@ private struct SongTrailingActions: View {
     @ObservedObject private var downloadProgress = DownloadProgressStore.shared
 
     var body: some View {
-        DownloadStatusIndicator(state: downloads.state(for: track.id.raw))
-        songMenu
+        Group {
+            DownloadStatusIndicator(state: downloads.state(for: track.id.raw))
+            songMenu
+        }
+        .sheet(item: $songToAdd) { song in
+            AddToPlaylistSheet(song: song) { playlist in addToPlaylist(song, playlist) }
+        }
+        .alert("Couldn't add the song to the playlist", isPresented: Binding(
+            get: { addError != nil },
+            set: { if !$0 { addError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(addError ?? "")
+        }
+    }
+
+    /// Adds to the end of the playlist, after the sheet has closed — so a failure (offline, say) is
+    /// reported here.
+    private func addToPlaylist(_ song: Child, _ playlist: PlaylistSummary) {
+        Task {
+            do {
+                try await PlaylistEditor.add(song, to: playlist)
+            } catch {
+                addError = error.localizedDescription
+            }
+        }
     }
 
     private var artistRoute: AppRoute? {
@@ -755,6 +796,13 @@ private struct SongTrailingActions: View {
                     } label: {
                         Label("Go to artist", systemImage: AppRoute.artistSymbol)
                     }
+                }
+            }
+            if showsAddToPlaylist {
+                Button {
+                    songToAdd = track
+                } label: {
+                    Label("Add to playlist", systemImage: "text.badge.plus")
                 }
             }
             if let onRemoveFromPlaylist {

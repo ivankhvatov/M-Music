@@ -853,6 +853,11 @@ private struct TrackRow: View {
     @ObservedObject private var downloadProgress = DownloadProgressStore.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
+    /// The song the "Add to playlist" sheet is open for, and what went wrong adding it — as in
+    /// `SongsListView`'s song rows.
+    @State private var songToAdd: Child?
+    @State private var addError: String?
+
     var body: some View {
         HStack(spacing: 12) {
             HStack(spacing: 12) {
@@ -884,6 +889,29 @@ private struct TrackRow: View {
 
             trackMenu
         }
+        .sheet(item: $songToAdd) { song in
+            AddToPlaylistSheet(song: song) { playlist in addToPlaylist(song, playlist) }
+        }
+        .alert("Couldn't add the song to the playlist", isPresented: Binding(
+            get: { addError != nil },
+            set: { if !$0 { addError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(addError ?? "")
+        }
+    }
+
+    /// Adds to the end of the playlist, after the sheet has closed — so a failure (offline, say) is
+    /// reported here.
+    private func addToPlaylist(_ song: Child, _ playlist: PlaylistSummary) {
+        Task {
+            do {
+                try await PlaylistEditor.add(song, to: playlist)
+            } catch {
+                addError = error.localizedDescription
+            }
+        }
     }
 
     private var trackMenu: some View {
@@ -910,6 +938,11 @@ private struct TrackRow: View {
                 player.addToQueue(track)
             } label: {
                 Label("Add to queue", systemImage: "text.line.last.and.arrowtriangle.forward")
+            }
+            Button {
+                songToAdd = track
+            } label: {
+                Label("Add to playlist", systemImage: "text.badge.plus")
             }
 
             switch downloadState {
