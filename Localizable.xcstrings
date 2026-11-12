@@ -1062,6 +1062,22 @@
         }
       }
     },
+    "Couldn't remove the song from the playlist" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Titel konnte nicht aus der Playlist entfernt werden"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удалось удалить песню из плейлиста"
+          }
+        }
+      }
+    },
     "Create" : {
       "localizations" : {
         "de" : {
@@ -2459,6 +2475,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Удалить из избранного"
+          }
+        }
+      }
+    },
+    "Remove from playlist" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aus Playlist entfernen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удалить из плейлиста"
           }
         }
       }

@@ -542,6 +542,8 @@ struct SongRow: View {
     var showsPlayingIndicator = true
     /// The playlist whose tracklist this row is in, if any — see `SongNowPlayingOverlay`.
     var playlistId: String?
+    /// Adds "Remove from playlist" to the song menu; set by a playlist's tracklist.
+    var onRemoveFromPlaylist: (() -> Void)?
 
     private let client = SubsonicClient.shared
     @ObservedObject private var downloads = DownloadStore.shared
@@ -562,7 +564,8 @@ struct SongRow: View {
         onReorderDragEnded: (() -> Void)? = nil,
         onTap: (() -> Void)? = nil,
         showsPlayingIndicator: Bool = true,
-        playlistId: String? = nil
+        playlistId: String? = nil,
+        onRemoveFromPlaylist: (() -> Void)? = nil
     ) {
         self.track = track
         self.rowArtworkSize = rowArtworkSize
@@ -573,6 +576,7 @@ struct SongRow: View {
         self.onTap = onTap
         self.showsPlayingIndicator = showsPlayingIndicator
         self.playlistId = playlistId
+        self.onRemoveFromPlaylist = onRemoveFromPlaylist
         _artworkURL = State(initialValue: ArtworkRequest.songRow(ArtworkRequest.artworkId(of: track), scale: displayScale).url)
     }
 
@@ -623,7 +627,7 @@ struct SongRow: View {
                         )
                     )
             } else {
-                SongTrailingActions(track: track)
+                SongTrailingActions(track: track, onRemoveFromPlaylist: onRemoveFromPlaylist)
             }
         }
     }
@@ -687,6 +691,7 @@ private struct TapIfAvailable: ViewModifier {
 /// what it reads.
 private struct SongTrailingActions: View {
     let track: Child
+    var onRemoveFromPlaylist: (() -> Void)?
 
     private let player = PlayerManager.shared
     @ObservedObject private var starStore = StarStore.shared
@@ -721,6 +726,13 @@ private struct SongTrailingActions: View {
                 player.addToQueue(track)
             } label: {
                 Label("Add to queue", systemImage: "text.line.last.and.arrowtriangle.forward")
+            }
+            if let onRemoveFromPlaylist {
+                Button(role: .destructive) {
+                    onRemoveFromPlaylist()
+                } label: {
+                    Label("Remove from playlist", systemImage: "text.badge.xmark")
+                }
             }
 
             switch downloadState {

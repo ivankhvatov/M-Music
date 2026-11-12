@@ -652,6 +652,61 @@ final class PlayerManager: ObservableObject {
         persistState()
     }
 
+    /// Follows a song being removed from a playlist: takes that instance of it — repeat
+    /// `occurrence` of `songId`, see `Child.occurrence` — out of the queue, and renumbers the later
+    /// repeats of it so the playing entry still matches its row. If it's the playing instance that
+    /// went, playback skips on to the song after it, as `next()` would. Only a queue that was
+    /// started from this playlist is numbered by it.
+    func playlistSongRemoved(songId: FlexibleID, occurrence: Int, fromPlaylist playlistId: String) {
+        guard queueOrigin == .playlist(playlistId), !awaitingFullQueue else { return }
+
+        func isRemoved(_ track: Child) -> Bool {
+            track.id == songId && track.occurrence == occurrence
+        }
+        func remaining(_ tracks: [Child]) -> [Child] {
+            tracks.compactMap { track in
+                guard track.id == songId, let number = track.occurrence else { return track }
+                if number == occurrence { return nil }
+                var track = track
+                if number > occurrence { track.occurrence = number - 1 }
+                return track
+            }
+        }
+
+        let updated = remaining(queue)
+        guard updated != queue else { return }
+        unshuffledQueue = remaining(unshuffledQueue)
+
+        guard let oldIndex = currentIndex, queue.indices.contains(oldIndex) else {
+            queue = updated
+            persistState()
+            return
+        }
+        let removedCurrent = isRemoved(queue[oldIndex])
+        // Where the current track — or, if it's the one that went, the song after it — now is.
+        let newIndex = oldIndex - queue[..<oldIndex].filter(isRemoved).count
+        queue = updated
+
+        if !removedCurrent {
+            currentIndex = newIndex
+            refreshNextItem()
+            persistState()
+        } else if updated.indices.contains(newIndex) {
+            currentIndex = newIndex
+            clearGaplessPreload()
+            loadCurrentItem(autoplay: true)
+            persistState()
+        } else if repeatMode == .all, !updated.isEmpty {
+            currentIndex = 0
+            clearGaplessPreload()
+            loadCurrentItem(autoplay: true)
+            persistState()
+        } else {
+            finishQueue()
+        }
+        persistShuffle()
+    }
+
     // MARK: - Shuffle and repeat
 
     /// Shuffles the up-next part of the queue — the tracks after the current one, which plays on —

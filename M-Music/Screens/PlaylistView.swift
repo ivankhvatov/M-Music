@@ -37,6 +37,15 @@ struct PlaylistView: View {
     @State private var artworkURL: URL?
 
     @State private var showingRemoveDownloadConfirmation = false
+    /// "Remove from playlist" is on its way to the server — a second one waits for it, since each
+    /// is a position in the list the first one is changing.
+    @State private var isRemovingSong = false
+    @State private var removeError: String?
+    /// What this screen's removals have taken off the `playlist` it was opened with, whose song
+    /// count, length and changed time are from before them.
+    @State private var removedSongCount = 0
+    @State private var removedDuration = 0
+    @State private var changedAfterRemoval: Date?
     /// Where the user last was in the song list, to warm around on resume — see `onAppResume`.
     @State private var lastSeen = LastSeenIndex()
 
@@ -67,6 +76,14 @@ struct PlaylistView: View {
         }
         .preferredColorScheme(.dark)
         .onAppResume { warmAround(lastSeen.index, in: visibleSongs) }
+        .alert("Couldn't remove the song from the playlist", isPresented: Binding(
+            get: { removeError != nil },
+            set: { if !$0 { removeError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(removeError ?? "")
+        }
         .task {
             await loadSongs()
         }
@@ -206,7 +223,11 @@ struct PlaylistView: View {
             Button {
                 playTrack(at: index)
             } label: {
-                SongRow(track: track, rowArtworkSize: rowArtworkSize, displayScale: displayScale, playlistId: playlist.id.raw)
+                SongRow(
+                    track: track, rowArtworkSize: rowArtworkSize, displayScale: displayScale,
+                    playlistId: playlist.id.raw,
+                    onRemoveFromPlaylist: { removeFromPlaylist(track) }
+                )
                     .padding(.vertical, 8)
                     .contentShape(Rectangle())
             }
@@ -274,6 +295,28 @@ struct PlaylistView: View {
         player.play(queue: queue, startAt: startAt, fromPlaylist: true, sourceName: playlist.name, origin: .playlist(playlist.id.raw))
     }
 
+    /// Takes `song` — this row's instance of it, if the playlist holds it more than once — out of
+    /// the playlist. The row goes once the server has taken it out, not before.
+    private func removeFromPlaylist(_ song: Child) {
+        guard !isRemovingSong else { return }
+        isRemovingSong = true
+        Task {
+            defer { isRemovingSong = false }
+            do {
+                let removal = try await PlaylistEditor.remove(song, from: playlist)
+                songs = removal.songs
+                if removal.removed {
+                    player.playlistSongRemoved(songId: song.id, occurrence: song.occurrence ?? 0, fromPlaylist: playlist.id.raw)
+                    removedSongCount += 1
+                    removedDuration += song.duration ?? 0
+                    changedAfterRemoval = Date()
+                }
+            } catch {
+                removeError = error.localizedDescription
+            }
+        }
+    }
+
     private func shuffle() {
         let queue = playableSongs
         guard !queue.isEmpty else { return }
@@ -281,8 +324,8 @@ struct PlaylistView: View {
     }
 
     private var trackCountAndDuration: String {
-        let totalMinutes = playlist.duration / 60
-        let songsText = String(localized: "\(playlist.songCount) songs")
+        let totalMinutes = max(0, playlist.duration - removedDuration) / 60
+        let songsText = String(localized: "\(max(0, playlist.songCount - removedSongCount)) songs")
         let minutesText = String(localized: "\(totalMinutes) minutes")
         return "\(songsText), \(minutesText)"
     }
@@ -325,6 +368,7 @@ struct PlaylistView: View {
     /// `playlist.changed`, parsed — Navidrome reports it as an ISO 8601 timestamp, with or
     /// without fractional seconds depending on the field.
     private var updatedDate: Date? {
+        if let changedAfterRemoval { return changedAfterRemoval }
         guard let changed = playlist.changed else { return nil }
         return Self.iso8601Fractional.date(from: changed) ?? Self.iso8601.date(from: changed)
     }
