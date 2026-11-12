@@ -1,24 +1,27 @@
 import SwiftUI
 
 /// The sheet behind the player's "Set timer": hours, minutes and seconds on three wheels that share
-/// one selection capsule, and a "Start" button. Starting with the time at zero just closes the sheet.
+/// one selection capsule, what to do when the time is up, and a "Start" button. Starting with the time
+/// at zero just closes the sheet.
 ///
-/// Starting is the presenter's business (`onStart`, given the seconds chosen); the sheet closes
-/// itself either way.
+/// Starting is the presenter's business (`onStart`, given the seconds and what to do after them); the
+/// sheet closes itself either way.
 struct SetTimerSheet: View {
-    let onStart: (TimeInterval) -> Void
+    let onStart: (TimeInterval, SleepTimer.Completion) -> Void
 
     @Environment(\.dismiss) private var dismiss
 
     @State private var hours = 0
     @State private var minutes = 0
     @State private var seconds = 0
+    @State private var completion = SleepTimer.Completion.stopImmediately
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 16) {
                 TimerWheels(hours: $hours, minutes: $minutes, seconds: $seconds)
                     .frame(height: 216)
+                completionMenu
                 Button {
                     start()
                 } label: {
@@ -40,13 +43,30 @@ struct SetTimerSheet: View {
                 }
             }
         }
-        .presentationDetents([.height(420)])
+        .presentationDetents([.height(460)])
         .presentationDragIndicator(.visible)
+    }
+
+    /// "Upon completion", with what's chosen beside it, opening a menu of the choices.
+    private var completionMenu: some View {
+        HStack {
+            Text("Upon completion")
+                .lineLimit(1)
+            Spacer(minLength: 12)
+            Picker("Upon completion", selection: $completion) {
+                Text("Stop immediately").tag(SleepTimer.Completion.stopImmediately)
+                Text("Finish current song").tag(SleepTimer.Completion.finishSong)
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .fixedSize()
+        }
+        .padding(.horizontal, 4)
     }
 
     private func start() {
         let total = TimeInterval(hours * 3600 + minutes * 60 + seconds)
-        if total > 0 { onStart(total) }
+        if total > 0 { onStart(total, completion) }
         dismiss()
     }
 }

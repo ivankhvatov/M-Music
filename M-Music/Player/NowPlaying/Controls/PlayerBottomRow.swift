@@ -32,7 +32,7 @@ struct PlayerBottomRow: View {
             AddToPlaylistSheet(song: song) { playlist in addToPlaylist(song, playlist) }
         }
         .sheet(isPresented: $showsTimerSheet) {
-            SetTimerSheet { seconds in sleepTimer.start(seconds: seconds) }
+            SetTimerSheet { seconds, completion in sleepTimer.start(seconds: seconds, completion: completion) }
         }
         .alert("Stop the timer?", isPresented: $showsStopTimerAlert) {
             Button("Stop", role: .destructive) { sleepTimer.stop() }
@@ -62,11 +62,14 @@ struct PlayerBottomRow: View {
 }
 
 private extension PlayerBottomRow {
-    /// "Set timer" — or, while the timer runs, what's left of it, which asks whether to stop it.
+    /// "Set timer" — or, while the timer runs, what's left of it, which asks whether to stop it. Once the
+    /// time is up and the song is being played to its end, "After this song" in its place.
     @ViewBuilder
     var timerButton: some View {
         if sleepTimer.isRunning {
             SleepTimerMenuItem(countdown: sleepTimer.countdown) { showsStopTimerAlert = true }
+        } else if sleepTimer.isWaitingForSongEnd {
+            Button { showsStopTimerAlert = true } label: { TimerMenuLabel(title: String(localized: "After this song")) }
         } else {
             Button("Set timer", systemImage: "timer") { showsTimerSheet = true }
         }
@@ -110,11 +113,20 @@ private struct SleepTimerMenuItem: View {
 
     var body: some View {
         Button(action: action) {
-            Label {
-                Text(SleepTimer.formatted(TimeInterval(countdown.seconds)))
-            } icon: {
-                Image(uiImage: Self.activeSymbol)
-            }
+            TimerMenuLabel(title: SleepTimer.formatted(TimeInterval(countdown.seconds)))
+        }
+    }
+}
+
+/// A timer item's label in the menu while a timer is active: its text beside the active symbol.
+private struct TimerMenuLabel: View {
+    let title: String
+
+    var body: some View {
+        Label {
+            Text(title)
+        } icon: {
+            Image(uiImage: Self.activeSymbol)
         }
     }
 

@@ -894,6 +894,7 @@ final class PlayerManager: ObservableObject {
 
     /// Pauses playback; the sleep timer's end too (`SleepTimer`).
     func pause() {
+        SleepTimer.shared.cancelWaitingForSongEnd()
         guard hasLoadedItem, isPlaying else { return }
         // Where the song really is, not where it was at the last update: a pause is where it's
         // picked up from — the lyrics' dots too — including after a relaunch.
@@ -1100,6 +1101,8 @@ final class PlayerManager: ObservableObject {
             updateNowPlayingPlaybackState()
             return
         }
+        // A sleep timer that's waited for this song to end: the next one is lined up, but not played.
+        let stopsAfterThisSong = SleepTimer.shared.consumeSongEnd()
         guard currentIndex != nil else { return }
         nextItemRefreshTask?.cancel()
         finishScrobbleTracking()
@@ -1135,11 +1138,16 @@ final class PlayerManager: ObservableObject {
             updateArtworkURL()
             updateNowPlayingInfo()
             prepareNextItem()
+            if stopsAfterThisSong {
+                // The engine has already begun the next song; take it back to its start, paused.
+                engine.pause()
+                engine.seek(to: 0)
+            }
             updateNowPlayingPlaybackState()
             persistState()
         } else {
             clearGaplessPreload()
-            loadCurrentItem(autoplay: true)
+            loadCurrentItem(autoplay: !stopsAfterThisSong)
         }
     }
 

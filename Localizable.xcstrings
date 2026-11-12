@@ -612,6 +612,22 @@
         }
       }
     },
+    "After this song" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nach diesem Song"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "После этой песни"
+          }
+        }
+      }
+    },
     "Album" : {
       "localizations" : {
         "de" : {
@@ -1542,6 +1558,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Фильтр"
+          }
+        }
+      }
+    },
+    "Finish current song" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktuellen Song beenden"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Завершить текущую песню"
           }
         }
       }
@@ -2621,10 +2653,24 @@
       }
     },
     "Repeat" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Повтор"
+          }
+        }
+      }
     },
     "Repeat One" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Повтор одной песни"
+          }
+        }
+      }
     },
     "ReplayGain" : {
       "localizations" : {
@@ -2873,7 +2919,14 @@
       }
     },
     "Shuffle" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Перемешать"
+          }
+        }
+      }
     },
     "Singles" : {
       "localizations" : {
@@ -2971,6 +3024,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Остановить"
+          }
+        }
+      }
+    },
+    "Stop immediately" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sofort stoppen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Остановить сразу"
           }
         }
       }
@@ -3305,6 +3374,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Обновлено вчера"
+          }
+        }
+      }
+    },
+    "Upon completion" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nach Ablauf"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "По окончании"
           }
         }
       }
