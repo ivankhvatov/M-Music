@@ -209,7 +209,7 @@ struct HomeView: View {
             .screenOnStack()
             .toolbar {
                 moreButton
-                settingsButton
+                SettingsToolbarItem()
             }
             .task { await refresh() }
             .onChange(of: groupReleaseVersionsEnabled) {
@@ -575,16 +575,6 @@ struct HomeView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {} label: {
                     Image(systemName: "ellipsis")
-                        .foregroundStyle(Color.accentColor)
-                }
-            }
-        }
-    
-    @ToolbarContentBuilder
-        private var settingsButton: some ToolbarContent {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {} label: {
-                    Image(systemName: "gear")
                         .foregroundStyle(Color.accentColor)
                 }
             }

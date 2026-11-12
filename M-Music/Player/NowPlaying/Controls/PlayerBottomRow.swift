@@ -4,12 +4,17 @@ import SwiftUI
 /// The queue and lyrics toggles each replace the big artwork with their panel (see
 /// `RegularChrome`); the two are mutually exclusive — `panel` can only be one of them — so turning
 /// either on turns the other off. "More" opens a menu to go to the song's album or artist, add it
-/// to a playlist, set a timer or open its lyrics (the last two do nothing yet).
+/// to a playlist, set a sleep timer (while one runs, the item shows what's left and asks whether to
+/// stop it) or open its lyrics (which does nothing yet).
 struct PlayerBottomRow: View {
     @Binding var panel: PlayerPanel
     /// The song the "Add to playlist" sheet is open for, and what went wrong adding it.
     @State private var songToAdd: Child?
     @State private var addError: String?
+    /// Whether the "Set timer" sheet, or the "Stop the timer?" alert, is up.
+    @State private var showsTimerSheet = false
+    @State private var showsStopTimerAlert = false
+    @ObservedObject private var sleepTimer = SleepTimer.shared
 
     var body: some View {
         HStack {
@@ -25,6 +30,13 @@ struct PlayerBottomRow: View {
         }
         .sheet(item: $songToAdd) { song in
             AddToPlaylistSheet(song: song) { playlist in addToPlaylist(song, playlist) }
+        }
+        .sheet(isPresented: $showsTimerSheet) {
+            SetTimerSheet { seconds, completion in sleepTimer.start(seconds: seconds, completion: completion) }
+        }
+        .alert("Stop the timer?", isPresented: $showsStopTimerAlert) {
+            Button("Stop", role: .destructive) { sleepTimer.stop() }
+            Button("Cancel", role: .cancel) {}
         }
         .alert("Couldn't add the song to the playlist", isPresented: Binding(
             get: { addError != nil },
@@ -50,6 +62,19 @@ struct PlayerBottomRow: View {
 }
 
 private extension PlayerBottomRow {
+    /// "Set timer" — or, while the timer runs, what's left of it, which asks whether to stop it. Once the
+    /// time is up and the song is being played to its end, "After this song" in its place.
+    @ViewBuilder
+    var timerButton: some View {
+        if sleepTimer.isRunning {
+            SleepTimerMenuItem(countdown: sleepTimer.countdown) { showsStopTimerAlert = true }
+        } else if sleepTimer.isWaitingForSongEnd {
+            Button { showsStopTimerAlert = true } label: { TimerMenuLabel(title: String(localized: "After this song")) }
+        } else {
+            Button("Set timer", systemImage: "timer") { showsTimerSheet = true }
+        }
+    }
+
     /// Where the song is from: its album, and the album's artist; then what else can be done with
     /// it. The ids are read when a button is tapped, so the menu doesn't follow the player's every
     /// tick.
@@ -66,8 +91,7 @@ private extension PlayerBottomRow {
             Button("Add to playlist", systemImage: "text.badge.plus") {
                 songToAdd = PlayerManager.shared.currentTrack
             }
-            // Not wired up yet.
-            Button("Set timer", systemImage: "timer") {}
+            timerButton
             Button("Open lyrics", systemImage: "quote.closing") {}
         } label: {
             PlayerBottomGlyph(symbol: "ellipsis", isOn: false)
@@ -79,6 +103,55 @@ private extension PlayerBottomRow {
         .menuIndicator(.hidden)
         .menuOrder(.fixed)
     }
+}
+
+/// The menu's timer item while a timer runs: what's left, which stops the timer when tapped. It alone
+/// follows the countdown, so as it ticks only this item's number changes, not the rest of the menu.
+private struct SleepTimerMenuItem: View {
+    @ObservedObject var countdown: SleepTimerCountdown
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            TimerMenuLabel(title: SleepTimer.formatted(TimeInterval(countdown.seconds)))
+        }
+    }
+}
+
+/// A timer item's label in the menu while a timer is active: its text beside the active symbol.
+private struct TimerMenuLabel: View {
+    let title: String
+
+    var body: some View {
+        Label {
+            Text(title)
+        } icon: {
+            Image(uiImage: Self.activeSymbol)
+        }
+    }
+
+    /// The timer symbol knocked out of a filled circle, as the lyrics and queue buttons draw
+    /// themselves when on (`PlayerBottomGlyph`) — as a template image, so the menu tints it like
+    /// its other symbols. The symbol is the size the menu draws its own symbols at (the inactive timer
+    /// item's), so the circle grows around it.
+    private static let activeSymbol: UIImage = {
+        let pointSize: CGFloat = 17
+        let configuration = UIImage.SymbolConfiguration(pointSize: pointSize, weight: .regular)
+        guard let symbol = UIImage(systemName: "timer", withConfiguration: configuration) else { return UIImage() }
+        // The menu shows an image at 30 pt at most, so no bigger, or the symbol would shrink with it.
+        let side: CGFloat = 30
+        let size = CGSize(width: side, height: side)
+        let image = UIGraphicsImageRenderer(size: size).image { _ in
+            UIColor.black.setFill()
+            UIBezierPath(ovalIn: CGRect(origin: .zero, size: size)).fill()
+            let frame = CGRect(
+                x: (side - symbol.size.width) / 2, y: (side - symbol.size.height) / 2,
+                width: symbol.size.width, height: symbol.size.height
+            )
+            symbol.withTintColor(.black, renderingMode: .alwaysOriginal).draw(in: frame, blendMode: .destinationOut, alpha: 1)
+        }
+        return image.withRenderingMode(.alwaysTemplate)
+    }()
 }
 
 /// A glyph button in `PlayerBottomRow`. Off, it's a plain transparent-white symbol; on, the symbol

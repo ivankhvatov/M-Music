@@ -475,7 +475,10 @@ private struct SongListRow: View {
 
     var body: some View {
         Button(action: onPlay) {
-            SongRow(track: track, rowArtworkSize: rowArtworkSize, displayScale: displayScale)
+            SongRow(
+                track: track, rowArtworkSize: rowArtworkSize, displayScale: displayScale,
+                showsGoToActions: true, showsAddToPlaylist: true
+            )
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -542,6 +545,12 @@ struct SongRow: View {
     var showsPlayingIndicator = true
     /// The playlist whose tracklist this row is in, if any — see `SongNowPlayingOverlay`.
     var playlistId: String?
+    /// Adds "Remove from playlist" to the song menu; set by a playlist's tracklist.
+    var onRemoveFromPlaylist: (() -> Void)?
+    /// Adds "Go to album" and "Go to artist" to the song menu.
+    var showsGoToActions = false
+    /// Adds "Add to playlist" to the song menu, between "Add to queue" and the "Go to" actions.
+    var showsAddToPlaylist = false
 
     private let client = SubsonicClient.shared
     @ObservedObject private var downloads = DownloadStore.shared
@@ -562,7 +571,10 @@ struct SongRow: View {
         onReorderDragEnded: (() -> Void)? = nil,
         onTap: (() -> Void)? = nil,
         showsPlayingIndicator: Bool = true,
-        playlistId: String? = nil
+        playlistId: String? = nil,
+        onRemoveFromPlaylist: (() -> Void)? = nil,
+        showsGoToActions: Bool = false,
+        showsAddToPlaylist: Bool = false
     ) {
         self.track = track
         self.rowArtworkSize = rowArtworkSize
@@ -573,6 +585,9 @@ struct SongRow: View {
         self.onTap = onTap
         self.showsPlayingIndicator = showsPlayingIndicator
         self.playlistId = playlistId
+        self.onRemoveFromPlaylist = onRemoveFromPlaylist
+        self.showsGoToActions = showsGoToActions
+        self.showsAddToPlaylist = showsAddToPlaylist
         _artworkURL = State(initialValue: ArtworkRequest.songRow(ArtworkRequest.artworkId(of: track), scale: displayScale).url)
     }
 
@@ -623,7 +638,10 @@ struct SongRow: View {
                         )
                     )
             } else {
-                SongTrailingActions(track: track)
+                SongTrailingActions(
+                    track: track, showsGoToActions: showsGoToActions, showsAddToPlaylist: showsAddToPlaylist,
+                    onRemoveFromPlaylist: onRemoveFromPlaylist
+                )
             }
         }
     }
@@ -687,6 +705,14 @@ private struct TapIfAvailable: ViewModifier {
 /// what it reads.
 private struct SongTrailingActions: View {
     let track: Child
+    var showsGoToActions = false
+    var showsAddToPlaylist = false
+    var onRemoveFromPlaylist: (() -> Void)?
+
+    /// The song the "Add to playlist" sheet is open for, and what went wrong adding it — as in
+    /// `PlayerBottomRow`.
+    @State private var songToAdd: Child?
+    @State private var addError: String?
 
     private let player = PlayerManager.shared
     @ObservedObject private var starStore = StarStore.shared
@@ -695,8 +721,39 @@ private struct SongTrailingActions: View {
     @ObservedObject private var downloadProgress = DownloadProgressStore.shared
 
     var body: some View {
-        DownloadStatusIndicator(state: downloads.state(for: track.id.raw))
-        songMenu
+        Group {
+            DownloadStatusIndicator(state: downloads.state(for: track.id.raw))
+            songMenu
+        }
+        .sheet(item: $songToAdd) { song in
+            AddToPlaylistSheet(song: song) { playlist in addToPlaylist(song, playlist) }
+        }
+        .alert("Couldn't add the song to the playlist", isPresented: Binding(
+            get: { addError != nil },
+            set: { if !$0 { addError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(addError ?? "")
+        }
+    }
+
+    /// Adds to the end of the playlist, after the sheet has closed — so a failure (offline, say) is
+    /// reported here.
+    private func addToPlaylist(_ song: Child, _ playlist: PlaylistSummary) {
+        Task {
+            do {
+                try await PlaylistEditor.add(song, to: playlist)
+            } catch {
+                addError = error.localizedDescription
+            }
+        }
+    }
+
+    private var artistRoute: AppRoute? {
+        if let artistID = track.artistId?.raw { return .artistWithID(artistID) }
+        if let albumID = track.albumId?.raw { return .artist(ofAlbum: albumID) }
+        return nil
     }
 
     private var songMenu: some View {
@@ -722,13 +779,46 @@ private struct SongTrailingActions: View {
             } label: {
                 Label("Add to queue", systemImage: "text.line.last.and.arrowtriangle.forward")
             }
+            if showsAddToPlaylist {
+                Button {
+                    songToAdd = track
+                } label: {
+                    Label("Add to playlist", systemImage: "text.badge.plus")
+                }
+            }
+            if showsGoToActions {
+                // From the song's own ids, read when tapped: pushed on top of this screen, by
+                // `AppNavigation`, which every screen on the tab's stack takes part in.
+                if let albumID = track.albumId?.raw {
+                    Button {
+                        AppNavigation.shared.open(.album(id: albumID), fromPlayer: false)
+                    } label: {
+                        Label("Go to album", systemImage: "opticaldisc")
+                    }
+                }
+                // The song's own artist; the album's, for a song that doesn't name one.
+                if let route = artistRoute {
+                    Button {
+                        AppNavigation.shared.open(route, fromPlayer: false)
+                    } label: {
+                        Label("Go to artist", systemImage: AppRoute.artistSymbol)
+                    }
+                }
+            }
+            if let onRemoveFromPlaylist {
+                Button(role: .destructive) {
+                    onRemoveFromPlaylist()
+                } label: {
+                    Label { Text("Remove from playlist") } icon: { redMenuSymbol("text.badge.xmark") }
+                }
+            }
 
             switch downloadState {
             case .completed:
                 Button(role: .destructive) {
                     downloads.remove(songId: track.id.raw)
                 } label: {
-                    Label("Remove Download", systemImage: "checkmark.circle.fill")
+                    Label { Text("Remove Download") } icon: { redMenuSymbol("checkmark.circle.fill") }
                 }
             case .queued, .downloading:
                 Label("Downloading…", systemImage: "arrow.down.circle")

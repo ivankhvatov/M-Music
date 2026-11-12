@@ -36,7 +36,7 @@ struct LibraryView: View {
                 .screenOnStack()
                 .toolbar {
                     plusButton
-                    settingsButton
+                    SettingsToolbarItem()
                 }
                 .task { await refresh() }
             }
@@ -67,7 +67,8 @@ struct LibraryView: View {
             .padding(.horizontal, 16)
 
             Text("Recently played")
-                .font(.system(size: 20))
+                .font(.title3)
+                .fontWeight(.semibold)
                 .padding(.horizontal, 16)
                 .padding(.top, 16)
                 .padding(.bottom, 18)
@@ -283,42 +284,6 @@ struct LibraryView: View {
                     Image(systemName: "plus")
                         .foregroundStyle(Color.accentColor)
                 }
-            }
-        }
-
-    @ToolbarContentBuilder
-        private var settingsButton: some ToolbarContent {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    // `LazyDestination`: any `NavigationLink` initializer — the autoclosure form and
-                    // the `{ }` builder alike — builds its destination when the link is built, and
-                    // `PlaybackSettingsView` alone has ~17 `@AppStorage` properties; this only
-                    // builds the screen on push.
-                    NavigationLink {
-                        LazyDestination { ServerSettingsView() }
-                    } label: {
-                        Label("Server", systemImage: "server.rack")
-                    }
-                    NavigationLink {
-                        LazyDestination { PlaybackSettingsView() }
-                    } label: {
-                        Label("Playback", systemImage: "play.circle")
-                    }
-                    NavigationLink {
-                        LazyDestination { DownloadsSettingsView() }
-                    } label: {
-                        Label("Downloads", systemImage: "square.and.arrow.down")
-                    }
-                    NavigationLink {
-                        LazyDestination { AppearanceSettingsView() }
-                    } label: {
-                        Label("Appearance", systemImage: "paintbrush")
-                    }
-                } label: {
-                    Image(systemName: "gear")
-                        .foregroundStyle(Color.accentColor)
-                }
-                .tint(.accentColor)
             }
         }
 }

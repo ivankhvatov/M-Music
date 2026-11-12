@@ -88,7 +88,7 @@ struct AddToPlaylistSheet: View {
                 Spacer(minLength: 0)
                 Image(systemName: contains ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 22))
-                    .foregroundStyle(contains ? Color.accentColor : Color.secondary.opacity(0.5))
+                    .foregroundStyle(contains ? Color.appAccent : Color.secondary.opacity(0.5))
             }
             .contentShape(.rect)
         }
@@ -164,6 +164,103 @@ enum PlaylistEditor {
         if let playlists = try? await client.getPlaylists() {
             await database.cacheAllPlaylists(playlists)
         }
+    }
+
+    /// Deletes `playlist` on the server, and takes it out of what's cached — its entry in the list
+    /// of playlists and its songs — so the playlists screen it returns to doesn't show it until
+    /// the server has been asked again.
+    @MainActor
+    static func delete(_ playlist: PlaylistSummary) async throws {
+        try await SubsonicClient.shared.deletePlaylist(id: playlist.id.raw)
+        let database = LibraryCacheDatabase.shared
+        await database.removeCachedPlaylistSongs(playlistId: playlist.id.raw)
+        if let playlists = await database.cachedAllPlaylists() {
+            await database.cacheAllPlaylists(playlists.filter { $0.id != playlist.id })
+        }
+    }
+
+    /// The playlist as the server has it now, with its songs, written over what's cached of it —
+    /// its song list and its entry in the list of playlists. Throws before touching anything if
+    /// the server can't be reached.
+    @MainActor
+    static func refresh(_ playlist: PlaylistSummary) async throws -> PlaylistWithSongs {
+        let client = SubsonicClient.shared
+        let database = LibraryCacheDatabase.shared
+        let fresh = try await client.getPlaylist(id: playlist.id.raw)
+        await database.cachePlaylistSongs(fresh.entry ?? [], playlistId: playlist.id.raw)
+        if let playlists = try? await client.getPlaylists() {
+            await database.cacheAllPlaylists(playlists)
+        }
+        return fresh
+    }
+
+    /// What `remove(_:from:)` left the playlist with.
+    struct Removal {
+        /// The playlist's songs as the server has them now.
+        let songs: [Child]
+        /// Whether this call took the song out; `false` when it was already gone.
+        let removed: Bool
+    }
+
+    /// Removes the one instance of `song` that `song.occurrence` names — the first, second, … time
+    /// the song is in the playlist — from `playlist` on the server, and brings what's cached of the
+    /// playlist up to date. A playlist can hold a song several times, and only that instance goes.
+    ///
+    /// The server removes by position, so the playlist is fetched first and the position found in
+    /// what the server has *now*, not in the list on screen, which can be an older cached one.
+    /// A song that's no longer there (removed from another device) is left alone.
+    @MainActor
+    static func remove(_ song: Child, from playlist: PlaylistSummary) async throws -> Removal {
+        let client = SubsonicClient.shared
+        let database = LibraryCacheDatabase.shared
+        let current = try await client.getPlaylist(id: playlist.id.raw).entry ?? []
+
+        var seen = 0
+        var position: Int?
+        for (index, entry) in current.enumerated() where entry.id == song.id {
+            if seen == (song.occurrence ?? 0) {
+                position = index
+                break
+            }
+            seen += 1
+        }
+        guard let position else {
+            await database.cachePlaylistSongs(current, playlistId: playlist.id.raw)
+            return Removal(songs: current, removed: false)
+        }
+
+        try await client.updatePlaylist(playlistId: playlist.id.raw, songIndexesToRemove: [position])
+        var remaining = current
+        let removedSong = remaining.remove(at: position)
+        await database.cachePlaylistSongs(remaining, playlistId: playlist.id.raw)
+        await recordRemoved(removedSong, from: playlist)
+
+        // What the server has now, best-effort: the song is out of the playlist either way.
+        if let full = try? await client.getPlaylist(id: playlist.id.raw) {
+            await database.cachePlaylistSongs(full.entry ?? [], playlistId: playlist.id.raw)
+            remaining = full.entry ?? []
+        }
+        if let playlists = try? await client.getPlaylists() {
+            await database.cacheAllPlaylists(playlists)
+        }
+        return Removal(songs: remaining, removed: true)
+    }
+
+    /// Takes the song off the playlist's cached entry in the list of playlists: one song fewer,
+    /// that much shorter, and changed now. (Its cached song list is written by the caller.)
+    static func recordRemoved(_ song: Child, from playlist: PlaylistSummary) async {
+        let database = LibraryCacheDatabase.shared
+        guard let playlists = await database.cachedAllPlaylists() else { return }
+        let now = ISO8601DateFormatter().string(from: Date())
+        await database.cacheAllPlaylists(playlists.map { cached in
+            guard cached.id == playlist.id else { return cached }
+            return PlaylistSummary(
+                id: cached.id, name: cached.name, comment: cached.comment, owner: cached.owner,
+                public: cached.public, songCount: max(0, cached.songCount - 1),
+                duration: max(0, cached.duration - (song.duration ?? 0)),
+                created: cached.created, changed: now, coverArt: cached.coverArt
+            )
+        })
     }
 
     /// Puts the songs at the end of the playlist's cached song list, and counts them in the

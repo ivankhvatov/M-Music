@@ -1,13 +1,15 @@
 import SwiftUI
 import Observation
 
-/// A screen opened from outside the tabs' own screens — from the expanded player's menu. Holds
-/// the ids only: the screens fetch what they show when they appear, so the player can collapse
+/// A screen opened from outside the tabs' own screens — from the expanded player's menu, or a song
+/// row's. Holds the ids only: the screens fetch what they show when they appear, so the player can collapse
 /// and the push begin right away.
 enum AppRoute: Hashable {
     case album(id: String)
     /// The album artist of an album.
     case artist(ofAlbum: String)
+    /// An artist, by their own id.
+    case artistWithID(String)
 }
 
 /// Which of the screens a route leads to a screen on a tab's stack is. Only for these screens: the
@@ -62,22 +64,28 @@ final class AppNavigation {
     /// redraw on top of it.
     private(set) var albums: [String: AlbumID3] = [:]
     private(set) var artists: [String: ArtistID3] = [:]
+    private(set) var artistsByID: [String: ArtistID3] = [:]
 
     /// Takes the app to `route` in the tab that is open: the menu it was chosen from goes first,
     /// then the player collapses, then — once that has settled — the screen is pushed on top of
     /// whatever is open there, or, if that is the screen already, nothing more is done. Each is an
     /// animation that keeps the CPU busy for as long as it lasts, and they were far costlier run
     /// together than one after another. What the screen shows is looked up meanwhile.
-    func open(_ route: AppRoute) {
+    ///
+    /// `fromPlayer`: whether the menu is the expanded player's. Chosen from a screen's own song
+    /// row there is no player to collapse, and the screen is pushed once the menu has gone.
+    func open(_ route: AppRoute, fromPlayer: Bool = true) {
         openTask?.cancel()
         let tab = selectedTab
         openTask = Task { @MainActor in
             async let lookup: Void = prefetch(route)
             try? await Task.sleep(for: .seconds(Self.menuDismissal))
             guard !Task.isCancelled else { return }
-            PlayerPresentation.shared.collapse()
-            await PlayerPresentation.shared.waitUntilCollapsed()
-            try? await Task.sleep(for: .seconds(Self.collapseSettling))
+            if fromPlayer {
+                PlayerPresentation.shared.collapse()
+                await PlayerPresentation.shared.waitUntilCollapsed()
+                try? await Task.sleep(for: .seconds(Self.collapseSettling))
+            }
             await lookup
             guard !Task.isCancelled else { return }
             if let key = key(of: route), topScreenKey(inTab: tab) == key { return }
@@ -92,6 +100,7 @@ final class AppNavigation {
         switch route {
         case .album(let id): .album(id)
         case .artist(let albumID): artists[albumID].map { .artist($0.id.raw) }
+        case .artistWithID(let id): .artist(id)
         }
     }
 
@@ -128,6 +137,8 @@ final class AppNavigation {
             if let detail = await RouteLookup.albumDetail(id: id) { albums[id] = AlbumID3(detail) }
         case .artist(let albumID):
             if let artist = await RouteLookup.albumArtist(ofAlbum: albumID) { artists[albumID] = artist }
+        case .artistWithID(let id):
+            if let artist = await RouteLookup.artist(id: id) { artistsByID[id] = artist }
         }
     }
 
@@ -174,6 +185,7 @@ private struct ScreenHost: ViewModifier {
                 switch route {
                 case .album(let id): RoutedAlbumView(id: id)
                 case .artist(let albumID): RoutedArtistView(albumID: albumID)
+                case .artistWithID(let id): RoutedArtistView(artistID: id)
                 }
             }
     }
@@ -227,15 +239,26 @@ struct RoutedAlbumView: View {
     }
 }
 
-/// The album artist of an album, opened by the album's id.
+/// An artist's screen, opened by the artist's id — or, for the album artist of an album, by the
+/// album's.
 struct RoutedArtistView: View {
-    let albumID: String
+    private enum Source {
+        case albumArtist(ofAlbum: String)
+        case artist(id: String)
+    }
+
+    private let source: Source
     @State private var artist: ArtistID3?
     @State private var failed = false
 
     init(albumID: String) {
-        self.albumID = albumID
+        source = .albumArtist(ofAlbum: albumID)
         _artist = State(initialValue: AppNavigation.shared.artists[albumID])
+    }
+
+    init(artistID: String) {
+        source = .artist(id: artistID)
+        _artist = State(initialValue: AppNavigation.shared.artistsByID[artistID])
     }
 
     var body: some View {
@@ -251,7 +274,12 @@ struct RoutedArtistView: View {
         .screenOnStack()
         .task {
             guard artist == nil else { return }
-            if let found = await RouteLookup.albumArtist(ofAlbum: albumID) {
+            let found: ArtistID3?
+            switch source {
+            case .albumArtist(let albumID): found = await RouteLookup.albumArtist(ofAlbum: albumID)
+            case .artist(let id): found = await RouteLookup.artist(id: id)
+            }
+            if let found {
                 artist = found
             } else {
                 failed = true
@@ -265,6 +293,18 @@ private enum RouteLookup {
     static func albumDetail(id: String) async -> AlbumWithSongsID3? {
         if let cached = await LibraryCacheDatabase.shared.cachedAlbumSongs(albumId: id) { return cached }
         return try? await SubsonicClient.shared.getAlbum(id: id)
+    }
+
+    /// Cached first, like `albumDetail` — works offline too, and is instant — then the server.
+    static func artist(id artistID: String) async -> ArtistID3? {
+        if let cached = await LibraryCacheDatabase.shared.cachedAllArtists()?.first(where: { $0.id.raw == artistID }) {
+            return cached
+        }
+        guard let found = try? await SubsonicClient.shared.getArtist(id: artistID) else { return nil }
+        return ArtistID3(
+            id: found.id, name: found.name, coverArt: found.coverArt,
+            albumCount: found.albumCount, starred: found.starred, userRating: found.userRating
+        )
     }
 
     static func albumArtist(ofAlbum albumID: String) async -> ArtistID3? {

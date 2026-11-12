@@ -28,7 +28,7 @@ struct PlayerControls: View {
                 }
             controlsRow
                 .padding(.horizontal, NowPlayingLayout.cardPaddings)
-                .padding(.bottom, 10)
+                .padding(.bottom, 16)
             Spacer(minLength: 0)
                 .frame(minHeight: isCompact ? restGap : 0, maxHeight: isCompact ? restGap : .infinity)
             PlayerBottomRow(panel: $panel)

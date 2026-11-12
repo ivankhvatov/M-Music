@@ -347,7 +347,8 @@ struct ArtistAlbumsView: View {
     private func albumCarousel(title: LocalizedStringKey, albums: [AlbumID3]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title)
-                .font(.system(size: 20, weight: .bold))
+                .font(.title3)
+                .fontWeight(.semibold)
                 .padding(.horizontal, 16)
 
             ScrollView(.horizontal, showsIndicators: false) {

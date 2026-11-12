@@ -652,6 +652,61 @@ final class PlayerManager: ObservableObject {
         persistState()
     }
 
+    /// Follows a song being removed from a playlist: takes that instance of it — repeat
+    /// `occurrence` of `songId`, see `Child.occurrence` — out of the queue, and renumbers the later
+    /// repeats of it so the playing entry still matches its row. If it's the playing instance that
+    /// went, playback skips on to the song after it, as `next()` would. Only a queue that was
+    /// started from this playlist is numbered by it.
+    func playlistSongRemoved(songId: FlexibleID, occurrence: Int, fromPlaylist playlistId: String) {
+        guard queueOrigin == .playlist(playlistId), !awaitingFullQueue else { return }
+
+        func isRemoved(_ track: Child) -> Bool {
+            track.id == songId && track.occurrence == occurrence
+        }
+        func remaining(_ tracks: [Child]) -> [Child] {
+            tracks.compactMap { track in
+                guard track.id == songId, let number = track.occurrence else { return track }
+                if number == occurrence { return nil }
+                var track = track
+                if number > occurrence { track.occurrence = number - 1 }
+                return track
+            }
+        }
+
+        let updated = remaining(queue)
+        guard updated != queue else { return }
+        unshuffledQueue = remaining(unshuffledQueue)
+
+        guard let oldIndex = currentIndex, queue.indices.contains(oldIndex) else {
+            queue = updated
+            persistState()
+            return
+        }
+        let removedCurrent = isRemoved(queue[oldIndex])
+        // Where the current track — or, if it's the one that went, the song after it — now is.
+        let newIndex = oldIndex - queue[..<oldIndex].filter(isRemoved).count
+        queue = updated
+
+        if !removedCurrent {
+            currentIndex = newIndex
+            refreshNextItem()
+            persistState()
+        } else if updated.indices.contains(newIndex) {
+            currentIndex = newIndex
+            clearGaplessPreload()
+            loadCurrentItem(autoplay: true)
+            persistState()
+        } else if repeatMode == .all, !updated.isEmpty {
+            currentIndex = 0
+            clearGaplessPreload()
+            loadCurrentItem(autoplay: true)
+            persistState()
+        } else {
+            finishQueue()
+        }
+        persistShuffle()
+    }
+
     // MARK: - Shuffle and repeat
 
     /// Shuffles the up-next part of the queue — the tracks after the current one, which plays on —
@@ -837,7 +892,9 @@ final class PlayerManager: ObservableObject {
         persistState()
     }
 
-    private func pause() {
+    /// Pauses playback; the sleep timer's end too (`SleepTimer`).
+    func pause() {
+        SleepTimer.shared.cancelWaitingForSongEnd()
         guard hasLoadedItem, isPlaying else { return }
         // Where the song really is, not where it was at the last update: a pause is where it's
         // picked up from — the lyrics' dots too — including after a relaunch.
@@ -1044,6 +1101,8 @@ final class PlayerManager: ObservableObject {
             updateNowPlayingPlaybackState()
             return
         }
+        // A sleep timer that's waited for this song to end: the next one is lined up, but not played.
+        let stopsAfterThisSong = SleepTimer.shared.consumeSongEnd()
         guard currentIndex != nil else { return }
         nextItemRefreshTask?.cancel()
         finishScrobbleTracking()
@@ -1079,11 +1138,16 @@ final class PlayerManager: ObservableObject {
             updateArtworkURL()
             updateNowPlayingInfo()
             prepareNextItem()
+            if stopsAfterThisSong {
+                // The engine has already begun the next song; take it back to its start, paused.
+                engine.pause()
+                engine.seek(to: 0)
+            }
             updateNowPlayingPlaybackState()
             persistState()
         } else {
             clearGaplessPreload()
-            loadCurrentItem(autoplay: true)
+            loadCurrentItem(autoplay: !stopsAfterThisSong)
         }
     }
 
@@ -1664,7 +1728,8 @@ final class PlayerManager: ObservableObject {
     }
 
     /// Everything about the current session except the queue itself: small enough (one track) to
-    /// read synchronously at launch and rewrite every few seconds.
+    /// read synchronously at launch and rewrite every few seconds — as a file, see
+    /// `PlayerSnapshotStore`.
     private struct PersistedSnapshot: Codable {
         let track: Child
         let index: Int
@@ -1674,8 +1739,18 @@ final class PlayerManager: ObservableObject {
         let queueOrigin: QueueOrigin?
     }
 
+    /// Where the snapshot was kept before `PlayerSnapshotStore`; only read to migrate.
     private static let snapshotKey = "PlayerManager.snapshot"
     private static let legacyPersistenceKey = "PlayerManager.state"
+
+    /// Takes the old `UserDefaults` copies of the saved state out — only the ones that are there,
+    /// since even removing a key that isn't announces a change to every `@AppStorage` view.
+    private static func removeLegacyDefaults() {
+        let defaults = UserDefaults.standard
+        for key in [snapshotKey, legacyPersistenceKey] where defaults.object(forKey: key) != nil {
+            defaults.removeObject(forKey: key)
+        }
+    }
 
     private func persistState() {
         // Radio leaves the last real queue on disk untouched, so it's restored next launch.
@@ -1683,8 +1758,8 @@ final class PlayerManager: ObservableObject {
         // See `awaitingFullQueue`.
         guard !awaitingFullQueue else { return }
         guard let currentIndex, queue.indices.contains(currentIndex) else {
-            UserDefaults.standard.removeObject(forKey: Self.snapshotKey)
-            UserDefaults.standard.removeObject(forKey: Self.legacyPersistenceKey)
+            PlayerSnapshotStore.clear()
+            Self.removeLegacyDefaults()
             persistedQueueVersion = queueVersion
             Task(priority: .utility) { await QueueStore.shared.clear() }
             return
@@ -1694,7 +1769,7 @@ final class PlayerManager: ObservableObject {
             isPlaylistQueue: isPlaylistQueue, queueOrigin: queueOrigin
         )
         if let data = try? JSONEncoder().encode(snapshot) {
-            UserDefaults.standard.set(data, forKey: Self.snapshotKey)
+            PlayerSnapshotStore.save(data)
         }
         if queueVersion != persistedQueueVersion {
             persistedQueueVersion = queueVersion
@@ -1714,8 +1789,14 @@ final class PlayerManager: ObservableObject {
         let defaults = UserDefaults.standard
         repeatMode = RepeatMode(rawValue: defaults.integer(forKey: Self.repeatModeKey)) ?? .off
         isShuffled = defaults.bool(forKey: Self.shuffleKey)
-        if let data = defaults.data(forKey: Self.snapshotKey),
+        let fileData = PlayerSnapshotStore.load()
+        // A snapshot from before it was a file is moved over, once.
+        if let data = fileData ?? defaults.data(forKey: Self.snapshotKey),
            let snapshot = try? JSONDecoder().decode(PersistedSnapshot.self, from: data) {
+            if fileData == nil {
+                PlayerSnapshotStore.save(data)
+                Self.removeLegacyDefaults()
+            }
             isApplyingRestoredQueue = true
             queue = [snapshot.track]
             isApplyingRestoredQueue = false
@@ -1745,7 +1826,7 @@ final class PlayerManager: ObservableObject {
         currentTime = state.currentTime
         duration = TimeInterval(state.queue[state.currentIndex].duration ?? 0)
         updateArtworkURL()
-        defaults.removeObject(forKey: Self.legacyPersistenceKey)
+        Self.removeLegacyDefaults()
         persistState()
     }
 

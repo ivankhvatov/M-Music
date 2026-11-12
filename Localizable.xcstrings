@@ -1,8 +1,12 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "-%@" : {},
-    "%lld" : {},
+    "-%@" : {
+
+    },
+    "%lld" : {
+
+    },
     "%lld dB" : {
       "localizations" : {
         "de" : {
@@ -265,7 +269,9 @@
         }
       }
     },
-    "%lld%%" : {},
+    "%lld%%" : {
+
+    },
     "1 day" : {
       "localizations" : {
         "de" : {
@@ -602,6 +608,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Регулирует громкость воспроизведения, чтобы треки и альбомы звучали одинаково громко, используя теги ReplayGain из вашей медиатеки."
+          }
+        }
+      }
+    },
+    "After this song" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nach diesem Song"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "После этой песни"
           }
         }
       }
@@ -1062,6 +1084,38 @@
         }
       }
     },
+    "Couldn't delete the playlist" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Playlist konnte nicht gelöscht werden"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удалось удалить плейлист"
+          }
+        }
+      }
+    },
+    "Couldn't remove the song from the playlist" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Titel konnte nicht aus der Playlist entfernt werden"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удалось удалить песню из плейлиста"
+          }
+        }
+      }
+    },
     "Create" : {
       "localizations" : {
         "de" : {
@@ -1186,6 +1240,22 @@
         }
       }
     },
+    "Delete playlist" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Playlist löschen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удалить плейлист"
+          }
+        }
+      }
+    },
     "Delete the album from this device?" : {
       "localizations" : {
         "ru" : {
@@ -1208,6 +1278,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Удалить плейлист с этого устройства?"
+          }
+        }
+      }
+    },
+    "Delete the playlist?" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Playlist löschen?"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удалить плейлист?"
           }
         }
       }
@@ -1476,6 +1562,22 @@
         }
       }
     },
+    "Finish current song" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktuellen Song beenden"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Завершить текущую песню"
+          }
+        }
+      }
+    },
     "Format" : {
       "localizations" : {
         "de" : {
@@ -1590,6 +1692,9 @@
         }
       }
     },
+    "Hello, World!" : {
+
+    },
     "Home" : {
       "localizations" : {
         "de" : {
@@ -1622,18 +1727,18 @@
         }
       }
     },
-    "Loading…" : {
+    "hours" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Wird geladen …"
+            "value" : "Std."
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Загрузка…"
+            "value" : "ч"
           }
         }
       }
@@ -1660,6 +1765,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Инструменталы"
+          }
+        }
+      }
+    },
+    "It will be deleted from your server for good." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sie wird endgültig von deinem Server gelöscht."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Он будет безвозвратно удалён с вашего сервера."
           }
         }
       }
@@ -1738,7 +1859,9 @@
         }
       }
     },
-    "LIVE" : {},
+    "LIVE" : {
+
+    },
     "Live albums" : {
       "localizations" : {
         "ru" : {
@@ -1755,6 +1878,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Радиостанция"
+          }
+        }
+      }
+    },
+    "Loading…" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wird geladen …"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Загрузка…"
           }
         }
       }
@@ -1803,6 +1942,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Текст песни недоступен"
+          }
+        }
+      }
+    },
+    "min" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Min."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "мин"
           }
         }
       }
@@ -1935,6 +2090,22 @@
         }
       }
     },
+    "New Playlist %lld" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neue Playlist %lld"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Новый плейлист %lld"
+          }
+        }
+      }
+    },
     "No albums found." : {
       "localizations" : {
         "de" : {
@@ -2045,7 +2216,9 @@
         }
       }
     },
-    "Non-Stop" : {},
+    "Non-Stop" : {
+
+    },
     "Not Playing" : {
       "localizations" : {
         "de" : {
@@ -2463,8 +2636,42 @@
         }
       }
     },
-    "Repeat" : {},
-    "Repeat One" : {},
+    "Remove from playlist" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aus Playlist entfernen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удалить из плейлиста"
+          }
+        }
+      }
+    },
+    "Repeat" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Повтор"
+          }
+        }
+      }
+    },
+    "Repeat One" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Повтор одной песни"
+          }
+        }
+      }
+    },
     "ReplayGain" : {
       "localizations" : {
         "de" : {
@@ -2557,6 +2764,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Поиск"
+          }
+        }
+      }
+    },
+    "sec" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sek."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "с"
           }
         }
       }
@@ -2695,7 +2918,16 @@
         }
       }
     },
-    "Shuffle" : {},
+    "Shuffle" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Перемешать"
+          }
+        }
+      }
+    },
     "Singles" : {
       "localizations" : {
         "ru" : {
@@ -2760,6 +2992,70 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Сортировать по"
+          }
+        }
+      }
+    },
+    "Start" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Starten"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Старт"
+          }
+        }
+      }
+    },
+    "Stop" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stoppen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Остановить"
+          }
+        }
+      }
+    },
+    "Stop immediately" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sofort stoppen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Остановить сразу"
+          }
+        }
+      }
+    },
+    "Stop the timer?" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Timer stoppen?"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Остановить таймер?"
           }
         }
       }
@@ -3082,6 +3378,22 @@
         }
       }
     },
+    "Upon completion" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nach Ablauf"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "По окончании"
+          }
+        }
+      }
+    },
     "Username" : {
       "localizations" : {
         "de" : {
@@ -3152,22 +3464,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Год"
-          }
-        }
-      }
-    },
-    "New Playlist %lld" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Neue Playlist %lld"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Новый плейлист %lld"
           }
         }
       }
