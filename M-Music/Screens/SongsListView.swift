@@ -475,7 +475,7 @@ private struct SongListRow: View {
 
     var body: some View {
         Button(action: onPlay) {
-            SongRow(track: track, rowArtworkSize: rowArtworkSize, displayScale: displayScale)
+            SongRow(track: track, rowArtworkSize: rowArtworkSize, displayScale: displayScale, showsGoToActions: true)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

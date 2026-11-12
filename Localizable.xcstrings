@@ -1,8 +1,12 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "-%@" : {},
-    "%lld" : {},
+    "-%@" : {
+
+    },
+    "%lld" : {
+
+    },
     "%lld dB" : {
       "localizations" : {
         "de" : {
@@ -265,7 +269,9 @@
         }
       }
     },
-    "%lld%%" : {},
+    "%lld%%" : {
+
+    },
     "1 day" : {
       "localizations" : {
         "de" : {
@@ -1062,22 +1068,6 @@
         }
       }
     },
-    "Couldn't remove the song from the playlist" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Der Titel konnte nicht aus der Playlist entfernt werden"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Не удалось удалить песню из плейлиста"
-          }
-        }
-      }
-    },
     "Couldn't delete the playlist" : {
       "localizations" : {
         "de" : {
@@ -1090,6 +1080,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Не удалось удалить плейлист"
+          }
+        }
+      }
+    },
+    "Couldn't remove the song from the playlist" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Titel konnte nicht aus der Playlist entfernt werden"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удалось удалить песню из плейлиста"
           }
         }
       }
@@ -1654,6 +1660,9 @@
         }
       }
     },
+    "Hello, World!" : {
+
+    },
     "Home" : {
       "localizations" : {
         "de" : {
@@ -1686,18 +1695,18 @@
         }
       }
     },
-    "Loading…" : {
+    "hours" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Wird geladen …"
+            "value" : "Std."
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Загрузка…"
+            "value" : "ч"
           }
         }
       }
@@ -1818,7 +1827,9 @@
         }
       }
     },
-    "LIVE" : {},
+    "LIVE" : {
+
+    },
     "Live albums" : {
       "localizations" : {
         "ru" : {
@@ -1835,6 +1846,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Радиостанция"
+          }
+        }
+      }
+    },
+    "Loading…" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wird geladen …"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Загрузка…"
           }
         }
       }
@@ -1883,6 +1910,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Текст песни недоступен"
+          }
+        }
+      }
+    },
+    "min" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Min."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "мин"
           }
         }
       }
@@ -2015,6 +2058,22 @@
         }
       }
     },
+    "New Playlist %lld" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neue Playlist %lld"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Новый плейлист %lld"
+          }
+        }
+      }
+    },
     "No albums found." : {
       "localizations" : {
         "de" : {
@@ -2125,7 +2184,9 @@
         }
       }
     },
-    "Non-Stop" : {},
+    "Non-Stop" : {
+
+    },
     "Not Playing" : {
       "localizations" : {
         "de" : {
@@ -2559,8 +2620,12 @@
         }
       }
     },
-    "Repeat" : {},
-    "Repeat One" : {},
+    "Repeat" : {
+
+    },
+    "Repeat One" : {
+
+    },
     "ReplayGain" : {
       "localizations" : {
         "de" : {
@@ -2653,6 +2718,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Поиск"
+          }
+        }
+      }
+    },
+    "sec" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sek."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "с"
           }
         }
       }
@@ -2791,7 +2872,9 @@
         }
       }
     },
-    "Shuffle" : {},
+    "Shuffle" : {
+
+    },
     "Singles" : {
       "localizations" : {
         "ru" : {
@@ -3296,70 +3379,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Год"
-          }
-        }
-      }
-    },
-    "New Playlist %lld" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Neue Playlist %lld"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Новый плейлист %lld"
-          }
-        }
-      }
-    },
-    "hours" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Std."
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ч"
-          }
-        }
-      }
-    },
-    "min" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Min."
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "мин"
-          }
-        }
-      }
-    },
-    "sec" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sek."
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "с"
           }
         }
       }
