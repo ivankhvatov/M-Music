@@ -36,6 +36,9 @@ struct PlaylistView: View {
     /// `PlaylistCardView`, which requests this same URL) appear immediately with no placeholder
     /// flash.
     @State private var artworkURL: URL?
+    /// Width over height of the artwork that's showing, to size the frame the rounded corners and
+    /// outline are drawn on — see `artworkFrameSize`. Square until an image has loaded.
+    @State private var artworkAspect: CGFloat = 1
 
     @State private var showingRemoveDownloadConfirmation = false
     @State private var showingDeleteConfirmation = false
@@ -480,10 +483,22 @@ struct PlaylistView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// The artwork's own bounds, fitted into a 270pt square: the shorter side shrinks to match its
+    /// aspect ratio, whichever side that is, so the rounded corners and outline hug the image. A
+    /// flexible `.frame(maxWidth:maxHeight:)` only did that for a wide image — handed no height to
+    /// fit in, a tall one just overflowed it.
+    private var artworkFrameSize: CGSize {
+        let side: CGFloat = 270
+        return artworkAspect >= 1
+            ? CGSize(width: side, height: side / artworkAspect)
+            : CGSize(width: side * artworkAspect, height: side)
+    }
+
     func playlistArtwork() -> some View {
         // Same URL PlaylistCardView requests (original size, no `size` param), so this reuses the
         // image straight from ImageCache instead of triggering a second fetch.
         CachedAsyncImage(url: artworkURL, fallbackMaxPixelSize: ImageCache.cardMaxPixelSize, onLoad: { uiImage in
+            if uiImage.size.width > 0, uiImage.size.height > 0 { artworkAspect = uiImage.size.width / uiImage.size.height }
             Task.detached(priority: .userInitiated) {
                 guard let color = uiImage.averageColor() else { return }
                 await MainActor.run {
@@ -499,7 +514,7 @@ struct PlaylistView: View {
             Rectangle()
                 .fill(Color.secondary.opacity(0.2))
         }
-        .frame(maxWidth: 270, maxHeight: 270)
+        .frame(width: artworkFrameSize.width, height: artworkFrameSize.height)
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
