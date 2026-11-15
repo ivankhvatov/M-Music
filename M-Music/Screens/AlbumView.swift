@@ -501,7 +501,7 @@ struct AlbumView: View {
     private func shuffle() {
         let queue = playableSongs
         guard !queue.isEmpty else { return }
-        player.play(queue: queue.shuffled(), startAt: 0, sourceName: album.name, origin: .album(album.id.raw))
+        player.playShuffled(queue: queue, sourceName: album.name, origin: .album(album.id.raw))
     }
 
     private var trackCountAndDuration: String {

@@ -215,9 +215,9 @@ struct SongsListView: View {
     }
 
     private func shuffleAll() {
-        let queue = playableSongs.shuffled()
+        let queue = playableSongs
         guard !queue.isEmpty else { return }
-        player.play(queue: queue, startAt: 0, origin: .songs)
+        player.playShuffled(queue: queue, origin: .songs)
     }
 
     /// Same look as `ArtistAlbumsView.actionButtons`: two capsules sharing the row's width. They

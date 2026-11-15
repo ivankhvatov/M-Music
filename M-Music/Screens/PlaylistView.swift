@@ -425,7 +425,7 @@ struct PlaylistView: View {
     private func shuffle() {
         let queue = playableSongs
         guard !queue.isEmpty else { return }
-        player.play(queue: queue.shuffled(), startAt: 0, fromPlaylist: true, sourceName: playlist.name, origin: .playlist(playlist.id.raw))
+        player.playShuffled(queue: queue, fromPlaylist: true, sourceName: playlist.name, origin: .playlist(playlist.id.raw))
     }
 
     private var trackCountAndDuration: String {

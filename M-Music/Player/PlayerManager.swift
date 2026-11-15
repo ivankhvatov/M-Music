@@ -90,6 +90,10 @@ final class PlayerManager: ObservableObject {
     @Published private(set) var repeatMode: RepeatMode = .off
     /// The queue as it was when it was shuffled, to put it back in order again.
     private var unshuffledQueue: [Child] = []
+    /// Whether the shuffle was started by a shuffle button on a screen (`playShuffled`) rather than
+    /// switched on in the queue: then it belongs to that queue alone, and the next queue that's
+    /// started plays in order, instead of shuffled for as long as the queue's own button is on.
+    private var shuffleBelongsToQueue = false
 
     /// The album or playlist the current queue was started from, when the caller said — shown as
     /// "From …" above the queue list. Not persisted, so it's `nil` again after a relaunch.
@@ -507,6 +511,13 @@ final class PlayerManager: ObservableObject {
     ) {
         guard newQueue.indices.contains(index) else { return }
         currentRadioStation = nil
+        // A shuffle that was this queue's alone ends with it.
+        if isShuffled, shuffleBelongsToQueue {
+            isShuffled = false
+            unshuffledQueue = []
+            shuffleBelongsToQueue = false
+            persistShuffle()
+        }
         // With shuffle on, the new queue plays shuffled too: the track it starts from first, the
         // rest of it in a random order.
         if isShuffled {
@@ -516,6 +527,30 @@ final class PlayerManager: ObservableObject {
         } else {
             queue = newQueue
         }
+        beginQueue(at: index, fromPlaylist: fromPlaylist, sourceName: sourceName, origin: origin)
+    }
+
+    /// What a screen's shuffle button does: plays `newQueue` in a random order from a random song,
+    /// with the queue's shuffle button on. Switching that off puts the songs in the order `newQueue`
+    /// was given in, from where the song that's playing then is in it.
+    func playShuffled(
+        queue newQueue: [Child],
+        fromPlaylist: Bool = false,
+        sourceName: String? = nil,
+        origin: QueueOrigin = .other
+    ) {
+        guard !newQueue.isEmpty else { return }
+        currentRadioStation = nil
+        unshuffledQueue = newQueue
+        isShuffled = true
+        shuffleBelongsToQueue = true
+        queue = newQueue.shuffled()
+        persistShuffle()
+        beginQueue(at: 0, fromPlaylist: fromPlaylist, sourceName: sourceName, origin: origin)
+    }
+
+    /// Starts playing the track at `index` of the `queue` that was just set.
+    private func beginQueue(at index: Int, fromPlaylist: Bool, sourceName: String?, origin: QueueOrigin) {
         isPlaylistQueue = fromPlaylist
         queueSourceName = sourceName
         queueOrigin = origin
@@ -738,6 +773,7 @@ final class PlayerManager: ObservableObject {
     private func shuffleQueue() {
         unshuffledQueue = queue
         isShuffled = true
+        shuffleBelongsToQueue = false
         guard let currentIndex else { return }
         let shuffled = Self.shuffledUpcoming(of: queue, after: currentIndex)
         guard shuffled != queue else { return }
@@ -753,6 +789,7 @@ final class PlayerManager: ObservableObject {
         let original = unshuffledQueue
         unshuffledQueue = []
         isShuffled = false
+        shuffleBelongsToQueue = false
         guard let currentIndex, !original.isEmpty else { return }
         // Each track of the queue takes the first place that's left for its id in the old order —
         // a track in the queue twice has two.
@@ -791,6 +828,7 @@ final class PlayerManager: ObservableObject {
     }
 
     private static let shuffleKey = "PlayerManager.isShuffled"
+    private static let shuffleBelongsToQueueKey = "PlayerManager.shuffleBelongsToQueue"
     private static let repeatModeKey = "PlayerManager.repeatMode"
     /// The queue as it was before shuffling, for putting it back after a relaunch.
     private static let unshuffledQueueStore = QueueStore(
@@ -799,6 +837,7 @@ final class PlayerManager: ObservableObject {
 
     private func persistShuffle() {
         UserDefaults.standard.set(isShuffled, forKey: Self.shuffleKey)
+        UserDefaults.standard.set(shuffleBelongsToQueue, forKey: Self.shuffleBelongsToQueueKey)
         let original = unshuffledQueue
         let shuffled = isShuffled
         Task(priority: .utility) {
@@ -1789,6 +1828,7 @@ final class PlayerManager: ObservableObject {
         let defaults = UserDefaults.standard
         repeatMode = RepeatMode(rawValue: defaults.integer(forKey: Self.repeatModeKey)) ?? .off
         isShuffled = defaults.bool(forKey: Self.shuffleKey)
+        shuffleBelongsToQueue = defaults.bool(forKey: Self.shuffleBelongsToQueueKey)
         let fileData = PlayerSnapshotStore.load()
         // A snapshot from before it was a file is moved over, once.
         if let data = fileData ?? defaults.data(forKey: Self.snapshotKey),
