@@ -551,6 +551,9 @@ struct SongRow: View {
     var showsGoToActions = false
     /// Adds "Add to playlist" to the song menu, between "Add to queue" and the "Go to" actions.
     var showsAddToPlaylist = false
+    /// Whether the download status and song menu are at the trailing edge. Off for a list that
+    /// brings its own trailing control, like the system's reorder handle of an editing `List`.
+    var showsTrailingActions = true
 
     private let client = SubsonicClient.shared
     @ObservedObject private var downloads = DownloadStore.shared
@@ -574,7 +577,8 @@ struct SongRow: View {
         playlistId: String? = nil,
         onRemoveFromPlaylist: (() -> Void)? = nil,
         showsGoToActions: Bool = false,
-        showsAddToPlaylist: Bool = false
+        showsAddToPlaylist: Bool = false,
+        showsTrailingActions: Bool = true
     ) {
         self.track = track
         self.rowArtworkSize = rowArtworkSize
@@ -588,6 +592,7 @@ struct SongRow: View {
         self.onRemoveFromPlaylist = onRemoveFromPlaylist
         self.showsGoToActions = showsGoToActions
         self.showsAddToPlaylist = showsAddToPlaylist
+        self.showsTrailingActions = showsTrailingActions
         _artworkURL = State(initialValue: ArtworkRequest.songRow(ArtworkRequest.artworkId(of: track), scale: displayScale).url)
     }
 
@@ -637,7 +642,7 @@ struct SongRow: View {
                             priorityName: PanGesture.reorderHandleTag
                         )
                     )
-            } else {
+            } else if showsTrailingActions {
                 SongTrailingActions(
                     track: track, showsGoToActions: showsGoToActions, showsAddToPlaylist: showsAddToPlaylist,
                     onRemoveFromPlaylist: onRemoveFromPlaylist

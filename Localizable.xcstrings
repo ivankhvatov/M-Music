@@ -834,6 +834,22 @@
         }
       }
     },
+    "Artwork uploads are turned off on your server." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Hochladen von Covern ist auf deinem Server deaktiviert."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Загрузка обложек отключена на вашем сервере."
+          }
+        }
+      }
+    },
     "Ascending" : {
       "localizations" : {
         "de" : {
@@ -924,6 +940,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Сотовая связь"
+          }
+        }
+      }
+    },
+    "Choose an artwork" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cover auswählen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Выбрать обложку"
           }
         }
       }
@@ -1116,6 +1148,22 @@
         }
       }
     },
+    "Couldn't save the playlist" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Playlist konnte nicht gesichert werden"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удалось сохранить плейлист"
+          }
+        }
+      }
+    },
     "Create" : {
       "localizations" : {
         "de" : {
@@ -1262,6 +1310,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Удалить альбом с этого устройства?"
+          }
+        }
+      }
+    },
+    "Delete the artwork" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cover löschen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удалить обложку"
+          }
+        }
+      }
+    },
+    "Delete the artwork?" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cover löschen?"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удалить обложку?"
           }
         }
       }
@@ -1450,6 +1530,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Загрузка песен перед воспроизведением для бесшовного перехода при транскодировании или слабом соединении. Песни, не воспроизводимые в течение указанного времени, удаляются автоматически."
+          }
+        }
+      }
+    },
+    "Edit Playlist" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bearbeiten"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Изменить"
           }
         }
       }
@@ -2704,6 +2800,22 @@
         }
       }
     },
+    "Save" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sichern"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сохранить"
+          }
+        }
+      }
+    },
     "Saves a song's lyrics along with it, and shows them from the device instead of fetching them from the server. Applies only to new downloads — songs already saved to this device keep fetching their lyrics from the server. Deleting a download deletes its lyrics too." : {
       "localizations" : {
         "de" : {
@@ -3066,6 +3178,54 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Стриминг"
+          }
+        }
+      }
+    },
+    "The image couldn't be read." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Bild konnte nicht gelesen werden."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удалось прочитать изображение."
+          }
+        }
+      }
+    },
+    "The playlist goes back to the artwork Navidrome makes from its songs." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Playlist verwendet wieder das Cover, das Navidrome aus ihren Songs erstellt."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "У плейлиста снова будет обложка, которую Navidrome составляет из его песен."
+          }
+        }
+      }
+    },
+    "The server refused the artwork (HTTP status %lld)." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Server hat das Cover abgelehnt (HTTP-Status %lld)."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сервер отклонил обложку (статус HTTP %lld)."
           }
         }
       }
@@ -3464,6 +3624,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Год"
+          }
+        }
+      }
+    },
+    "Your server's Navidrome is too old to change a playlist's artwork." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Navidrome deines Servers ist zu alt, um das Cover einer Playlist zu ändern."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Версия Navidrome на вашем сервере слишком старая, чтобы менять обложку плейлиста."
           }
         }
       }

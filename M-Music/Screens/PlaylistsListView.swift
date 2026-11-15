@@ -154,6 +154,13 @@ struct PlaylistsListView: View {
             Text(createError ?? "")
         }
         .task { await refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { notification in
+            guard let changed = notification.changedPlaylist,
+                  let index = playlists.firstIndex(where: { $0.id == changed.id }),
+                  playlists[index] != changed else { return }
+            playlists[index] = changed
+            updateDisplayedPlaylists()
+        }
         .onChange(of: sortFieldStorage) { updateDisplayedPlaylists() }
         .onChange(of: sortOrderStorage) { updateDisplayedPlaylists() }
         .onChange(of: searchText) { updateDisplayedPlaylists() }
@@ -435,6 +442,7 @@ struct PlaylistRow: View {
 
     private let rowArtworkSize: CGFloat = ImageCache.RowArtwork.playlist
     private let artworkCornerRadius: CGFloat = 4
+    @Environment(\.displayScale) private var environmentDisplayScale
 
     @ObservedObject private var downloads = DownloadStore.shared
     @ObservedObject private var libraryCacheStatus = LibraryCacheStatus.shared
@@ -473,6 +481,10 @@ struct PlaylistRow: View {
             // And decoded (with the first songs' thumbnails), once the row has stayed on screen a
             // moment, so the playlist's own screen opens with its images — see `ImageWarmer`.
             await ImageWarmer.shared.warmPlaylist(id: playlist.id.raw, artworkId: artworkId)
+        }
+        // See `PlaylistCardView`: `artworkURL` was resolved once, for the artwork it had then.
+        .onChange(of: playlist.coverArt) {
+            artworkURL = ArtworkRequest.playlistRow(playlist.coverArt ?? playlist.id.raw, scale: environmentDisplayScale).url
         }
     }
 

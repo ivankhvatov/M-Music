@@ -40,6 +40,7 @@ struct PlaylistView: View {
     @State private var showingRemoveDownloadConfirmation = false
     @State private var showingDeleteConfirmation = false
     @State private var showingAddToPlaylist = false
+    @State private var showingEditSheet = false
     @State private var isRefreshing = false
     @State private var isDeleting = false
     /// What went wrong adding the playlist's songs to another playlist, or deleting this one.
@@ -92,6 +93,11 @@ struct PlaylistView: View {
                 addToPlaylist(songsToAdd, target)
             }
         }
+        .sheet(isPresented: $showingEditSheet) {
+            EditPlaylistSheet(playlist: displayedPlaylist, songs: songs, artworkURL: artworkURL) { fresh in
+                Task { await apply(fresh) }
+            }
+        }
         .alert("Couldn't add the songs to the playlist", isPresented: Binding(
             get: { addToPlaylistError != nil },
             set: { if !$0 { addToPlaylistError = nil } }
@@ -118,6 +124,10 @@ struct PlaylistView: View {
         }
         .task {
             await loadSongs()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { notification in
+            guard let changed = notification.changedPlaylist else { return }
+            Task { await playlistChanged(changed) }
         }
     }
 
@@ -325,7 +335,7 @@ struct PlaylistView: View {
         // By `instanceID`, not `id`: with a song repeated in the playlist, the first repeat's
         // position would be found for a tap on any of them.
         guard let startAt = queue.firstIndex(where: { $0.instanceID == visible[index].instanceID }) else { return }
-        player.play(queue: queue, startAt: startAt, fromPlaylist: true, sourceName: playlist.name, origin: .playlist(playlist.id.raw))
+        player.play(queue: queue, startAt: startAt, fromPlaylist: true, sourceName: displayedPlaylist.name, origin: .playlist(playlist.id.raw))
     }
 
     /// Takes `song` — this row's instance of it, if the playlist holds it more than once — out of
@@ -372,11 +382,36 @@ struct PlaylistView: View {
         defer { isRefreshing = false }
 
         guard let fresh = try? await PlaylistEditor.refresh(playlist) else { return }
-        let freshSongs = fresh.entry ?? []
+        await apply(fresh)
+    }
 
+    /// Shows `fresh`, the playlist as the server has it now — its songs, name and artwork — in
+    /// place of what this screen holds, and purges the images of the old copy from the cache.
+    private func apply(_ fresh: PlaylistWithSongs) async {
+        let freshSongs = fresh.entry ?? []
+        await purgeArtwork(replacedBy: PlaylistSummary(fresh), songs: songs + freshSongs)
+
+        songs = freshSongs
+        isLoadingSongs = false
+        loadError = nil
+        refreshedPlaylist = PlaylistSummary(fresh)
+        removedSongCount = 0
+        removedDuration = 0
+        changedAfterRemoval = nil
+        // A newly signed URL is what makes `CachedAsyncImage` reload; its stable cache key was just
+        // purged, so this refetches the header artwork from the server.
+        artworkURL = try? client.coverArtURL(forId: fresh.coverArt ?? playlist.coverArt ?? playlist.id.raw)
+        await DownloadedArtwork.shared.requestSync()
+    }
+
+    /// Drops the cached images of the playlist's old artwork and of `songs`, so what is shown next
+    /// comes from the server.
+    private func purgeArtwork(replacedBy fresh: PlaylistSummary, songs: [Child]) async {
         // Ids from both the old and new copy, in case a cover changed server-side.
-        var artworkIds: Set<String> = [playlist.coverArt ?? playlist.id.raw, fresh.coverArt ?? playlist.id.raw]
-        for song in songs + freshSongs { artworkIds.insert(ArtworkRequest.artworkId(of: song)) }
+        var artworkIds: Set<String> = [
+            displayedPlaylist.coverArt ?? playlist.id.raw, fresh.coverArt ?? playlist.id.raw,
+        ]
+        for song in songs { artworkIds.insert(ArtworkRequest.artworkId(of: song)) }
         // Full size, plus the row-thumbnail sizes song rows and playlist rows request.
         let pixelSizes: [Int?] = [
             nil,
@@ -389,22 +424,20 @@ struct PlaylistView: View {
         await Task.detached(priority: .userInitiated) {
             for url in artworkURLs { ImageCache.shared.remove(url) }
         }.value
+    }
 
-        songs = freshSongs
-        isLoadingSongs = false
-        loadError = nil
-        refreshedPlaylist = PlaylistSummary(
-            id: fresh.id, name: fresh.name, comment: fresh.comment, owner: fresh.owner,
-            public: fresh.public, songCount: fresh.songCount, duration: fresh.duration,
-            created: fresh.created, changed: fresh.changed, coverArt: fresh.coverArt
-        )
+    /// The playlist was read back from the server by something else — its own edit sheet, or this
+    /// same playlist's screen on another tab. Takes over its name, artwork and songs (the song list
+    /// is in the cache by now), so a screen that was left open doesn't show the old ones.
+    private func playlistChanged(_ changed: PlaylistSummary) async {
+        guard changed.id == playlist.id, changed != displayedPlaylist else { return }
+        await purgeArtwork(replacedBy: changed, songs: songs)
+        refreshedPlaylist = changed
         removedSongCount = 0
         removedDuration = 0
         changedAfterRemoval = nil
-        // A newly signed URL is what makes `CachedAsyncImage` reload; its stable cache key was just
-        // purged, so this refetches the header artwork from the server.
-        artworkURL = try? client.coverArtURL(forId: fresh.coverArt ?? playlist.coverArt ?? playlist.id.raw)
-        await DownloadedArtwork.shared.requestSync()
+        artworkURL = try? client.coverArtURL(forId: changed.coverArt ?? playlist.id.raw)
+        await loadSongs()
     }
 
     /// Deletes the playlist on the server, then leaves its screen.
@@ -425,11 +458,15 @@ struct PlaylistView: View {
     private func shuffle() {
         let queue = playableSongs
         guard !queue.isEmpty else { return }
-        player.playShuffled(queue: queue, fromPlaylist: true, sourceName: playlist.name, origin: .playlist(playlist.id.raw))
+        player.playShuffled(queue: queue, fromPlaylist: true, sourceName: displayedPlaylist.name, origin: .playlist(playlist.id.raw))
     }
 
+    /// The playlist as last known: the server's copy from a refresh or an edit, else the one this
+    /// screen was opened with.
+    private var displayedPlaylist: PlaylistSummary { refreshedPlaylist ?? playlist }
+
     private var trackCountAndDuration: String {
-        let summary = refreshedPlaylist ?? playlist
+        let summary = displayedPlaylist
         let totalMinutes = max(0, summary.duration - removedDuration) / 60
         let songsText = String(localized: "\(max(0, summary.songCount - removedSongCount)) songs")
         let minutesText = String(localized: "\(totalMinutes) minutes")
@@ -521,7 +558,7 @@ struct PlaylistView: View {
             Spacer()
             VStack(alignment: .center, spacing: 6) {
                 playlistArtwork()
-                Text(playlist.name)
+                Text(displayedPlaylist.name)
                     .font(.system(size: 24, weight: .bold))
                     .multilineTextAlignment(.center)
                     .padding(.top, 15)
@@ -570,7 +607,9 @@ struct PlaylistView: View {
             }
             .disabled(songs.isEmpty)
 
-            Button {} label: {
+            Button {
+                showingEditSheet = true
+            } label: {
                 Image(systemName: "pencil")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(.primary)
@@ -578,6 +617,8 @@ struct PlaylistView: View {
                     .background(Color.gray.opacity(0.3))
                     .clipShape(Circle())
             }
+            // Edits go to the server, and the songs have to be there to be put in order.
+            .disabled(isLoadingSongs || !networkMonitor.isOnline)
         }
         .buttonStyle(.plain)
     }
