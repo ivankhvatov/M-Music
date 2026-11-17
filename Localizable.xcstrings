@@ -1960,6 +1960,12 @@
     },
     "Live albums" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live-Alben"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1970,6 +1976,12 @@
     },
     "Live Radio" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live-Radio"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
