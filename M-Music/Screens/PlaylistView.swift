@@ -472,8 +472,19 @@ struct PlaylistView: View {
         let summary = displayedPlaylist
         let totalMinutes = max(0, summary.duration - removedDuration) / 60
         let songsText = String(localized: "\(max(0, summary.songCount - removedSongCount)) songs")
-        let minutesText = String(localized: "\(totalMinutes) minutes")
-        return "\(songsText), \(minutesText)"
+        // Hours and minutes from an hour up, as in `AlbumView.trackCountAndDuration`.
+        let durationText: String
+        if totalMinutes >= 60 {
+            let hours = totalMinutes / 60
+            let remainingMinutes = totalMinutes % 60
+            let hoursText = String(localized: "\(hours) hours")
+            durationText = remainingMinutes == 0
+                ? hoursText
+                : "\(hoursText) \(String(localized: "\(remainingMinutes) minutes"))"
+        } else {
+            durationText = String(localized: "\(totalMinutes) minutes")
+        }
+        return "\(songsText), \(durationText)"
     }
 
     func playlistFooter() -> some View {
