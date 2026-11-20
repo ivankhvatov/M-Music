@@ -7,33 +7,6 @@
 
 import SwiftUI
 
-/// One match in the library search: an artist, an album, a playlist or a song.
-private enum SearchItem: Identifiable, Sendable {
-    case artist(ArtistID3)
-    case album(AlbumID3)
-    case playlist(PlaylistSummary)
-    case song(Child)
-
-    var id: String {
-        switch self {
-        case .artist(let artist): "artist-\(artist.id.raw)"
-        case .album(let album): "album-\(album.id.raw)"
-        case .playlist(let playlist): "playlist-\(playlist.id.raw)"
-        case .song(let song): "song-\(song.id.raw)"
-        }
-    }
-
-    /// Where the kind sorts among equally good matches.
-    var kindRank: Int {
-        switch self {
-        case .artist: 0
-        case .album: 1
-        case .playlist: 2
-        case .song: 3
-        }
-    }
-}
-
 /// A screen a result opens.
 private enum SearchRoute: Identifiable, Hashable {
     case artist(ArtistID3)
@@ -49,6 +22,28 @@ private enum SearchRoute: Identifiable, Hashable {
     }
 }
 
+/// What `SearchView` keeps about the results on screen without being re-rendered by it — see
+/// `LastSeenIndex`: the thumbnail of each row (for looking ahead and for `open`), and where each
+/// row is.
+@MainActor
+private final class SearchLookAhead {
+    private(set) var requests: [ArtworkRequest] = []
+    private let positions = RowPositions()
+    var lastIndex = 0
+
+    func update(_ outcome: SearchOutcome) {
+        requests = outcome.requests
+        positions.update(ids: outcome.items.map(\.id))
+        lastIndex = 0
+    }
+
+    func position(of id: String) -> Int? { positions.position(of: id) }
+
+    func request(ofID id: String) -> ArtworkRequest? {
+        position(of: id).flatMap { requests.indices.contains($0) ? requests[$0] : nil }
+    }
+}
+
 struct SearchView: View {
     @State var query = ""
     @AppStorage(SearchBarPosition.storageKey) private var searchBarPositionStorage = SearchBarPosition.top.stored
@@ -58,20 +53,22 @@ struct SearchView: View {
     @Environment(\.displayScale) private var displayScale
 
     private let client = SubsonicClient.shared
+    /// Not observed — see `SongsListView.player`.
     private let player = PlayerManager.shared
 
-    @State private var artists: [ArtistID3] = []
-    @State private var albums: [AlbumID3] = []
-    @State private var playlists: [PlaylistSummary] = []
-    @State private var songs: [Child] = []
+    /// The library and the search over it, off the main actor. A reference that is never read in
+    /// `body`: the library arriving must not re-render the results.
+    @State private var engine = SearchEngine()
     @State private var results: [SearchItem] = []
+    /// The query `results` is for, so "no results" isn't shown for a query still being searched.
+    @State private var settledQuery = ""
+    @State private var lookAhead = SearchLookAhead()
     /// The screen being opened, once it's ready to be.
     @State private var route: SearchRoute?
     @State private var isOpening = false
-    /// Which call of `show` is the newest.
+    /// The search in flight, and which one is the newest.
+    @State private var searchTask: Task<Void, Never>?
     @State private var applyGeneration = 0
-    /// Matches off the main actor — see `OffMainDeriver`.
-    @State private var deriver = OffMainDeriver()
 
     /// Rows are a little taller than the library lists': more room around the same artwork.
     private let rowMinHeight: CGFloat = 56
@@ -79,7 +76,11 @@ struct SearchView: View {
     private let rowArtworkSize: CGFloat = 56
     private let rowInsets = EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16)
     /// What a very broad query is cut down to.
-    private nonisolated static let resultLimit = 300
+    private static let resultLimit = 300
+    /// How long a burst of keystrokes is waited out before searching, and how long the matches of
+    /// a list arriving are (four of them tend to arrive together).
+    private static let typingDelay: Duration = .milliseconds(150)
+    private static let loadDelay: Duration = .milliseconds(50)
 
     private var searchBarPosition: SearchBarPosition {
         SearchBarPosition(stored: searchBarPositionStorage)
@@ -106,8 +107,8 @@ struct SearchView: View {
                     SettingsToolbarItem()
                 }
                 .task { await loadLibrary() }
-                // A burst of keystrokes coalesces into one pass (the delay is inside `recompute`).
-                .onChange(of: query) { recompute(debounced: true) }
+                .onAppResume { warmAround(lookAhead.lastIndex) }
+                .onChange(of: query) { search(after: Self.typingDelay) }
         }
         .environment(\.appTab, AppNavigation.searchTab)
         .environment(\.keepsSystemColorScheme, searchBarPosition == .bottom)
@@ -120,11 +121,17 @@ struct SearchView: View {
             ForEach(results) { item in
                 row(for: item)
                     .listRowInsets(rowInsets)
+                    .onAppear { warmAhead(after: item) }
             }
         }
         .listStyle(.plain)
+        // Background work holds off while the results are scrolled — see `ScrollActivity`.
+        .onScrollPhaseChange { _, phase in
+            ScrollActivity.shared.set(scrolling: phase != .idle)
+        }
+        .onDisappear { ScrollActivity.shared.set(scrolling: false) }
         .overlay {
-            if !trimmedQuery.isEmpty, results.isEmpty, !deriver.isPending {
+            if results.isEmpty, !trimmedQuery.isEmpty, settledQuery == trimmedQuery {
                 ContentUnavailableView.search(text: trimmedQuery)
             }
         }
@@ -189,17 +196,14 @@ struct SearchView: View {
         isOpening = true
         Task {
             // The header it opens with, and the row's own thumbnail it zooms out of.
+            let thumbnail = lookAhead.request(ofID: route.id)
             switch route {
             case .artist:
                 break
             case .album(let album):
-                await ImageWarmer.shared.prepare([
-                    .albumHeader(album.coverArt ?? album.id.raw), artworkRequest(for: .album(album))
-                ])
+                await ImageWarmer.shared.prepare([.albumHeader(album.coverArt ?? album.id.raw)] + [thumbnail].compactMap { $0 })
             case .playlist(let playlist):
-                await ImageWarmer.shared.prepare([
-                    .playlistHeader(playlist.coverArt ?? playlist.id.raw), artworkRequest(for: .playlist(playlist))
-                ])
+                await ImageWarmer.shared.prepare([.playlistHeader(playlist.coverArt ?? playlist.id.raw)] + [thumbnail].compactMap { $0 })
             }
             self.route = route
             isOpening = false
@@ -231,124 +235,100 @@ struct SearchView: View {
         player.play(queue: [song], startAt: 0, origin: .other)
     }
 
-    // MARK: - Matching
+    // MARK: - Searching
 
-    private struct Library: Sendable {
-        var artists: [ArtistID3]
-        var albums: [AlbumID3]
-        var playlists: [PlaylistSummary]
-        var songs: [Child]
-    }
-
-    private func recompute(debounced: Bool = false) {
-        let search = trimmedQuery
-        guard !search.isEmpty else {
-            deriver.cancel()
-            applyGeneration += 1
-            results = []
-            return
-        }
-        let library = Library(artists: artists, albums: albums, playlists: playlists, songs: songs)
-        deriver.run(delay: debounced ? .milliseconds(200) : nil, {
-            Self.matches(for: search, in: library)
-        }, apply: { matches in
-            show(matches)
-        })
-    }
-
-    /// Puts `matches` on screen once the thumbnails of the first rows are in memory — rows that
-    /// appear with placeholders and fill in as they load keep the screen busy, and a tap during that
-    /// opens the album without its zoom. Gives up waiting after a moment; a newer result replaces
-    /// this one meanwhile. Whatever is further down is warmed after it's shown.
-    private func show(_ matches: [SearchItem]) {
+    /// Searches the library for the query, after `delay` (a burst of keystrokes is coalesced into
+    /// the last one) — the newest search wins. The matching itself is `SearchEngine`'s, off the main
+    /// actor; this task only waits for it and then for the first rows' thumbnails.
+    private func search(after delay: Duration? = nil) {
+        searchTask?.cancel()
         applyGeneration += 1
         let generation = applyGeneration
-        let first = matches.prefix(ImageWarmer.gateLimit + 4).map(artworkRequest(for:))
-        let rest = matches.dropFirst(ImageWarmer.gateLimit + 4).prefix(ImageWarmer.scrollAheadCount).map(artworkRequest(for:))
-        Task {
-            await ImageWarmer.shared.prepare(first, timeout: .milliseconds(800))
-            // Not while an album is being opened: rebuilding the rows would pull the zoom's source
-            // out from under it.
-            guard generation == applyGeneration, !isOpening, route == nil else { return }
-            results = matches
-            await ImageWarmer.shared.warmAhead(rest, source: "search")
+        let text = trimmedQuery
+        guard !text.isEmpty else {
+            results = []
+            settledQuery = ""
+            return
         }
-    }
-
-    /// The thumbnail a result's row shows.
-    private func artworkRequest(for item: SearchItem) -> ArtworkRequest {
-        switch item {
-        case .artist(let artist):
-            .artistRow(artist.coverArt ?? artist.id.raw, scale: displayScale, points: rowArtworkSize)
-        case .album(let album):
-            .albumRow(album.coverArt ?? album.id.raw, scale: displayScale, points: rowArtworkSize)
-        case .playlist(let playlist):
-            .playlistRow(playlist.coverArt ?? playlist.id.raw, scale: displayScale, points: rowArtworkSize)
-        case .song(let song):
-            .songRow(ArtworkRequest.artworkId(of: song), scale: displayScale, points: rowArtworkSize)
-        }
-    }
-
-    /// Everything that matches, best first: a name that starts with the query, then one that
-    /// contains it, then an item only its artist matches. Within those, artists, albums, playlists
-    /// and songs in that order, each in the library's own order.
-    private nonisolated static func matches(for search: String, in library: Library) -> [SearchItem] {
-        func score(_ name: String, other: String? = nil) -> Int? {
-            if name.range(of: search, options: [.caseInsensitive, .diacriticInsensitive, .anchored]) != nil { return 0 }
-            if name.localizedCaseInsensitiveContains(search) { return 1 }
-            if let other, other.localizedCaseInsensitiveContains(search) { return 2 }
-            return nil
-        }
-
-        var scored: [(score: Int, item: SearchItem)] = []
-        for artist in library.artists {
-            if let s = score(artist.name) { scored.append((s, .artist(artist))) }
-        }
-        for album in library.albums {
-            if let s = score(album.name, other: album.artist) { scored.append((s, .album(album))) }
-        }
-        for playlist in library.playlists {
-            if let s = score(playlist.name, other: playlist.owner) { scored.append((s, .playlist(playlist))) }
-        }
-        for song in library.songs {
-            if let s = score(song.title, other: song.artist) { scored.append((s, .song(song))) }
-        }
-
-        // A stable order: the sort isn't promised to be, so the position breaks ties.
-        let ordered = scored.enumerated().sorted { lhs, rhs in
-            if lhs.element.score != rhs.element.score { return lhs.element.score < rhs.element.score }
-            if lhs.element.item.kindRank != rhs.element.item.kindRank {
-                return lhs.element.item.kindRank < rhs.element.item.kindRank
+        let scale = displayScale
+        let points = rowArtworkSize
+        let engine = engine
+        searchTask = Task {
+            if let delay {
+                try? await Task.sleep(for: delay)
+                guard !Task.isCancelled else { return }
             }
-            return lhs.offset < rhs.offset
+            guard let outcome = await engine.search(text, limit: Self.resultLimit, scale: scale, artworkPoints: points),
+                  !Task.isCancelled else { return }
+            await show(outcome, for: text, generation: generation)
         }
-        return ordered.prefix(resultLimit).map(\.element.item)
+    }
+
+    /// Puts `outcome` on screen once the thumbnails of its first rows are in memory — rows that
+    /// appear with placeholders and fill in as they load keep the screen busy, and a tap during that
+    /// opens the album without its zoom. Usually there's nothing to wait for (they're cached, which
+    /// is found out synchronously, as in `ImageReadiness.require`); otherwise it gives up waiting
+    /// after a moment. What's further down is warmed once the rows are shown (`warmAhead`).
+    private func show(_ outcome: SearchOutcome, for text: String, generation: Int) async {
+        let first = Array(outcome.requests.prefix(ImageWarmer.gateLimit + 4))
+        if !first.allSatisfy({ ImageCache.shared.isCached($0) }) {
+            await ImageWarmer.shared.prepare(first, timeout: .milliseconds(800))
+        }
+        // Not while an album is being opened: rebuilding the rows would pull the zoom's source out
+        // from under it.
+        guard generation == applyGeneration, !isOpening, route == nil else { return }
+        lookAhead.update(outcome)
+        results = outcome.items
+        settledQuery = text
+        warmAround(0)
+    }
+
+    // MARK: - Look-ahead
+
+    /// A row scrolled into view: warm the ones around it, so a fast scroll finds them ready.
+    private func warmAhead(after item: SearchItem) {
+        guard let index = lookAhead.position(of: item.id) else { return }
+        lookAhead.lastIndex = index
+        warmAround(index)
+    }
+
+    /// Warms the thumbnails around `index` — also after the app resumes, where the user left off.
+    private func warmAround(_ index: Int) {
+        let requests = lookAhead.requests
+        guard requests.indices.contains(index) else { return }
+        let near = ImageWarmer.neighbors(of: index, in: requests, count: ImageWarmer.scrollAheadCount)
+        Task { await ImageWarmer.shared.warmAhead(near, source: "search") }
     }
 
     // MARK: - Loading
 
     /// The four lists the search runs over, each from the cache first, then revalidated — the same
-    /// way their own screens load them, so it works offline too. All of them are loaded alongside
-    /// each other; the matches are refreshed as each arrives.
+    /// way their own screens load them, so it works offline too. They load alongside each other,
+    /// off the main actor; each one that changed what's indexed has the matches refreshed (once for
+    /// the lists that arrive together).
     private func loadLibrary() async {
         guard client.isConfigured else { return }
-        async let loadedArtists: Void = load(.allArtists(), shown: { artists }) { artists = $0 }
-        async let loadedAlbums: Void = load(.allAlbums(), shown: { albums }) { albums = $0 }
-        async let loadedPlaylists: Void = load(.allPlaylists(), shown: { playlists }) { playlists = $0 }
-        async let loadedSongs: Void = load(.allSongs(), shown: { songs }) { songs = $0 }
-        _ = await (loadedArtists, loadedAlbums, loadedPlaylists, loadedSongs)
+        let engine = engine
+        let refresh: @MainActor @Sendable () -> Void = { search(after: Self.loadDelay) }
+        async let artists: Void = Self.load(.allArtists(), current: { await engine.artists }, apply: { await engine.update(artists: $0) }, refresh: refresh)
+        async let albums: Void = Self.load(.allAlbums(), current: { await engine.albums }, apply: { await engine.update(albums: $0) }, refresh: refresh)
+        async let playlists: Void = Self.load(.allPlaylists(), current: { await engine.playlists }, apply: { await engine.update(playlists: $0) }, refresh: refresh)
+        async let songs: Void = Self.load(.allSongs(), current: { await engine.songs }, apply: { await engine.update(songs: $0) }, refresh: refresh)
+        _ = await (artists, albums, playlists, songs)
     }
 
-    private func load<Value: Equatable & Sendable>(
+    /// Feeds one list from `LibraryLoader` into the engine. Everything but `refresh` runs off the
+    /// main actor.
+    private nonisolated static func load<Value: Equatable & Sendable>(
         _ source: LibrarySource<Value>,
-        shown: () -> Value,
-        assign: (Value) -> Void
+        current: @Sendable () async -> Value,
+        apply: @Sendable (Value) async -> Bool,
+        refresh: @MainActor @Sendable () -> Void
     ) async {
-        for await event in LibraryLoader.load(source, shown: shown()) {
+        for await event in LibraryLoader.load(source, shown: await current()) {
             switch event {
             case .cached(let value), .fresh(let value):
-                assign(value)
-                recompute()
+                if await apply(value) { await refresh() }
             case .upToDate, .failed:
                 break
             }
@@ -382,31 +362,44 @@ private struct SearchFieldModifier: ViewModifier {
     }
 }
 
-/// A row of the results that opens a screen: its content and the trailing chevron a `NavigationLink`
-/// would have drawn — it's a button because the screen is only pushed once `SearchView.open` has it
-/// ready. Observes download and network state itself, to disable itself while offline and not
-/// downloaded: `SearchView` observes none of it, or every change to it (a cached album detail being
-/// written while an album opens, say) would rebuild all of the rows, the zoom transition's source
-/// among them.
-private struct SearchResultLink<Label: View>: View {
-    enum Availability {
-        case artist(name: String)
-        case album(id: String)
-        case playlist(id: String)
-    }
+/// What decides whether a result is available while offline: a downloaded song of the artist, of
+/// the album, in the playlist, or the song itself. The same checks the Artists, Albums, Playlists
+/// and Songs lists make to dim and disable a row.
+private enum SearchAvailability {
+    case artist(name: String)
+    case album(id: String)
+    case playlist(id: String)
+    case song(id: String)
+}
 
-    let availability: Availability
-    let minHeight: CGFloat
-    let onOpen: () -> Void
-    @ViewBuilder let label: Label
+/// Builds `content` with whether the result is available. Online, everything is, and the only thing
+/// observed is the network flag — which changes rarely; the download and library-cache stores, which
+/// change often, are only observed by a row that is offline (`OfflineAvailability`). `SearchView`
+/// observes none of them: every change (a cached album detail being written while an album opens,
+/// say) would rebuild all of the rows, the zoom transition's source among them.
+private struct AvailabilityGate<Content: View>: View {
+    let availability: SearchAvailability
+    @ViewBuilder let content: (Bool) -> Content
+
+    @ObservedObject private var networkMonitor = NetworkMonitor.shared
+
+    var body: some View {
+        if networkMonitor.isOnline {
+            content(true)
+        } else {
+            OfflineAvailability(availability: availability, content: content)
+        }
+    }
+}
+
+private struct OfflineAvailability<Content: View>: View {
+    let availability: SearchAvailability
+    @ViewBuilder let content: (Bool) -> Content
 
     @ObservedObject private var downloads = DownloadStore.shared
-    @ObservedObject private var networkMonitor = NetworkMonitor.shared
     @ObservedObject private var libraryCacheStatus = LibraryCacheStatus.shared
 
-    /// The same checks the Artists, Albums and Playlists lists make to dim and disable a row.
     private var isAvailable: Bool {
-        guard !networkMonitor.isOnline else { return true }
         switch availability {
         case .artist(let name):
             return downloads.hasDownloadedSong(byArtist: name)
@@ -415,29 +408,46 @@ private struct SearchResultLink<Label: View>: View {
         case .playlist(let id):
             let songIds = libraryCacheStatus.songIds(forPlaylist: id) ?? []
             return songIds.contains { downloads.isDownloaded($0) }
+        case .song(let id):
+            return downloads.isDownloaded(id)
         }
     }
 
     var body: some View {
-        Button(action: onOpen) {
-            HStack(spacing: 8) {
-                label
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.tertiary)
+        content(isAvailable)
+    }
+}
+
+/// A row of the results that opens a screen: its content and the trailing chevron a `NavigationLink`
+/// would have drawn — it's a button because the screen is only pushed once `SearchView.open` has it
+/// ready.
+private struct SearchResultLink<Label: View>: View {
+    let availability: SearchAvailability
+    let minHeight: CGFloat
+    let onOpen: () -> Void
+    @ViewBuilder let label: Label
+
+    var body: some View {
+        AvailabilityGate(availability: availability) { isAvailable in
+            Button(action: onOpen) {
+                HStack(spacing: 8) {
+                    label
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .frame(minHeight: minHeight)
+                .contentShape(Rectangle())
             }
-            .frame(minHeight: minHeight)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .disabled(!isAvailable)
         }
-        .buttonStyle(.plain)
-        .disabled(!isAvailable)
     }
 }
 
 /// A song's row in the search results: tapping it plays it; the ellipsis menu is `SongRow`'s, as in
-/// the songs list. Observes download and network state itself, to disable itself — like the songs
-/// list's rows.
+/// the songs list.
 private struct SearchSongRow: View {
     let track: Child
     let subtitle: String
@@ -446,20 +456,19 @@ private struct SearchSongRow: View {
     let minHeight: CGFloat
     let onPlay: () -> Void
 
-    @ObservedObject private var downloads = DownloadStore.shared
-    @ObservedObject private var networkMonitor = NetworkMonitor.shared
-
     var body: some View {
-        Button(action: onPlay) {
-            SongRow(
-                track: track, rowArtworkSize: artworkSize, displayScale: displayScale,
-                showsGoToActions: true, showsAddToPlaylist: true, subtitle: subtitle
-            )
-            .frame(minHeight: minHeight)
-            .contentShape(Rectangle())
+        AvailabilityGate(availability: .song(id: track.id.raw)) { isAvailable in
+            Button(action: onPlay) {
+                SongRow(
+                    track: track, rowArtworkSize: artworkSize, displayScale: displayScale,
+                    showsGoToActions: true, showsAddToPlaylist: true, subtitle: subtitle
+                )
+                .frame(minHeight: minHeight)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!isAvailable)
         }
-        .buttonStyle(.plain)
-        .disabled(!(networkMonitor.isOnline || downloads.isDownloaded(track.id.raw)))
     }
 }
 
