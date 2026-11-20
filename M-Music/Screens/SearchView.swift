@@ -51,6 +51,7 @@ private enum SearchRoute: Identifiable, Hashable {
 
 struct SearchView: View {
     @State var query = ""
+    @AppStorage(SearchBarPosition.storageKey) private var searchBarPositionStorage = SearchBarPosition.top.stored
 
     @Namespace private var albumZoomNamespace
     @Namespace private var playlistZoomNamespace
@@ -80,11 +81,15 @@ struct SearchView: View {
     /// What a very broad query is cut down to.
     private nonisolated static let resultLimit = 300
 
+    private var searchBarPosition: SearchBarPosition {
+        SearchBarPosition(stored: searchBarPositionStorage)
+    }
+
     var body: some View {
         NavigationStack {
             content
                 .navigationTitle("Search")
-                .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
+                .modifier(SearchFieldModifier(text: $query, position: searchBarPosition))
                 .screenOnStack()
                 .navigationDestination(item: $route) { route in
                     switch route {
@@ -105,6 +110,7 @@ struct SearchView: View {
                 .onChange(of: query) { recompute(debounced: true) }
         }
         .environment(\.appTab, AppNavigation.searchTab)
+        .environment(\.keepsSystemColorScheme, searchBarPosition == .bottom)
     }
 
     /// The list is always there, with the empty states drawn over it: swapping it out for them (and
@@ -356,6 +362,22 @@ struct SearchView: View {
                 Image(systemName: "line.horizontal.3.decrease")
                     .foregroundStyle(Color.accentColor)
             }
+        }
+    }
+}
+
+/// Puts the search field where the user chose (`SearchBarPosition`).
+private struct SearchFieldModifier: ViewModifier {
+    @Binding var text: String
+    let position: SearchBarPosition
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        switch position {
+        case .top:
+            content.searchable(text: $text, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
+        case .bottom:
+            content.searchable(text: $text, placement: .toolbar, prompt: "Search")
         }
     }
 }

@@ -100,7 +100,7 @@ struct AlbumView: View {
                 albumList
             }
         }
-        .preferredColorScheme(.dark)
+        .darkAppearance()
         .tint(.primary)
         .onAppResume { rewarmAfterResume() }
         // So the player's "Go to album" can tell this is the screen it would open.

@@ -1,6 +1,70 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Top" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Oben"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сверху"
+          }
+        }
+      }
+    },
+    "Bottom" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unten"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Снизу"
+          }
+        }
+      }
+    },
+    "Search bar" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suchleiste"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Строка поиска"
+          }
+        }
+      }
+    },
+    "Top puts the search field under the title. Bottom uses the system search field in the tab bar." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„Oben“ setzt das Suchfeld unter den Titel. „Unten“ verwendet das System-Suchfeld in der Tab-Leiste."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "«Сверху» размещает поле поиска под заголовком. «Снизу» использует системное поле поиска в панели вкладок."
+          }
+        }
+      }
+    },
     "Song" : {
       "localizations" : {
         "de" : {

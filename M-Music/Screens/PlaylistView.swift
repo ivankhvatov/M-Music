@@ -89,7 +89,7 @@ struct PlaylistView: View {
                 playlistList
             }
         }
-        .preferredColorScheme(.dark)
+        .darkAppearance()
         .onAppResume { warmAround(lastSeen.index, in: visibleSongs) }
         .sheet(isPresented: $showingAddToPlaylist) {
             AddAlbumToPlaylistSheet(songs: songs) { songsToAdd, target in
