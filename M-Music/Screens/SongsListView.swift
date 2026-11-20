@@ -554,6 +554,8 @@ struct SongRow: View {
     /// Whether the download status and song menu are at the trailing edge. Off for a list that
     /// brings its own trailing control, like the system's reorder handle of an editing `List`.
     var showsTrailingActions = true
+    /// Replaces the artist line — the search screen puts the item type there.
+    var subtitle: String?
 
     private let client = SubsonicClient.shared
     @ObservedObject private var downloads = DownloadStore.shared
@@ -578,9 +580,11 @@ struct SongRow: View {
         onRemoveFromPlaylist: (() -> Void)? = nil,
         showsGoToActions: Bool = false,
         showsAddToPlaylist: Bool = false,
-        showsTrailingActions: Bool = true
+        showsTrailingActions: Bool = true,
+        subtitle: String? = nil
     ) {
         self.track = track
+        self.subtitle = subtitle
         self.rowArtworkSize = rowArtworkSize
         self.displayScale = displayScale
         self.showsReorderHandle = showsReorderHandle
@@ -593,7 +597,7 @@ struct SongRow: View {
         self.showsGoToActions = showsGoToActions
         self.showsAddToPlaylist = showsAddToPlaylist
         self.showsTrailingActions = showsTrailingActions
-        _artworkURL = State(initialValue: ArtworkRequest.songRow(ArtworkRequest.artworkId(of: track), scale: displayScale).url)
+        _artworkURL = State(initialValue: ArtworkRequest.songRow(ArtworkRequest.artworkId(of: track), scale: displayScale, points: rowArtworkSize).url)
     }
 
     var body: some View {
@@ -603,9 +607,13 @@ struct SongRow: View {
 
                 VStack(alignment: .leading) {
                     Text(track.title)
-                        .font(.callout)
+                        .font(subtitle == nil ? .callout : .system(size: 18))
 
-                    if let trackArtist = track.artist {
+                    if let subtitle {
+                        Text(verbatim: subtitle)
+                            .font(.system(size: 14))
+                            .foregroundStyle(.secondary)
+                    } else if let trackArtist = track.artist {
                         Text(trackArtist)
                             .font(.caption)
                             .foregroundStyle(.secondary)

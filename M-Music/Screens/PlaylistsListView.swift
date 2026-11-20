@@ -423,6 +423,8 @@ enum PlaylistOrdering {
 struct PlaylistRow: View {
     let playlist: PlaylistSummary
     var zoomNamespace: Namespace.ID? = nil
+    /// Replaces the creator line — the search screen puts the item type there.
+    var subtitle: String? = nil
     /// Whether the row gets the playlist's own screen ready while it's on screen (its full-size
     /// cover, and the images of its first songs). Not for a row that only picks a playlist.
     var preparesPlaylistScreen = true
@@ -440,7 +442,7 @@ struct PlaylistRow: View {
     /// cost for the row itself.
     @State private var artworkURL: URL?
 
-    private let rowArtworkSize: CGFloat = ImageCache.RowArtwork.playlist
+    private let rowArtworkSize: CGFloat
     private let artworkCornerRadius: CGFloat = 4
     @Environment(\.displayScale) private var environmentDisplayScale
 
@@ -448,11 +450,13 @@ struct PlaylistRow: View {
     @ObservedObject private var libraryCacheStatus = LibraryCacheStatus.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
-    init(playlist: PlaylistSummary, zoomNamespace: Namespace.ID? = nil, preparesPlaylistScreen: Bool = true, displayScale: CGFloat) {
+    init(playlist: PlaylistSummary, zoomNamespace: Namespace.ID? = nil, subtitle: String? = nil, artworkSize: CGFloat = ImageCache.RowArtwork.playlist, preparesPlaylistScreen: Bool = true, displayScale: CGFloat) {
         self.playlist = playlist
+        self.rowArtworkSize = artworkSize
+        self.subtitle = subtitle
         self.zoomNamespace = zoomNamespace
         self.preparesPlaylistScreen = preparesPlaylistScreen
-        _artworkURL = State(initialValue: ArtworkRequest.playlistRow(playlist.coverArt ?? playlist.id.raw, scale: displayScale).url)
+        _artworkURL = State(initialValue: ArtworkRequest.playlistRow(playlist.coverArt ?? playlist.id.raw, scale: displayScale, points: artworkSize).url)
     }
 
     var body: some View {
@@ -463,10 +467,16 @@ struct PlaylistRow: View {
                 Text(playlist.name)
                     .font(.system(size: 18))
                     .lineLimit(1)
-                Text(playlist.owner ?? "Unknown Creator")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                Group {
+                    if let subtitle {
+                        Text(verbatim: subtitle)
+                    } else {
+                        Text(playlist.owner ?? "Unknown Creator")
+                    }
+                }
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
             }
         }
         .dimmedIfUnavailable(isAvailable)
@@ -484,7 +494,7 @@ struct PlaylistRow: View {
         }
         // See `PlaylistCardView`: `artworkURL` was resolved once, for the artwork it had then.
         .onChange(of: playlist.coverArt) {
-            artworkURL = ArtworkRequest.playlistRow(playlist.coverArt ?? playlist.id.raw, scale: environmentDisplayScale).url
+            artworkURL = ArtworkRequest.playlistRow(playlist.coverArt ?? playlist.id.raw, scale: environmentDisplayScale, points: rowArtworkSize).url
         }
     }
 

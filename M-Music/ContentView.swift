@@ -150,7 +150,7 @@ struct MainView: View {
             Tab("Library", systemImage: "music.note.square.stack.fill", value: 2) {
                 LibraryView()
             }
-            Tab("Search", systemImage: "magnifyingglass", value: 3, role: .search) {
+            Tab("Search", systemImage: "magnifyingglass", value: 3) {
                 SearchView()
             }
         }
