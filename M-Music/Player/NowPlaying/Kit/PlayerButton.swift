@@ -8,6 +8,7 @@ struct PlayerButton<Content: View>: View {
     @Environment(\.playerButtonSymbolTransitions) private var symbolTransitions
     @State private var showCircle = false
     @State private var pressed = false
+    private let activity = AppActivity.shared
     private let onEnded: (() -> Void)?
     private let label: Content?
 
@@ -17,6 +18,28 @@ struct PlayerButton<Content: View>: View {
     }
 
     var body: some View {
+        content
+            // Built afresh each time the app comes back, and not just re-evaluated: an animation that
+            // was running when the app left the screen — the press shrinking back, the highlight
+            // fading, the symbol swapping, the skip glyph morphing — isn't always finished or
+            // replayed on the way back, and the button is left standing in the middle of it. Its
+            // state is already at rest then (`pressed` false, the symbol the final one), so nothing
+            // changes to make SwiftUI draw it again, and it stays like that until the next press.
+            // A new identity starts every layer at its resting value, whatever was left over.
+            .id(activity.resumeCount)
+            .onChange(of: activity.isActive) {
+                // The press state goes at once too, on the way out, and with no animation: a press
+                // the system cancelled by taking the app away never reaches `onEnded`.
+                var instant = Transaction()
+                instant.disablesAnimations = true
+                withTransaction(instant) {
+                    pressed = false
+                    showCircle = false
+                }
+            }
+    }
+
+    private var content: some View {
         label
             .scaleEffect(pressed ? 0.9 : 1)
             .frame(width: config.size, height: config.size)
@@ -49,7 +72,11 @@ struct PlayerButton<Content: View>: View {
                     onEnded?()
                 }
             )
-            .contentTransition(symbolTransitions ? .symbolEffect(.replace) : .identity)
+            // Not while the app isn't active either: that transition is played by the render layer,
+            // which isn't running then, so a change made in the meantime (paused from the lock
+            // screen, by the sleep timer) would be held back and play in front of the user on the way
+            // back.
+            .contentTransition(symbolTransitions && activity.isActive ? .symbolEffect(.replace) : .identity)
     }
 }
 
