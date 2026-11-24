@@ -161,6 +161,26 @@ actor SearchEngine {
         return SearchOutcome(items: items, requests: items.map { Self.request(for: $0, scale: scale, points: artworkPoints) })
     }
 
+    /// The items for history `ids` (`SearchItem.id`s), in that order, with their thumbnails; one that
+    /// is no longer in the library is left out.
+    func items(matching ids: [String], scale: CGFloat, artworkPoints: CGFloat) -> SearchOutcome {
+        // The ids by kind: "album-42" is the album "42" (the id itself may contain dashes).
+        var wanted: [String: Set<String>] = [:]
+        for id in ids {
+            guard let dash = id.firstIndex(of: "-") else { continue }
+            wanted[String(id[..<dash]), default: []].insert(String(id[id.index(after: dash)...]))
+        }
+        var found: [String: SearchItem] = [:]
+        func keep(_ item: SearchItem) { found[item.id] = item }
+        if let wanted = wanted["artist"] { artists.lazy.filter { wanted.contains($0.id.raw) }.forEach { keep(.artist($0)) } }
+        if let wanted = wanted["album"] { albums.lazy.filter { wanted.contains($0.id.raw) }.forEach { keep(.album($0)) } }
+        if let wanted = wanted["playlist"] { playlists.lazy.filter { wanted.contains($0.id.raw) }.forEach { keep(.playlist($0)) } }
+        if let wanted = wanted["song"] { songs.lazy.filter { wanted.contains($0.id.raw) }.forEach { keep(.song($0)) } }
+
+        let items = ids.compactMap { found[$0] }
+        return SearchOutcome(items: items, requests: items.map { Self.request(for: $0, scale: scale, points: artworkPoints) })
+    }
+
     /// The thumbnail a result's row shows.
     nonisolated static func request(for item: SearchItem, scale: CGFloat, points: CGFloat) -> ArtworkRequest {
         switch item {

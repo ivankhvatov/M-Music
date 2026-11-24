@@ -145,3 +145,54 @@ struct SearchEngineTests {
         #expect(await task.value == nil)
     }
 }
+
+struct SearchHistoryTests {
+    private func makeStore() -> SearchHistoryStore {
+        let defaults = UserDefaults(suiteName: "SearchHistoryTests-\(UUID().uuidString)")!
+        return SearchHistoryStore(defaults: defaults, key: "history")
+    }
+
+    @Test func newestComesFirstAndARepeatMovesUp() async {
+        let store = makeStore()
+        await store.record("album-1")
+        await store.record("song-2")
+        await store.record("album-1")
+        #expect(await store.recent() == ["album-1", "song-2"])
+    }
+
+    @Test func isCapped() async {
+        let store = makeStore()
+        for n in 0..<(SearchHistoryStore.limit + 10) { await store.record("song-\(n)") }
+        let recent = await store.recent()
+        #expect(recent.count == SearchHistoryStore.limit)
+        #expect(recent.first == "song-\(SearchHistoryStore.limit + 9)")
+    }
+
+    @Test func removesAndClears() async {
+        let store = makeStore()
+        await store.record("a-1")
+        await store.record("a-2")
+        await store.remove("a-1")
+        #expect(await store.recent() == ["a-2"])
+        await store.clear()
+        #expect(await store.recent().isEmpty)
+    }
+
+    @Test func persists() async {
+        let defaults = UserDefaults(suiteName: "SearchHistoryTests-\(UUID().uuidString)")!
+        await SearchHistoryStore(defaults: defaults, key: "h").record("album-1")
+        #expect(await SearchHistoryStore(defaults: defaults, key: "h").recent() == ["album-1"])
+    }
+
+    @Test func engineResolvesIdsInOrderAndDropsTheMissing() async {
+        let engine = SearchEngine()
+        await engine.update(artists: [artist("a-b-c", "Echo")])      // an id with dashes
+        await engine.update(albums: [album("al", "Echo")])
+        await engine.update(songs: [song("s", "Echo")])
+        let outcome = await engine.items(
+            matching: ["song-s", "album-gone", "artist-a-b-c", "album-al", "nonsense"], scale: 3, artworkPoints: 56
+        )
+        #expect(outcome.items.map(\.id) == ["song-s", "artist-a-b-c", "album-al"])
+        #expect(outcome.requests.count == 3)
+    }
+}

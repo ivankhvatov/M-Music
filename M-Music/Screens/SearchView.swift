@@ -22,18 +22,37 @@ private enum SearchRoute: Identifiable, Hashable {
     }
 }
 
-/// What `SearchView` keeps about the results on screen without being re-rendered by it — see
-/// `LastSeenIndex`: the thumbnail of each row (for looking ahead and for `open`), and where each
-/// row is.
+/// What `SearchView` keeps about the rows on screen without being re-rendered by it — see
+/// `LastSeenIndex`: the thumbnail of each row (for looking ahead and for `open`), and where each row
+/// is. The rows are the search results, or the history while that is what's shown.
 @MainActor
 private final class SearchLookAhead {
-    private(set) var requests: [ArtworkRequest] = []
+    private var results = SearchOutcome(items: [], requests: [])
+    private var history = SearchOutcome(items: [], requests: [])
+    private var showsHistory = false
     private let positions = RowPositions()
     var lastIndex = 0
 
-    func update(_ outcome: SearchOutcome) {
-        requests = outcome.requests
-        positions.update(ids: outcome.items.map(\.id))
+    var requests: [ArtworkRequest] { showsHistory ? history.requests : results.requests }
+
+    func setResults(_ outcome: SearchOutcome) {
+        results = outcome
+        rebuild()
+    }
+
+    func setHistory(_ outcome: SearchOutcome) {
+        history = outcome
+        rebuild()
+    }
+
+    func setShowsHistory(_ shows: Bool) {
+        guard shows != showsHistory else { return }
+        showsHistory = shows
+        rebuild()
+    }
+
+    private func rebuild() {
+        positions.update(ids: (showsHistory ? history : results).items.map(\.id))
         lastIndex = 0
     }
 
@@ -60,6 +79,10 @@ struct SearchView: View {
     /// `body`: the library arriving must not re-render the results.
     @State private var engine = SearchEngine()
     @State private var results: [SearchItem] = []
+    /// What was opened or played from the results, shown while the field is open and empty.
+    @State private var history: [SearchItem] = []
+    /// Whether the search field is open (the keyboard is up) — see `SearchingReader`.
+    @State private var isSearching = false
     /// The query `results` is for, so "no results" isn't shown for a query still being searched.
     @State private var settledQuery = ""
     @State private var lookAhead = SearchLookAhead()
@@ -68,6 +91,7 @@ struct SearchView: View {
     @State private var isOpening = false
     /// The search in flight, and which one is the newest.
     @State private var searchTask: Task<Void, Never>?
+    @State private var historyTask: Task<Void, Never>?
     @State private var applyGeneration = 0
 
     /// Rows are a little taller than the library lists': more room around the same artwork.
@@ -81,6 +105,9 @@ struct SearchView: View {
     /// a list arriving are (four of them tend to arrive together).
     private static let typingDelay: Duration = .milliseconds(150)
     private static let loadDelay: Duration = .milliseconds(50)
+    /// How long after a screen is popped the history waits before re-ordering itself: the pop's zoom
+    /// lands on the row it left, which must not move meanwhile.
+    private static let afterPopDelay: Duration = .milliseconds(900)
 
     private var searchBarPosition: SearchBarPosition {
         SearchBarPosition(stored: searchBarPositionStorage)
@@ -107,8 +134,16 @@ struct SearchView: View {
                     SettingsToolbarItem()
                 }
                 .task { await loadLibrary() }
+                .task { await refreshHistory() }
                 .onAppResume { warmAround(lookAhead.lastIndex) }
                 .onChange(of: query) { search(after: Self.typingDelay) }
+                .onChange(of: showsHistory) { lookAhead.setShowsHistory(showsHistory) }
+                // The history is brought up to date while it isn't on screen, so it never reorders
+                // under the user's finger: when the field closes, when the query is cleared (what
+                // was opened meanwhile moves up), and a moment after a screen is popped.
+                .onChange(of: isSearching) { if !isSearching { refreshHistory(after: .zero) } }
+                .onChange(of: trimmedQuery.isEmpty) { if trimmedQuery.isEmpty { refreshHistory(after: .zero) } }
+                .onChange(of: route) { if route == nil { refreshHistory(after: Self.afterPopDelay) } }
         }
         .environment(\.appTab, AppNavigation.searchTab)
         .environment(\.keepsSystemColorScheme, searchBarPosition == .bottom)
@@ -118,13 +153,42 @@ struct SearchView: View {
     /// back) would tear down the rows, and the zoom transition's source with them.
     private var content: some View {
         List {
-            ForEach(results) { item in
-                row(for: item)
-                    .listRowInsets(rowInsets)
-                    .onAppear { warmAhead(after: item) }
+            if showsHistory {
+                Section {
+                    ForEach(history) { item in
+                        row(for: item)
+                            .listRowInsets(rowInsets)
+                            .onAppear { warmAhead(after: item) }
+                            .swipeActions {
+                                Button(role: .destructive) {
+                                    forget(item)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
+                    }
+                } header: {
+                    HStack {
+                        Text("Recently Searched")
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        Button("Clear") { clearHistory() }
+                            .font(.subheadline)
+                    }
+                    .textCase(nil)
+                }
+            } else {
+                ForEach(results) { item in
+                    row(for: item)
+                        .listRowInsets(rowInsets)
+                        .onAppear { warmAhead(after: item) }
+                }
             }
         }
         .listStyle(.plain)
+        // Whether the field is open can only be read from inside what `searchable` is applied to.
+        .background(SearchingReader(isSearching: $isSearching))
         // Background work holds off while the results are scrolled — see `ScrollActivity`.
         .onScrollPhaseChange { _, phase in
             ScrollActivity.shared.set(scrolling: phase != .idle)
@@ -135,6 +199,13 @@ struct SearchView: View {
                 ContentUnavailableView.search(text: trimmedQuery)
             }
         }
+    }
+
+    /// The history is shown while the field is open and empty. A screen being opened from it keeps
+    /// it on screen — the field may close as the screen is pushed, and the row the zoom starts from
+    /// must stay put.
+    private var showsHistory: Bool {
+        trimmedQuery.isEmpty && !history.isEmpty && (isSearching || isOpening || route != nil)
     }
 
     private var trimmedQuery: String {
@@ -205,6 +276,7 @@ struct SearchView: View {
             case .playlist(let playlist):
                 await ImageWarmer.shared.prepare([.playlistHeader(playlist.coverArt ?? playlist.id.raw)] + [thumbnail].compactMap { $0 })
             }
+            remember(route.id)
             self.route = route
             isOpening = false
         }
@@ -233,6 +305,53 @@ struct SearchView: View {
     /// Replaces the queue with just this song.
     private func play(_ song: Child) {
         player.play(queue: [song], startAt: 0, origin: .other)
+        remember(SearchItem.song(song).id)
+    }
+
+    // MARK: - History
+
+    /// Adds what was opened or played to the history. It isn't shown again until the history is next
+    /// brought up to date (see `body`).
+    private func remember(_ id: String) {
+        Task { await SearchHistoryStore.shared.record(id) }
+    }
+
+    private func forget(_ item: SearchItem) {
+        history.removeAll { $0.id == item.id }
+        let id = item.id
+        Task { await SearchHistoryStore.shared.remove(id) }
+    }
+
+    private func clearHistory() {
+        history = []
+        Task { await SearchHistoryStore.shared.clear() }
+    }
+
+    /// Reads the history again — after `delay`, and only the newest such request counts — and shows
+    /// it once its first thumbnails are in memory, like the results (see `show`).
+    private func refreshHistory(after delay: Duration) {
+        historyTask?.cancel()
+        historyTask = Task {
+            if delay > .zero {
+                try? await Task.sleep(for: delay)
+                guard !Task.isCancelled else { return }
+            }
+            await refreshHistory()
+        }
+    }
+
+    private func refreshHistory() async {
+        let scale = displayScale
+        let points = rowArtworkSize
+        let ids = await SearchHistoryStore.shared.recent()
+        let outcome = await engine.items(matching: ids, scale: scale, artworkPoints: points)
+        guard !Task.isCancelled else { return }
+        await prepareFirst(of: outcome.requests)
+        // Never while it's on screen and a screen is being opened from it.
+        guard !Task.isCancelled, !isOpening, route == nil else { return }
+        lookAhead.setHistory(outcome)
+        history = outcome.items
+        warmAround(0)
     }
 
     // MARK: - Searching
@@ -270,17 +389,24 @@ struct SearchView: View {
     /// is found out synchronously, as in `ImageReadiness.require`); otherwise it gives up waiting
     /// after a moment. What's further down is warmed once the rows are shown (`warmAhead`).
     private func show(_ outcome: SearchOutcome, for text: String, generation: Int) async {
-        let first = Array(outcome.requests.prefix(ImageWarmer.gateLimit + 4))
-        if !first.allSatisfy({ ImageCache.shared.isCached($0) }) {
-            await ImageWarmer.shared.prepare(first, timeout: .milliseconds(800))
-        }
+        await prepareFirst(of: outcome.requests)
         // Not while an album is being opened: rebuilding the rows would pull the zoom's source out
         // from under it.
         guard generation == applyGeneration, !isOpening, route == nil else { return }
-        lookAhead.update(outcome)
+        lookAhead.setResults(outcome)
         results = outcome.items
         settledQuery = text
         warmAround(0)
+    }
+
+    /// Waits for the thumbnails of the first rows to be in memory — usually there's nothing to wait
+    /// for (they're cached, which is found out synchronously, as in `ImageReadiness.require`);
+    /// otherwise it gives up after a moment.
+    private func prepareFirst(of requests: [ArtworkRequest]) async {
+        let first = Array(requests.prefix(ImageWarmer.gateLimit + 4))
+        if !first.allSatisfy({ ImageCache.shared.isCached($0) }) {
+            await ImageWarmer.shared.prepare(first, timeout: .milliseconds(800))
+        }
     }
 
     // MARK: - Look-ahead
@@ -309,7 +435,10 @@ struct SearchView: View {
     private func loadLibrary() async {
         guard client.isConfigured else { return }
         let engine = engine
-        let refresh: @MainActor @Sendable () -> Void = { search(after: Self.loadDelay) }
+        let refresh: @MainActor @Sendable () -> Void = {
+            search(after: Self.loadDelay)
+            refreshHistory(after: Self.loadDelay)
+        }
         async let artists: Void = Self.load(.allArtists(), current: { await engine.artists }, apply: { await engine.update(artists: $0) }, refresh: refresh)
         async let albums: Void = Self.load(.allAlbums(), current: { await engine.albums }, apply: { await engine.update(albums: $0) }, refresh: refresh)
         async let playlists: Void = Self.load(.allPlaylists(), current: { await engine.playlists }, apply: { await engine.update(playlists: $0) }, refresh: refresh)
@@ -359,6 +488,18 @@ private struct SearchFieldModifier: ViewModifier {
         case .bottom:
             content.searchable(text: $text, placement: .toolbar, prompt: "Search")
         }
+    }
+}
+
+/// Reports whether the search field is open into `isSearching`. `\.isSearching` is only set for the
+/// views inside what `searchable` is applied to, so it's read here, in a view placed there.
+private struct SearchingReader: View {
+    @Binding var isSearching: Bool
+    @Environment(\.isSearching) private var environmentIsSearching
+
+    var body: some View {
+        Color.clear
+            .onChange(of: environmentIsSearching, initial: true) { isSearching = environmentIsSearching }
     }
 }
 
