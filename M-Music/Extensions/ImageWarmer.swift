@@ -187,9 +187,15 @@ actor ImageWarmer {
     /// Gets `requests` into memory as fast as it sensibly can, for a screen that's open and holding
     /// its content back until they are (`ImageReadiness`): the bytes of whatever isn't on disk
     /// are fetched a few at a time, then everything is decoded without the warm-up pauses. Gives
-    /// up after `timeout` — a slow or unreachable server must never keep a list blank.
-    func prepare(_ requests: [ArtworkRequest], timeout: Duration = .seconds(2)) async {
+    /// up after `timeout` — a slow or unreachable server must never keep a list blank. `screen`
+    /// only names the caller in the timing log (`PerfLog`).
+    func prepare(_ requests: [ArtworkRequest], timeout: Duration = .seconds(2), screen: String = #fileID) async {
         let cache = self.cache
+        let logWaitEnd = PerfLog.beginCoversWait(
+            screen: screen, count: requests.count,
+            missing: requests.filter { !cache.isCached($0) }.count, limit: timeout
+        )
+        defer { logWaitEnd() }
         await withTaskGroup(of: Void.self) { group in
             group.addTask {
                 await withTaskGroup(of: Void.self) { downloads in
@@ -378,16 +384,17 @@ final class ImageReadiness {
 
     /// Marks the content ready if `requests`' images are all in memory; otherwise starts getting
     /// them there, and marks it ready when that's done.
-    func require(_ requests: [ArtworkRequest]) {
+    func require(_ requests: [ArtworkRequest], screen: String = #fileID) {
         guard !isReady, !isPreparing else { return }
         let needed = Array(requests.prefix(ImageWarmer.gateLimit))
         if needed.allSatisfy({ ImageCache.shared.isCached($0) }) {
             isReady = true
+            PerfLog.coversReady(screen: screen, count: needed.count)
             return
         }
         isPreparing = true
         Task {
-            await ImageWarmer.shared.prepare(needed)
+            await ImageWarmer.shared.prepare(needed, screen: screen)
             isPreparing = false
             isReady = true
         }

@@ -407,6 +407,13 @@ final class PlayerManager: ObservableObject {
     }
 
     private func subscribeToEngine() {
+        // Ends the timing of a track load — see `PerfLog`.
+        isAdvancingPublisher
+            .filter { $0 }
+            .sink { [weak self] _ in
+                PerfLog.audioStarted(source: self?.playbackSource.map { String(describing: $0) } ?? "unknown")
+            }
+            .store(in: &subscriptions)
         engine.$currentTime
             // Not the value it starts with, which `@Published` hands to a new subscriber at once:
             // the engine hasn't played anything, and its 0 would replace the position restored
@@ -950,6 +957,7 @@ final class PlayerManager: ObservableObject {
     func pause() {
         SleepTimer.shared.cancelWaitingForSongEnd()
         guard hasLoadedItem, isPlaying else { return }
+        PerfLog.trackLoadCancelled()
         // Where the song really is, not where it was at the last update: a pause is where it's
         // picked up from — the lyrics' dots too — including after a relaunch.
         if let exact = engine.exactTime { currentTime = exact }
@@ -985,6 +993,7 @@ final class PlayerManager: ObservableObject {
             isPlaying = false
             return
         }
+        if autoplay { PerfLog.trackLoadStarted() } else { PerfLog.trackLoadCancelled() }
         // A reconnect after a playback failure reloads the same track mid-way (`startTime > 0`)
         // — that's the same listen, so keep accumulating rather than starting over.
         if startTime == 0 || scrobbleSongId != track.id.raw {

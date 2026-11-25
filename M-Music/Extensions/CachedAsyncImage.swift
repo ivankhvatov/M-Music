@@ -351,7 +351,10 @@ final class ImageCache: @unchecked Sendable {
         let started = ContinuousClock.now
         let image = decodedImage(from: data, maxPixelSize: maxPixelSize)
         let spent = ContinuousClock.now - started
-        if let image { store(image, forKey: memKey) }
+        if let image {
+            store(image, forKey: memKey)
+            PerfLog.artworkDecoded(took: spent, bitmapBytes: Self.cost(of: image))
+        }
         // The rests run in their own tasks, holding the slots, so this image is handed back to its
         // caller right now — only the *next* decode waits out the pause. A background decode frees
         // the shared gate at once (a card that's showing must never wait on it) and keeps only its
@@ -548,6 +551,7 @@ final class ImageCache: @unchecked Sendable {
         guard let (data, response) = try? await session.data(from: url) else { return nil }
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) { return nil }
         guard isImage(data) else { return nil }
+        PerfLog.artworkDownloaded(bytes: data.count)
         return data
     }
 

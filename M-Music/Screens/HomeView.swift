@@ -198,6 +198,7 @@ struct HomeView: View {
                     .padding(.top, 8)
                     .padding(.bottom, 16)
                     .task(id: layout.carousels.count) { await revealRemainingCarousels() }
+                    .onAppear { PerfLog.homeContentShown() }
                 }
             }
             // Background work holds off while this screen is scrolled — see `ScrollActivity`.
