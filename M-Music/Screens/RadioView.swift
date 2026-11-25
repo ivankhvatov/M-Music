@@ -12,6 +12,8 @@ struct RadioView: View {
     @State private var isLoading = false
     @State private var loadError: String?
     @State private var hasLoadedOnce = false
+    /// Why the last "Delete station" failed, shown in an alert.
+    @State private var deleteError: String?
     /// Mirrored from `PlayerManager` via `onReceive` rather than observing it directly, which
     /// would re-render this whole list on every playback-time tick.
     @State private var playingStationId: FlexibleID? = PlayerManager.shared.currentRadioStation?.id
@@ -56,6 +58,14 @@ struct RadioView: View {
             }
         }
         .environment(\.appTab, AppNavigation.radioTab)
+        .alert("Couldn't delete the station", isPresented: Binding(
+            get: { deleteError != nil },
+            set: { if !$0 { deleteError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(deleteError ?? "")
+        }
         .task { await refresh() }
         .onReceive(PlayerManager.shared.$currentRadioStation.map { $0?.id }.removeDuplicates()) { id in
             playingStationId = id
@@ -71,7 +81,8 @@ struct RadioView: View {
                     RadioStationRow(
                         station: station,
                         isPlaying: playingStationId == station.id,
-                        displayScale: displayScale
+                        displayScale: displayScale,
+                        onDelete: { delete(station) }
                     )
                     .contentShape(.rect)
                 }
@@ -99,6 +110,21 @@ struct RadioView: View {
             }
         guard !requests.isEmpty else { return }
         Task { await ImageWarmer.shared.warmAhead(requests, source: "radio") }
+    }
+
+    /// Removes `station` from the server's library, then from the list, stopping it if it's the one
+    /// playing — only once the server has confirmed it, so a failure (offline, or a user without
+    /// admin rights) leaves the row and its playback in place.
+    private func delete(_ station: InternetRadioStation) {
+        Task {
+            do {
+                try await client.deleteInternetRadioStation(id: station.id.raw)
+                PlayerManager.shared.stopRadio(ifPlaying: station.id)
+                stations.removeAll { $0.id == station.id }
+            } catch {
+                deleteError = error.localizedDescription
+            }
+        }
     }
 
     private var disconnectedContent: some View {
@@ -173,11 +199,14 @@ struct RadioView: View {
 
 /// A single row for the radio stations list — the same layout as `AlbumsListView.AlbumRow`
 /// (rounded-corner artwork, name/subtitle stacked next to it), but a plain tappable row rather
-/// than a navigation link: the trailing chevron becomes an ellipsis, and tapping it starts the
-/// station streaming instead of pushing a screen.
+/// than a navigation link: the trailing chevron becomes an ellipsis menu, and tapping the rest
+/// of the row starts the station streaming instead of pushing a screen.
 private struct RadioStationRow: View {
     let station: InternetRadioStation
     let isPlaying: Bool
+    let onDelete: () -> Void
+
+    @State private var showingDeleteConfirmation = false
 
     /// Computed once, in `init` — see `AlbumRow.artworkURL`. `nil` when the station has no cover
     /// art (older Navidrome servers, or nothing uploaded), which shows the placeholder.
@@ -186,9 +215,10 @@ private struct RadioStationRow: View {
     private let rowArtworkSize: CGFloat = 64
     private let artworkCornerRadius: CGFloat = 4
 
-    init(station: InternetRadioStation, isPlaying: Bool, displayScale: CGFloat) {
+    init(station: InternetRadioStation, isPlaying: Bool, displayScale: CGFloat, onDelete: @escaping () -> Void) {
         self.station = station
         self.isPlaying = isPlaying
+        self.onDelete = onDelete
         let pixelSize = Int(rowArtworkSize * displayScale)
         _artworkURL = State(initialValue: station.coverArt.flatMap {
             try? SubsonicClient.shared.coverArtURL(forId: $0, size: pixelSize)
@@ -212,11 +242,35 @@ private struct RadioStationRow: View {
 
             Spacer(minLength: 0)
 
-            Image(systemName: "ellipsis")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.tertiary)
+            stationMenu
         }
         .dimmedIfUnavailable(NetworkMonitor.shared.isOnline)
+    }
+
+    /// Styled like `AlbumView`'s track menu.
+    private var stationMenu: some View {
+        Menu {
+            Button(role: .destructive) {
+                showingDeleteConfirmation = true
+            } label: {
+                Label { Text("Delete station") } icon: { redMenuSymbol("trash") }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .foregroundStyle(.primary)
+                .font(.system(size: 18))
+                // Enlarges the tappable area well past the glyph itself without changing how it
+                // looks.
+                .frame(width: 32, height: 44, alignment: .trailing)
+                .contentShape(Rectangle())
+        }
+        .confirmationDialog(
+            "Delete the station from the library?",
+            isPresented: $showingDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive, action: onDelete)
+        }
     }
 
     /// The station's website host ("www." dropped), or a generic label when it has none.

@@ -254,6 +254,8 @@ final class PlayerManager: ObservableObject {
     private var didScrobbleCurrent = false
     /// Whether the current queue was started from a playlist — see `play(queue:startAt:fromPlaylist:)`.
     private var isPlaylistQueue = false
+    /// Set by `stopRadio(ifPlaying:)` — see `persistState()`.
+    private var didStopRadio = false
 
     private let starStore = StarStore.shared
 
@@ -551,6 +553,7 @@ final class PlayerManager: ObservableObject {
 
     /// Starts playing the track at `index` of the `queue` that was just set.
     private func beginQueue(at index: Int, fromPlaylist: Bool, sourceName: String?, origin: QueueOrigin) {
+        didStopRadio = false
         isPlaylistQueue = fromPlaylist
         queueSourceName = sourceName
         queueOrigin = origin
@@ -880,6 +883,18 @@ final class PlayerManager: ObservableObject {
         hasLoadedItem = true
         engine.play(url: url)
         engine.setReplayGainVolume(Float(min(ReplayGainSettings.untaggedLinearGain, 1)))
+    }
+
+    /// Stops playback and empties the player if the station with `stationId` is the one on it,
+    /// playing or paused — for when that station has been deleted.
+    func stopRadio(ifPlaying stationId: FlexibleID) {
+        guard currentRadioStation?.id == stationId else { return }
+        engine.stop()
+        hasLoadedItem = false
+        currentRadioStation = nil
+        didStopRadio = true
+        updateArtworkURL()
+        updateNowPlayingInfo()
     }
 
     func seek(to time: TimeInterval) {
@@ -1792,8 +1807,9 @@ final class PlayerManager: ObservableObject {
     }
 
     private func persistState() {
-        // Radio leaves the last real queue on disk untouched, so it's restored next launch.
-        guard !isRadio else { return }
+        // Radio leaves the last real queue on disk untouched, so it's restored next launch — also
+        // once it's been stopped and the player is empty, until a new queue starts.
+        guard !isRadio, !(didStopRadio && currentIndex == nil) else { return }
         // See `awaitingFullQueue`.
         guard !awaitingFullQueue else { return }
         guard let currentIndex, queue.indices.contains(currentIndex) else {
