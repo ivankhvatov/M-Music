@@ -59,6 +59,9 @@ struct AlbumView: View {
     /// `AlbumCardView`, which requests this same URL) appear immediately instead of flashing the
     /// placeholder for a frame while an async task first goes and computes the URL.
     @State private var artworkURL: URL?
+    /// Width over height of the artwork that's showing, to size the frame the rounded corners and
+    /// outline are drawn on — see `artworkFrameSize`. Square until an image has loaded.
+    @State private var artworkAspect: CGFloat = 1
 
     @State private var showingRemoveDownloadConfirmation = false
     @State private var showingRefreshDownloadedConfirmation = false
@@ -97,7 +100,7 @@ struct AlbumView: View {
                 albumList
             }
         }
-        .preferredColorScheme(.dark)
+        .darkAppearance()
         .tint(.primary)
         .onAppResume { rewarmAfterResume() }
         // So the player's "Go to album" can tell this is the screen it would open.
@@ -501,7 +504,7 @@ struct AlbumView: View {
     private func shuffle() {
         let queue = playableSongs
         guard !queue.isEmpty else { return }
-        player.play(queue: queue.shuffled(), startAt: 0, sourceName: album.name, origin: .album(album.id.raw))
+        player.playShuffled(queue: queue, sourceName: album.name, origin: .album(album.id.raw))
     }
 
     private var trackCountAndDuration: String {
@@ -576,11 +579,23 @@ struct AlbumView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// The artwork's own bounds, fitted into a 270pt square: the shorter side shrinks to match its
+    /// aspect ratio, whichever side that is, so the rounded corners and outline hug the image. A
+    /// flexible `.frame(maxWidth:maxHeight:)` only did that for a wide image — handed no height to
+    /// fit in, a tall one just overflowed it.
+    private var artworkFrameSize: CGSize {
+        let side: CGFloat = 270
+        return artworkAspect >= 1
+            ? CGSize(width: side, height: side / artworkAspect)
+            : CGSize(width: side * artworkAspect, height: side)
+    }
+
     func albumArtwork() -> some View {
         // Same URL AlbumCardView requests (original size, no `size` param), so this reuses the
         // image straight from ImageCache instead of re-fetching — the whole point being no lag
         // when this view opens.
         CachedAsyncImage(url: artworkURL, fallbackMaxPixelSize: ImageCache.cardMaxPixelSize, onLoad: { uiImage in
+            if uiImage.size.width > 0, uiImage.size.height > 0 { artworkAspect = uiImage.size.width / uiImage.size.height }
             Task.detached(priority: .userInitiated) {
                 guard let color = uiImage.averageColor() else { return }
                 await MainActor.run {
@@ -597,7 +612,7 @@ struct AlbumView: View {
             Rectangle()
                 .fill(Color.secondary.opacity(0.2))
         }
-        .frame(maxWidth: 270, maxHeight: 270)
+        .frame(width: artworkFrameSize.width, height: artworkFrameSize.height)
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(
             RoundedRectangle(cornerRadius: 10)

@@ -328,19 +328,23 @@ struct ArtistsListView: View {
     }
 }
 
-private struct ArtistRow: View {
+struct ArtistRow: View {
     let artist: ArtistID3
+    /// A second line under the name — the search screen says "Artist" there.
+    var subtitle: String? = nil
 
     @State private var artworkURL: URL?
 
-    private let rowArtworkSize: CGFloat = ImageCache.RowArtwork.artist
+    private let rowArtworkSize: CGFloat
 
     /// Requests the row-sized thumbnail, not the full picture the artist's own screen uses — a
     /// 48pt avatar has no use for the original, and a small download is also what the permanent
     /// cache saves for artists with downloaded songs (see `DownloadedArtwork`).
-    init(artist: ArtistID3, displayScale: CGFloat) {
+    init(artist: ArtistID3, subtitle: String? = nil, artworkSize: CGFloat = ImageCache.RowArtwork.artist, displayScale: CGFloat) {
         self.artist = artist
-        _artworkURL = State(initialValue: ArtworkRequest.artistRow(artist.coverArt ?? artist.id.raw, scale: displayScale).url)
+        self.rowArtworkSize = artworkSize
+        self.subtitle = subtitle
+        _artworkURL = State(initialValue: ArtworkRequest.artistRow(artist.coverArt ?? artist.id.raw, scale: displayScale, points: artworkSize).url)
     }
 
     @ObservedObject private var downloads = DownloadStore.shared
@@ -363,8 +367,20 @@ private struct ArtistRow: View {
             .frame(width: rowArtworkSize, height: rowArtworkSize)
             .clipShape(Circle())
 
-            Text(artist.name)
-                .font(.body)
+            if let subtitle {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(artist.name)
+                        .font(.system(size: 18))
+                        .lineLimit(1)
+                    Text(verbatim: subtitle)
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            } else {
+                Text(artist.name)
+                    .font(.body)
+            }
         }
         .dimmedIfUnavailable(networkMonitor.isOnline || downloads.hasDownloadedSong(byArtist: artist.name))
         // The artist's own screen opens with its picture and first albums' covers already

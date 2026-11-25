@@ -191,6 +191,12 @@ enum PlaylistEditor {
         if let playlists = try? await client.getPlaylists() {
             await database.cacheAllPlaylists(playlists)
         }
+        // The screens that are open hold their own copy of the playlist — a card on Home, a row in
+        // the list — and show what they were given until told otherwise: its name, and the artwork
+        // its `coverArt` id points at, which the server changes whenever the artwork does.
+        NotificationCenter.default.post(
+            name: .playlistDidChange, object: nil, userInfo: [Notification.playlistKey: PlaylistSummary(fresh)]
+        )
         return fresh
     }
 
@@ -285,5 +291,28 @@ enum PlaylistEditor {
                 )
             })
         }
+    }
+}
+
+extension Notification.Name {
+    /// A playlist was read back from the server after a change or a refresh; `userInfo` holds the
+    /// new `PlaylistSummary` under `Notification.playlistKey`.
+    static let playlistDidChange = Notification.Name("PlaylistDidChange")
+}
+
+extension Notification {
+    static let playlistKey = "playlist"
+
+    /// The playlist a `.playlistDidChange` notification carries.
+    var changedPlaylist: PlaylistSummary? { userInfo?[Self.playlistKey] as? PlaylistSummary }
+}
+
+extension PlaylistSummary {
+    init(_ playlist: PlaylistWithSongs) {
+        self.init(
+            id: playlist.id, name: playlist.name, comment: playlist.comment, owner: playlist.owner,
+            public: playlist.public, songCount: playlist.songCount, duration: playlist.duration,
+            created: playlist.created, changed: playlist.changed, coverArt: playlist.coverArt
+        )
     }
 }

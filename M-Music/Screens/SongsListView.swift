@@ -215,9 +215,9 @@ struct SongsListView: View {
     }
 
     private func shuffleAll() {
-        let queue = playableSongs.shuffled()
+        let queue = playableSongs
         guard !queue.isEmpty else { return }
-        player.play(queue: queue, startAt: 0, origin: .songs)
+        player.playShuffled(queue: queue, origin: .songs)
     }
 
     /// Same look as `ArtistAlbumsView.actionButtons`: two capsules sharing the row's width. They
@@ -551,6 +551,11 @@ struct SongRow: View {
     var showsGoToActions = false
     /// Adds "Add to playlist" to the song menu, between "Add to queue" and the "Go to" actions.
     var showsAddToPlaylist = false
+    /// Whether the download status and song menu are at the trailing edge. Off for a list that
+    /// brings its own trailing control, like the system's reorder handle of an editing `List`.
+    var showsTrailingActions = true
+    /// Replaces the artist line — the search screen puts the item type there.
+    var subtitle: String?
 
     private let client = SubsonicClient.shared
     @ObservedObject private var downloads = DownloadStore.shared
@@ -574,9 +579,12 @@ struct SongRow: View {
         playlistId: String? = nil,
         onRemoveFromPlaylist: (() -> Void)? = nil,
         showsGoToActions: Bool = false,
-        showsAddToPlaylist: Bool = false
+        showsAddToPlaylist: Bool = false,
+        showsTrailingActions: Bool = true,
+        subtitle: String? = nil
     ) {
         self.track = track
+        self.subtitle = subtitle
         self.rowArtworkSize = rowArtworkSize
         self.displayScale = displayScale
         self.showsReorderHandle = showsReorderHandle
@@ -588,7 +596,8 @@ struct SongRow: View {
         self.onRemoveFromPlaylist = onRemoveFromPlaylist
         self.showsGoToActions = showsGoToActions
         self.showsAddToPlaylist = showsAddToPlaylist
-        _artworkURL = State(initialValue: ArtworkRequest.songRow(ArtworkRequest.artworkId(of: track), scale: displayScale).url)
+        self.showsTrailingActions = showsTrailingActions
+        _artworkURL = State(initialValue: ArtworkRequest.songRow(ArtworkRequest.artworkId(of: track), scale: displayScale, points: rowArtworkSize).url)
     }
 
     var body: some View {
@@ -598,9 +607,13 @@ struct SongRow: View {
 
                 VStack(alignment: .leading) {
                     Text(track.title)
-                        .font(.callout)
+                        .font(subtitle == nil ? .callout : .system(size: 18))
 
-                    if let trackArtist = track.artist {
+                    if let subtitle {
+                        Text(verbatim: subtitle)
+                            .font(.system(size: 14))
+                            .foregroundStyle(.secondary)
+                    } else if let trackArtist = track.artist {
                         Text(trackArtist)
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -637,7 +650,7 @@ struct SongRow: View {
                             priorityName: PanGesture.reorderHandleTag
                         )
                     )
-            } else {
+            } else if showsTrailingActions {
                 SongTrailingActions(
                     track: track, showsGoToActions: showsGoToActions, showsAddToPlaylist: showsAddToPlaylist,
                     onRemoveFromPlaylist: onRemoveFromPlaylist

@@ -41,6 +41,11 @@ struct PlaylistCardView: View {
         .task(id: playlist.id) {
             await ImageWarmer.shared.warmPlaylist(id: playlist.id.raw, artworkId: playlist.coverArt ?? playlist.id.raw)
         }
+        // The same card is kept for a playlist whose artwork changed (its identity is the id), and
+        // `artworkURL` was resolved once, for the artwork it had then.
+        .onChange(of: playlist.coverArt) {
+            artworkURL = ArtworkRequest.playlistCard(playlist.coverArt ?? playlist.id.raw).url
+        }
     }
 
     /// Nothing is ever "unavailable" while online — only offline does whether this playlist has

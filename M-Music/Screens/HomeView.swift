@@ -221,6 +221,15 @@ struct HomeView: View {
                     rebuildSections(reshuffle: false)
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { notification in
+                // A playlist's name or artwork changed (from its own screen): the carousel shows
+                // the copy it was built with until it's given the new one.
+                guard let changed = notification.changedPlaylist,
+                      let index = topPlaylists.firstIndex(where: { $0.id == changed.id }),
+                      topPlaylists[index] != changed else { return }
+                topPlaylists[index] = changed
+                rebuildLayout()
+            }
             .onChange(of: translateGenres) { rebuildLayout() }
             .onChange(of: GenreLocalizer.shared.revision) { rebuildLayout() }
             .onChange(of: carouselOrderStorage) { rebuildLayout() }

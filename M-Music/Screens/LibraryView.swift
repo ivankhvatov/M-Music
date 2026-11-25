@@ -18,6 +18,9 @@ struct LibraryView: View {
     /// Where the user last was, to warm around on resume — see `onAppResume`.
     @State private var lastSeen = LastSeenIndex()
 
+    /// Set by the plus menu's "Create playlist"; see `createPlaylistAlerts`.
+    @State private var isCreatingPlaylist = false
+
     @ObservedObject private var downloads = DownloadStore.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
@@ -38,6 +41,15 @@ struct LibraryView: View {
                     plusButton
                     SettingsToolbarItem()
                 }
+                .createPlaylistAlerts(
+                    isPresented: $isCreatingPlaylist,
+                    existingNames: { await LibraryCacheDatabase.shared.cachedAllPlaylists()?.map(\.name) ?? [] },
+                    onCreated: {
+                        // Re-download the playlists into the cache, so the Playlists screen
+                        // shows the new one as soon as it's opened.
+                        for await _ in LibraryLoader.load(.allPlaylists(), shown: nil, force: true) {}
+                    }
+                )
                 .task { await refresh() }
             }
             .environment(\.appTab, AppNavigation.libraryTab)
@@ -280,10 +292,15 @@ struct LibraryView: View {
     @ToolbarContentBuilder
         private var plusButton: some ToolbarContent {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {} label: {
+                Menu {
+                    Button { isCreatingPlaylist = true } label: {
+                        Label("Create playlist", systemImage: "text.badge.plus")
+                    }
+                } label: {
                     Image(systemName: "plus")
                         .foregroundStyle(Color.accentColor)
                 }
+                .tint(.accentColor)
             }
         }
 }

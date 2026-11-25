@@ -455,9 +455,11 @@ struct AlbumsListView: View {
 /// (mirrors `AlbumCardView.artwork`, but fit rather than cropped to a square — see `artwork`
 /// below), title/artist stacked next to it (mirrors `ArtistsListView.ArtistRow`, which uses a
 /// circular artwork with just a title).
-private struct AlbumRow: View {
+struct AlbumRow: View {
     let album: AlbumID3
     var zoomNamespace: Namespace.ID? = nil
+    /// Replaces the artist line — the search screen puts the release type there.
+    var subtitle: String? = nil
 
     /// Computed once, in `init` — not via `.task` — so an already-cached cover (e.g. already
     /// fetched by this same row earlier) renders on the very first frame instead of flashing the
@@ -472,16 +474,18 @@ private struct AlbumRow: View {
     /// row itself.
     @State private var artworkURL: URL?
 
-    private let rowArtworkSize: CGFloat = ImageCache.RowArtwork.album
+    private let rowArtworkSize: CGFloat
     private let artworkCornerRadius: CGFloat = 4
 
     @ObservedObject private var downloads = DownloadStore.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
-    init(album: AlbumID3, zoomNamespace: Namespace.ID? = nil, displayScale: CGFloat) {
+    init(album: AlbumID3, zoomNamespace: Namespace.ID? = nil, subtitle: String? = nil, artworkSize: CGFloat = ImageCache.RowArtwork.album, displayScale: CGFloat) {
         self.album = album
+        self.rowArtworkSize = artworkSize
+        self.subtitle = subtitle
         self.zoomNamespace = zoomNamespace
-        _artworkURL = State(initialValue: ArtworkRequest.albumRow(album.coverArt ?? album.id.raw, scale: displayScale).url)
+        _artworkURL = State(initialValue: ArtworkRequest.albumRow(album.coverArt ?? album.id.raw, scale: displayScale, points: artworkSize).url)
     }
 
     var body: some View {
@@ -492,10 +496,16 @@ private struct AlbumRow: View {
                 Text(album.name + (album.version != nil ? (" (" + album.version! + ")") : ""))
                     .font(.system(size: 18))
                     .lineLimit(1)
-                Text(album.artist ?? "Unknown Artist")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                Group {
+                    if let subtitle {
+                        Text(verbatim: subtitle)
+                    } else {
+                        Text(album.artist ?? "Unknown Artist")
+                    }
+                }
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
             }
         }
         .dimmedIfUnavailable(networkMonitor.isOnline || downloads.hasDownloadedSong(inAlbum: album.id.raw))

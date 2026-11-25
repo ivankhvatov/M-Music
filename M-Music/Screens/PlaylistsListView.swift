@@ -58,8 +58,6 @@ struct PlaylistsListView: View {
     @State private var hasLoadedOnce = false
 
     @State private var isCreatingPlaylist = false
-    @State private var newPlaylistName = ""
-    @State private var createError: String?
 
     @AppStorage("library.playlistsDisplayStyle") private var displayStyleStorage = LibraryDisplayStyle.grid.storageKey
     @AppStorage("playlistsList.sortField") private var sortFieldStorage = PlaylistSortField.name.storageKey
@@ -140,20 +138,19 @@ struct PlaylistsListView: View {
             createButton
             sortButton
         }
-        .alert("Create a playlist", isPresented: $isCreatingPlaylist) {
-            TextField("Playlist name", text: $newPlaylistName)
-            Button("Cancel", role: .cancel) {}
-            Button("Create") { createPlaylist(named: newPlaylistName) }
-        }
-        .alert("Couldn't create the playlist", isPresented: Binding(
-            get: { createError != nil },
-            set: { if !$0 { createError = nil } }
-        )) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(createError ?? "")
-        }
+        .createPlaylistAlerts(
+            isPresented: $isCreatingPlaylist,
+            existingNames: { playlists.map(\.name) },
+            onCreated: { await performRefresh(force: true) }
+        )
         .task { await refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { notification in
+            guard let changed = notification.changedPlaylist,
+                  let index = playlists.firstIndex(where: { $0.id == changed.id }),
+                  playlists[index] != changed else { return }
+            playlists[index] = changed
+            updateDisplayedPlaylists()
+        }
         .onChange(of: sortFieldStorage) { updateDisplayedPlaylists() }
         .onChange(of: sortOrderStorage) { updateDisplayedPlaylists() }
         .onChange(of: searchText) { updateDisplayedPlaylists() }
@@ -227,36 +224,10 @@ struct PlaylistsListView: View {
         PlaylistOrdering.sorted(list, field: sortField.wrappedValue.storageKey, ascending: sortOrder.wrappedValue == .ascending)
     }
 
-    /// "New Playlist N" (localized) with the smallest N no existing playlist already uses,
-    /// ignoring case.
-    private func defaultPlaylistName() -> String {
-        let taken = Set(playlists.map { $0.name.lowercased() })
-        var number = 1
-        while taken.contains(String(localized: "New Playlist \(number)").lowercased()) {
-            number += 1
-        }
-        return String(localized: "New Playlist \(number)")
-    }
-
-    /// Creates an empty playlist on the server, then force-refreshes so it shows up.
-    private func createPlaylist(named name: String) {
-        var name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        if name.isEmpty { name = defaultPlaylistName() }
-        Task {
-            do {
-                try await client.createPlaylist(name: name)
-                await performRefresh(force: true)
-            } catch {
-                createError = error.localizedDescription
-            }
-        }
-    }
-
     @ToolbarContentBuilder
     private var createButton: some ToolbarContent {
         ToolbarItem(placement: .topBarTrailing) {
             Button {
-                newPlaylistName = ""
                 isCreatingPlaylist = true
             } label: {
                 Image(systemName: "plus")
@@ -416,6 +387,8 @@ enum PlaylistOrdering {
 struct PlaylistRow: View {
     let playlist: PlaylistSummary
     var zoomNamespace: Namespace.ID? = nil
+    /// Replaces the creator line — the search screen puts the item type there.
+    var subtitle: String? = nil
     /// Whether the row gets the playlist's own screen ready while it's on screen (its full-size
     /// cover, and the images of its first songs). Not for a row that only picks a playlist.
     var preparesPlaylistScreen = true
@@ -433,18 +406,21 @@ struct PlaylistRow: View {
     /// cost for the row itself.
     @State private var artworkURL: URL?
 
-    private let rowArtworkSize: CGFloat = ImageCache.RowArtwork.playlist
+    private let rowArtworkSize: CGFloat
     private let artworkCornerRadius: CGFloat = 4
+    @Environment(\.displayScale) private var environmentDisplayScale
 
     @ObservedObject private var downloads = DownloadStore.shared
     @ObservedObject private var libraryCacheStatus = LibraryCacheStatus.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
-    init(playlist: PlaylistSummary, zoomNamespace: Namespace.ID? = nil, preparesPlaylistScreen: Bool = true, displayScale: CGFloat) {
+    init(playlist: PlaylistSummary, zoomNamespace: Namespace.ID? = nil, subtitle: String? = nil, artworkSize: CGFloat = ImageCache.RowArtwork.playlist, preparesPlaylistScreen: Bool = true, displayScale: CGFloat) {
         self.playlist = playlist
+        self.rowArtworkSize = artworkSize
+        self.subtitle = subtitle
         self.zoomNamespace = zoomNamespace
         self.preparesPlaylistScreen = preparesPlaylistScreen
-        _artworkURL = State(initialValue: ArtworkRequest.playlistRow(playlist.coverArt ?? playlist.id.raw, scale: displayScale).url)
+        _artworkURL = State(initialValue: ArtworkRequest.playlistRow(playlist.coverArt ?? playlist.id.raw, scale: displayScale, points: artworkSize).url)
     }
 
     var body: some View {
@@ -455,10 +431,16 @@ struct PlaylistRow: View {
                 Text(playlist.name)
                     .font(.system(size: 18))
                     .lineLimit(1)
-                Text(playlist.owner ?? "Unknown Creator")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                Group {
+                    if let subtitle {
+                        Text(verbatim: subtitle)
+                    } else {
+                        Text(playlist.owner ?? "Unknown Creator")
+                    }
+                }
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
             }
         }
         .dimmedIfUnavailable(isAvailable)
@@ -473,6 +455,10 @@ struct PlaylistRow: View {
             // And decoded (with the first songs' thumbnails), once the row has stayed on screen a
             // moment, so the playlist's own screen opens with its images — see `ImageWarmer`.
             await ImageWarmer.shared.warmPlaylist(id: playlist.id.raw, artworkId: artworkId)
+        }
+        // See `PlaylistCardView`: `artworkURL` was resolved once, for the artwork it had then.
+        .onChange(of: playlist.coverArt) {
+            artworkURL = ArtworkRequest.playlistRow(playlist.coverArt ?? playlist.id.raw, scale: environmentDisplayScale, points: rowArtworkSize).url
         }
     }
 

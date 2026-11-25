@@ -545,14 +545,14 @@ struct ArtistAlbumsView: View {
     }
 
     private func play() {
-        runQueue { $0 }
+        runQueue(shuffled: false)
     }
 
     private func shuffle() {
-        runQueue { $0.shuffled() }
+        runQueue(shuffled: true)
     }
 
-    private func runQueue(_ transform: @escaping ([Child]) -> [Child]) {
+    private func runQueue(shuffled: Bool) {
         guard !albums.isEmpty, !isLoadingQueue else { return }
         isLoadingQueue = true
         Task {
@@ -562,9 +562,12 @@ struct ArtistAlbumsView: View {
             let playableSongs = networkMonitor.isOnline ? songs : songs.filter { downloads.isDownloaded($0.id.raw) }
             await MainActor.run {
                 isLoadingQueue = false
-                let queue = transform(playableSongs)
-                guard !queue.isEmpty else { return }
-                player.play(queue: queue, startAt: 0)
+                guard !playableSongs.isEmpty else { return }
+                if shuffled {
+                    player.playShuffled(queue: playableSongs)
+                } else {
+                    player.play(queue: playableSongs, startAt: 0)
+                }
             }
         }
     }

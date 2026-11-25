@@ -21,7 +21,15 @@ struct AppearanceSettingsView: View {
     @AppStorage(HomeContentSettings.Keys.disabled) private var homeDisabledStorage = ""
     @AppStorage(HomeContentSettings.Keys.randomGenreCount) private var randomGenreCount = 0
     @AppStorage(GenreTranslationSettings.Keys.isEnabled) private var translateGenres = false
+    @AppStorage(SearchBarPosition.storageKey) private var searchBarPositionStorage = SearchBarPosition.top.stored
     @State private var isHomeContentExpanded = false
+
+    private var searchBarPosition: Binding<SearchBarPosition> {
+        Binding(
+            get: { SearchBarPosition(stored: searchBarPositionStorage) },
+            set: { searchBarPositionStorage = $0.stored }
+        )
+    }
 
     private var homeOrder: [HomeCarouselKind] { HomeContentSettings.order(from: homeOrderStorage) }
 
@@ -104,6 +112,18 @@ struct AppearanceSettingsView: View {
                     Text("Home")
                 } footer: {
                     Text("Choose which carousels the Home page shows and drag to reorder them. Random genres shows the chosen number of carousels, each with albums of a different random genre.")
+                }
+                Section {
+                    Picker("Search bar", selection: searchBarPosition) {
+                        ForEach(SearchBarPosition.allCases, id: \.self) { position in
+                            Text(position.rawValue).tag(position)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                } header: {
+                    Text("Search")
+                } footer: {
+                    Text("Top puts the search field under the title. Bottom uses the system search field in the tab bar.")
                 }
                 Section {
                     Toggle("Translate genres", isOn: $translateGenres)

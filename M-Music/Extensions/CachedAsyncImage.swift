@@ -829,6 +829,10 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     /// re-rendered a few times right after opening (downloads publishing, its own `@State`
     /// loading in) re-ran whatever expensive thing `onLoad` does (color extraction) every time.
     @State private var notifiedURL: URL?
+    /// The url whose smaller stand-in (see `fallbackMaxPixelSize`) `uiImage` was set from at init.
+    /// After `url` changes, `uiImage` still holds the *previous* url's image until the new one
+    /// loads, and that must not be passed to `onLoad` as if it were the new image's.
+    @State private var standInURL: URL?
 
     init(
         url: URL?,
@@ -852,6 +856,7 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
         }
         _uiImage = State(initialValue: standIn)
         _loadedURL = State(initialValue: cached != nil ? url : nil)
+        _standInURL = State(initialValue: cached == nil && standIn != nil ? url : nil)
     }
 
     var body: some View {
@@ -887,7 +892,7 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
         }
         // Showing a smaller stand-in already (see `fallbackMaxPixelSize`): it's good enough for
         // `onLoad`'s purposes (e.g. an average color), so don't make that wait for the full decode.
-        notifyLoaded()
+        if standInURL == url { notifyLoaded() }
         if loadDelay > .zero {
             try? await Task.sleep(for: loadDelay)
             if Task.isCancelled { return }

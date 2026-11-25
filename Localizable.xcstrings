@@ -1,6 +1,262 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Couldn't delete the station" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Sender konnte nicht gelöscht werden"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удалось удалить радиостанцию"
+          }
+        }
+      }
+    },
+    "Delete station" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sender löschen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удалить радиостанцию"
+          }
+        }
+      }
+    },
+    "Delete the station from the library?" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sender aus der Mediathek löschen?"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удалить радиостанцию из медиатеки?"
+          }
+        }
+      }
+    },
+    "Recently Searched" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zuletzt gesucht"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Недавние запросы"
+          }
+        }
+      }
+    },
+    "Clear" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Löschen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Очистить"
+          }
+        }
+      }
+    },
+    "Top" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Oben"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сверху"
+          }
+        }
+      }
+    },
+    "Bottom" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unten"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Снизу"
+          }
+        }
+      }
+    },
+    "Search bar" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suchleiste"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Строка поиска"
+          }
+        }
+      }
+    },
+    "Top puts the search field under the title. Bottom uses the system search field in the tab bar." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„Oben“ setzt das Suchfeld unter den Titel. „Unten“ verwendet das System-Suchfeld in der Tab-Leiste."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "«Сверху» размещает поле поиска под заголовком. «Снизу» использует системное поле поиска в панели вкладок."
+          }
+        }
+      }
+    },
+    "Song" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Song"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Трек"
+          }
+        }
+      }
+    },
+    "Playlist" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Playlist"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Плейлист"
+          }
+        }
+      }
+    },
+    "EP" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "EP"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "EP"
+          }
+        }
+      }
+    },
+    "Single" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Single"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сингл"
+          }
+        }
+      }
+    },
+    "Compilation" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sammlung"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сборник"
+          }
+        }
+      }
+    },
+    "Live album" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live-Album"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Концертный альбом"
+          }
+        }
+      }
+    },
+    "Instrumental" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Instrumental"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Инструментал"
+          }
+        }
+      }
+    },
     "-%@" : {
 
     },
@@ -562,6 +818,12 @@
     },
     "Add to Favorites" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zu Favoriten hinzufügen"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -588,6 +850,12 @@
     },
     "Add to queue" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zur Warteschlange hinzufügen"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -646,6 +914,12 @@
     },
     "Album not available" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Album nicht verfügbar"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -784,6 +1058,12 @@
     },
     "Applies only to new downloads — songs already saved to this device keep whatever container they were downloaded in. Lossless downloads (FLAC, WAV, AIFF) are converted to Apple Lossless (ALAC); Opus downloads are repackaged into a .caf container. Both keep full audio quality — no lossy re-encoding is involved." : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gilt nur für neue Downloads – Titel, die bereits auf diesem Gerät gespeichert sind, behalten das Containerformat, in dem sie geladen wurden. Verlustfreie Downloads (FLAC, WAV, AIFF) werden in Apple Lossless (ALAC) umgewandelt; Opus-Downloads werden in einen .caf-Container umgepackt. Beides bewahrt die volle Audioqualität – es findet keine verlustbehaftete Neukodierung statt."
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -810,6 +1090,12 @@
     },
     "Artist not available" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Künstler nicht verfügbar"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -830,6 +1116,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Артисты"
+          }
+        }
+      }
+    },
+    "Artwork uploads are turned off on your server." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Hochladen von Covern ist auf deinem Server deaktiviert."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Загрузка обложек отключена на вашем сервере."
           }
         }
       }
@@ -868,6 +1170,12 @@
     },
     "Cache" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cache"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -878,6 +1186,12 @@
     },
     "Cache size limit" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cache-Größenlimit"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -888,6 +1202,12 @@
     },
     "Cache upcoming track" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nächsten Titel zwischenspeichern"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -928,6 +1248,22 @@
         }
       }
     },
+    "Choose an artwork" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cover auswählen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Выбрать обложку"
+          }
+        }
+      }
+    },
     "Choose which carousels the Home page shows and drag to reorder them. Random genres shows the chosen number of carousels, each with albums of a different random genre." : {
       "localizations" : {
         "de" : {
@@ -946,6 +1282,12 @@
     },
     "Choosing Never deletes every cached song now. From then on, the upcoming track is cached only while it's in the queue." : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wenn du „Nie“ wählst, werden sofort alle zwischengespeicherten Titel gelöscht. Danach wird der nächste Titel nur noch zwischengespeichert, solange er in der Warteschlange ist."
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -956,6 +1298,12 @@
     },
     "Clear Cache" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cache leeren"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -966,6 +1314,12 @@
     },
     "Compilations" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Compilations"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1008,6 +1362,12 @@
     },
     "Conversion" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Umwandlung"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1018,6 +1378,12 @@
     },
     "Convert lossless to ALAC" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verlustfreie Dateien in ALAC umwandeln"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1028,6 +1394,12 @@
     },
     "Convert Opus to .caf" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Opus in .caf umwandeln"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1116,6 +1488,22 @@
         }
       }
     },
+    "Couldn't save the playlist" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Playlist konnte nicht gesichert werden"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удалось сохранить плейлист"
+          }
+        }
+      }
+    },
     "Create" : {
       "localizations" : {
         "de" : {
@@ -1133,6 +1521,22 @@
       }
     },
     "Create a playlist" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Playlist erstellen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Создать плейлист"
+          }
+        }
+      }
+    },
+    "Create playlist" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1166,6 +1570,12 @@
     },
     "Currently cached" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktuell zwischengespeichert"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1192,6 +1602,12 @@
     },
     "Delete" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Löschen"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1202,6 +1618,12 @@
     },
     "Delete all cached songs?" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alle zwischengespeicherten Titel löschen?"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1212,6 +1634,12 @@
     },
     "Delete All Downloads" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alle Downloads löschen"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1222,6 +1650,12 @@
     },
     "Delete all downloads?" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alle Downloads löschen?"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1232,6 +1666,12 @@
     },
     "Delete Cache and Stop Keeping Songs" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cache löschen und Titel nicht mehr behalten"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1258,10 +1698,48 @@
     },
     "Delete the album from this device?" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Album von diesem Gerät löschen?"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Удалить альбом с этого устройства?"
+          }
+        }
+      }
+    },
+    "Delete the artwork" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cover löschen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удалить обложку"
+          }
+        }
+      }
+    },
+    "Delete the artwork?" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cover löschen?"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удалить обложку?"
           }
         }
       }
@@ -1316,6 +1794,12 @@
     },
     "Disconnect" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trennen"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1374,6 +1858,12 @@
     },
     "Download format" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download-Format"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1400,6 +1890,12 @@
     },
     "Downloaded" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Heruntergeladen"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1410,6 +1906,12 @@
     },
     "Downloaded songs" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Heruntergeladene Titel"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1420,6 +1922,12 @@
     },
     "Downloading…" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wird heruntergeladen …"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1446,6 +1954,12 @@
     },
     "Downloads every track to this device before playing it, instead of streaming, so transitions have no gap even over a transcoded or slow connection. A track not played again within the limit above is automatically removed." : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lädt jeden Titel vor der Wiedergabe auf dieses Gerät, statt ihn zu streamen, damit die Übergänge auch bei transkodierter oder langsamer Verbindung lückenlos sind. Ein Titel, der innerhalb des oben genannten Limits nicht erneut gespielt wird, wird automatisch entfernt."
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1454,8 +1968,30 @@
         }
       }
     },
+    "Edit Playlist" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bearbeiten"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Изменить"
+          }
+        }
+      }
+    },
     "Enable download transcoding" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download-Transkodierung aktivieren"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1498,6 +2034,12 @@
     },
     "Enter the address of your Navidrome server, e.g. https://music.example.com or http://192.168.1.10:4533" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gib die Adresse deines Navidrome-Servers ein, z. B. https://music.example.com oder http://192.168.1.10:4533"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1508,6 +2050,12 @@
     },
     "EPs" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "EPs"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1518,6 +2066,12 @@
     },
     "Favorite" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Favorit"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1528,6 +2082,12 @@
     },
     "Favorite only" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nur Favoriten"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1554,6 +2114,12 @@
     },
     "Filter" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filter"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1596,6 +2162,12 @@
     },
     "Format/bitrate apply only to new downloads — songs already saved to this device keep whatever quality they were downloaded at. When Prioritize downloads is on, a downloaded song always plays from the download regardless of its format; when off, a download only plays if its format still matches the current Transcoding setting in Playback settings, otherwise the gapless cache or streaming is used instead." : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Format und Bitrate gelten nur für neue Downloads – Titel, die bereits auf diesem Gerät gespeichert sind, behalten die Qualität, in der sie geladen wurden. Ist „Downloads bevorzugen“ aktiviert, wird ein heruntergeladener Titel immer aus dem Download abgespielt, unabhängig von seinem Format; ist es deaktiviert, wird ein Download nur abgespielt, wenn sein Format noch zur aktuellen Transkodierungseinstellung in den Wiedergabe-Einstellungen passt – andernfalls werden stattdessen der Gapless-Cache oder das Streaming verwendet."
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1622,6 +2194,12 @@
     },
     "Gapless Caching" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gapless-Caching"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1648,6 +2226,12 @@
     },
     "Go to album" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zum Album"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1658,6 +2242,12 @@
     },
     "Go to artist" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zum Künstler"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1684,6 +2274,12 @@
     },
     "Group release versions" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Release-Versionen gruppieren"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1761,6 +2357,12 @@
     },
     "Instrumentals" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Instrumentals"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1787,6 +2389,12 @@
     },
     "Keep cached for" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zwischenspeichern für"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1864,6 +2472,12 @@
     },
     "Live albums" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live-Alben"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1874,6 +2488,12 @@
     },
     "Live Radio" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live-Radio"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -2140,6 +2760,12 @@
     },
     "No cached songs." : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keine zwischengespeicherten Titel."
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -2182,6 +2808,12 @@
     },
     "No radio stations found." : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keine Radiosender gefunden."
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -2192,6 +2824,12 @@
     },
     "No recently played albums yet." : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Noch keine zuletzt gespielten Alben."
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -2237,6 +2875,12 @@
     },
     "Offline mode" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Offline-Modus"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -2375,6 +3019,12 @@
     },
     "Play next" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Als Nächstes abspielen"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -2401,6 +3051,12 @@
     },
     "Player" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Player"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -2475,6 +3131,12 @@
     },
     "Prioritize downloads" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Downloads bevorzugen"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -2598,6 +3260,12 @@
     },
     "Refresh" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktualisieren"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -2608,6 +3276,12 @@
     },
     "Refreshing will delete the album from your device." : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Beim Aktualisieren wird das Album von deinem Gerät gelöscht."
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -2618,6 +3292,12 @@
     },
     "Remove Download" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download entfernen"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -2628,6 +3308,12 @@
     },
     "Remove from Favorites" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aus Favoriten entfernen"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -2654,6 +3340,12 @@
     },
     "Repeat" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wiederholen"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -2664,6 +3356,12 @@
     },
     "Repeat One" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Titel wiederholen"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -2700,6 +3398,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Сообщает вашему серверу, что вы слушаете. Композиция скробблится, когда проиграна заданная её часть: 0% — сразу при начале воспроизведения, 100% — только если она прослушана целиком. Если выключено «Скробблить из плейлистов», композиции из плейлистов не скробблятся. Скробблы, созданные без сети или при недоступном сервере, отправляются по порядку, как только сервер снова станет доступен."
+          }
+        }
+      }
+    },
+    "Save" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sichern"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сохранить"
           }
         }
       }
@@ -2786,6 +3500,12 @@
     },
     "Separate artist's release types" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Release-Typen des Künstlers trennen"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -2796,6 +3516,12 @@
     },
     "Separate artist's release types shows an artist's albums, EPs, singles, and other release types as separate rows instead of one grid; artists with only one release type are unaffected. Group release versions collapses multiple versions of the same album (e.g. a Deluxe or Remastered edition) down to just the plain edition, or the one with the shortest version name if there's no plain edition — except when Albums is filtered to Favorite only." : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„Release-Typen des Künstlers trennen“ zeigt die Alben, EPs, Singles und anderen Release-Typen eines Künstlers in getrennten Reihen statt in einem einzigen Raster; Künstler mit nur einem Release-Typ sind nicht betroffen. „Release-Versionen gruppieren“ fasst mehrere Versionen desselben Albums (z. B. eine Deluxe- oder Remastered-Edition) auf die einfache Ausgabe zusammen – oder auf die mit dem kürzesten Versionsnamen, falls es keine einfache Ausgabe gibt –, außer wenn Alben auf „Nur Favoriten“ gefiltert sind."
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -2854,6 +3580,12 @@
     },
     "Show audio info" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Audioinformationen anzeigen"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -2864,6 +3596,12 @@
     },
     "Show unavailable in albums" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nicht verfügbare in Alben anzeigen"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -2874,6 +3612,12 @@
     },
     "Show unavailable in lists" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nicht verfügbare in Listen anzeigen"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -2884,6 +3628,12 @@
     },
     "Show unavailable in playlists" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nicht verfügbare in Playlists anzeigen"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -2910,6 +3660,12 @@
     },
     "Shows the current playback source, codec, and bitrate (or bit depth/sample rate for a lossless codec) below the artist name in the expanded Now Playing view." : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zeigt die aktuelle Wiedergabequelle, den Codec und die Bitrate (bei einem verlustfreien Codec Bittiefe und Abtastrate) unter dem Künstlernamen in der erweiterten Ansicht „Wiedergabe“ an."
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -2920,6 +3676,12 @@
     },
     "Shuffle" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zufällig"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -2930,6 +3692,12 @@
     },
     "Singles" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Singles"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -2972,6 +3740,12 @@
     },
     "Songs and albums you download will appear here." : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Titel und Alben, die du herunterlädst, erscheinen hier."
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -3062,10 +3836,64 @@
     },
     "Stream" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stream"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Стриминг"
+          }
+        }
+      }
+    },
+    "The image couldn't be read." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Bild konnte nicht gelesen werden."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удалось прочитать изображение."
+          }
+        }
+      }
+    },
+    "The playlist goes back to the artwork Navidrome makes from its songs." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Playlist verwendet wieder das Cover, das Navidrome aus ihren Songs erstellt."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "У плейлиста снова будет обложка, которую Navidrome составляет из его песен."
+          }
+        }
+      }
+    },
+    "The server refused the artwork (HTTP status %lld)." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Server hat das Cover abgelehnt (HTTP-Status %lld)."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сервер отклонил обложку (статус HTTP %lld)."
           }
         }
       }
@@ -3088,6 +3916,12 @@
     },
     "The upcoming track is cached so it can play gaplessly, and stays cached only while it's in the queue — once it's removed from the queue, it's deleted." : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der nächste Titel wird zwischengespeichert, damit er lückenlos abgespielt werden kann, und bleibt nur so lange gespeichert, wie er in der Warteschlange ist – sobald er daraus entfernt wird, wird er gelöscht."
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -3130,6 +3964,12 @@
     },
     "Total size" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gesamtgröße"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -3236,6 +4076,12 @@
     },
     "Unknown Album" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unbekanntes Album"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -3412,6 +4258,12 @@
     },
     "When offline, controls whether content you haven't downloaded is shown dimmed (on) or hidden entirely (off): songs in Songs, fully-downloaded playlists/albums/artists in their list screens, and individual tracks inside an album or playlist." : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Legt fest, ob Inhalte, die du nicht heruntergeladen hast, im Offline-Modus abgeblendet angezeigt (an) oder ganz ausgeblendet (aus) werden: Titel in „Titel“, vollständig heruntergeladene Playlists/Alben/Künstler in ihren Listen sowie einzelne Titel in einem Album oder einer Playlist."
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -3464,6 +4316,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Год"
+          }
+        }
+      }
+    },
+    "Your server's Navidrome is too old to change a playlist's artwork." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Navidrome deines Servers ist zu alt, um das Cover einer Playlist zu ändern."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Версия Navidrome на вашем сервере слишком старая, чтобы менять обложку плейлиста."
           }
         }
       }

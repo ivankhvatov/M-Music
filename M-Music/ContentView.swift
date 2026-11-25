@@ -77,6 +77,7 @@ struct MainView: View {
         .map { index, station in index != nil || station != nil }
         .removeDuplicates()
 
+    @AppStorage(SearchBarPosition.storageKey) private var searchBarPositionStorage = SearchBarPosition.top.stored
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     /// Set once the launch warm-up has been started, so the `.active` that accompanies the launch
@@ -139,6 +140,10 @@ struct MainView: View {
         await ImageWarmer.shared.warmAll(nowPlayingURL: artworkURL, upcoming: upcoming)
     }
 
+    private var searchBarPosition: SearchBarPosition {
+        SearchBarPosition(stored: searchBarPositionStorage)
+    }
+
     func TabBar() -> some View {
         TabView(selection: $navigation.selectedTab) {
             Tab("Home", systemImage: "house.fill", value: 0) {
@@ -150,7 +155,7 @@ struct MainView: View {
             Tab("Library", systemImage: "music.note.square.stack.fill", value: 2) {
                 LibraryView()
             }
-            Tab("Search", systemImage: "magnifyingglass", value: 3, role: .search) {
+            Tab("Search", systemImage: "magnifyingglass", value: 3, role: searchBarPosition == .bottom ? .search : nil) {
                 SearchView()
             }
         }

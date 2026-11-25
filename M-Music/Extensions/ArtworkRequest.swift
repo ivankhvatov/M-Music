@@ -27,10 +27,10 @@ struct ArtworkRequest: Hashable, Codable, Sendable {
     }
 
     /// A list row (`AlbumsListView.AlbumRow`): the server's row-sized thumbnail.
-    static func albumRow(_ artworkId: String, scale: CGFloat) -> ArtworkRequest {
+    static func albumRow(_ artworkId: String, scale: CGFloat, points: CGFloat = ImageCache.RowArtwork.album) -> ArtworkRequest {
         ArtworkRequest(
             id: artworkId,
-            size: ImageCache.RowArtwork.pixels(ImageCache.RowArtwork.album, scale: scale),
+            size: ImageCache.RowArtwork.pixels(points, scale: scale),
             maxPixelSize: ImageCache.standardMaxPixelSize
         )
     }
@@ -44,10 +44,10 @@ struct ArtworkRequest: Hashable, Codable, Sendable {
 
     static func playlistCard(_ artworkId: String) -> ArtworkRequest { albumCard(artworkId) }
 
-    static func playlistRow(_ artworkId: String, scale: CGFloat) -> ArtworkRequest {
+    static func playlistRow(_ artworkId: String, scale: CGFloat, points: CGFloat = ImageCache.RowArtwork.playlist) -> ArtworkRequest {
         ArtworkRequest(
             id: artworkId,
-            size: ImageCache.RowArtwork.pixels(ImageCache.RowArtwork.playlist, scale: scale),
+            size: ImageCache.RowArtwork.pixels(points, scale: scale),
             maxPixelSize: ImageCache.standardMaxPixelSize
         )
     }
@@ -56,10 +56,10 @@ struct ArtworkRequest: Hashable, Codable, Sendable {
 
     // MARK: Artists
 
-    static func artistRow(_ artworkId: String, scale: CGFloat) -> ArtworkRequest {
+    static func artistRow(_ artworkId: String, scale: CGFloat, points: CGFloat = ImageCache.RowArtwork.artist) -> ArtworkRequest {
         ArtworkRequest(
             id: artworkId,
-            size: ImageCache.RowArtwork.pixels(ImageCache.RowArtwork.artist, scale: scale),
+            size: ImageCache.RowArtwork.pixels(points, scale: scale),
             maxPixelSize: ImageCache.avatarMaxPixelSize
         )
     }
@@ -71,10 +71,10 @@ struct ArtworkRequest: Hashable, Codable, Sendable {
     // MARK: Songs and Now Playing
 
     /// A song row (`SongRow`).
-    static func songRow(_ artworkId: String, scale: CGFloat) -> ArtworkRequest {
+    static func songRow(_ artworkId: String, scale: CGFloat, points: CGFloat = ImageCache.RowArtwork.song) -> ArtworkRequest {
         ArtworkRequest(
             id: artworkId,
-            size: ImageCache.RowArtwork.pixels(ImageCache.RowArtwork.song, scale: scale),
+            size: ImageCache.RowArtwork.pixels(points, scale: scale),
             maxPixelSize: ImageCache.standardMaxPixelSize
         )
     }
