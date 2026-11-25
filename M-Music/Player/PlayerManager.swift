@@ -1723,7 +1723,9 @@ final class PlayerManager: ObservableObject {
     private func loadNowPlayingArtwork() {
         guard let artworkURL else { return }
         Task { [weak self] in
-            guard let self, let uiImage = await ImageCache.shared.load(artworkURL) else { return }
+            // As many pixels as the screen is wide: the lock screen shows the cover that large.
+            let tier = ImageCache.nowPlayingMaxPixelSize
+            guard let self, let uiImage = await ImageCache.shared.load(artworkURL, maxPixelSize: tier) else { return }
             await MainActor.run {
                 guard self.artworkURL == artworkURL, var info = MPNowPlayingInfoCenter.default().nowPlayingInfo else { return }
                 info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: uiImage.size) { _ in uiImage }

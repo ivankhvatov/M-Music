@@ -708,6 +708,53 @@ extension ImageCacheTests {
         #expect(image?.cgImage?.width == 300)
     }
 
+    /// Between the tier and twice it, where JPEG sub-sampling has nothing to skip.
+    @Test func aJpegUnderTwiceItsTierIsShrunkToIt() async {
+        let tier = ImageCache.cardMaxPixelSize
+        ImageStub.reset(body: jpegData(side: tier * 2 - 1))
+        let image = await Directories().makeCache().load(coverURL("al-62"), maxPixelSize: tier)
+        #expect(image?.cgImage?.width == tier)
+        #expect(image?.cgImage?.height == tier)
+    }
+
+    @Test func anotherFormatJustOverItsTierIsShrunkToIt() async {
+        let tier = ImageCache.cardMaxPixelSize
+        let side = tier + tier / 5
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let png = UIGraphicsImageRenderer(size: CGSize(width: side, height: side / 2), format: format).pngData { context in
+            UIColor.orange.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: side, height: side / 2))
+        }
+        ImageStub.reset(body: png)
+        let image = await Directories().makeCache().load(coverURL("al-63"), maxPixelSize: tier)
+        #expect(image?.cgImage?.width == tier)
+        // The shape is kept.
+        #expect(abs((image?.cgImage?.height ?? 0) - tier / 2) <= 1)
+    }
+
+    @Test func aFullResolutionLoadKeepsEveryPixel() async {
+        ImageStub.reset(body: jpegData(side: 1000))
+        let image = await Directories().makeCache().load(coverURL("al-64"), maxPixelSize: nil)
+        #expect(image?.cgImage?.width == 1000)
+    }
+
+    /// The app sets them at launch (`AppDelegate`), and the tests run inside it.
+    @MainActor
+    @Test func theTiersWereSizedForThisScreenAtLaunch() {
+        let expected = ImageCache.screenTiers(width: UIScreen.main.bounds.width, scale: UIScreen.main.scale)
+        #expect(ImageCache.cardMaxPixelSize == expected.card)
+        #expect(ImageCache.nowPlayingMaxPixelSize == expected.nowPlaying)
+    }
+
+    @Test func theScreenSizesTheTiersThatFollowIt() {
+        let large = ImageCache.screenTiers(width: 440, scale: 3)
+        #expect(large.card == 588)
+        #expect(large.nowPlaying == 1320)
+        #expect(ImageCache.screenTiers(width: 390, scale: 3).card == 513)
+        #expect(ImageCache.screenTiers(width: 320, scale: 2).card == 512)
+    }
+
     @Test func backgroundDecodesRunOneAtATime() async {
         ImageStub.reset(body: jpegData(side: 900))
         let dirs = Directories()

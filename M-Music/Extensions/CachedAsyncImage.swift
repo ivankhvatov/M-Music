@@ -36,9 +36,27 @@ final class ImageCache: @unchecked Sendable {
     /// tier. The largest thing that shows a cover apart from Now Playing is the album header at
     /// 270pt (≈810px at 3x), so this leaves headroom without any visible softness.
     static let standardMaxPixelSize = 900
-    /// Cards and grid cells (~170pt wide, ≈510px at 3x). Decoding these at the header tier would
-    /// mean up to 3x the pixels for nothing, dozens of times over on a screen full of covers.
-    static let cardMaxPixelSize = 512
+    /// Cards and grid cells: as many pixels as a cell of a two-column grid is wide on this device
+    /// (513 on a 390pt iPhone, 588 on a 440pt one), never under 512. Decoding these at the header
+    /// tier would mean up to 3x the pixels for nothing, dozens of times over on a screen full of
+    /// covers. Set once at launch, by `setScreenSize(width:scale:)`.
+    nonisolated(unsafe) private(set) static var cardMaxPixelSize = 512
+    /// The screen's width in pixels — what the lock screen's artwork, shown about that wide, is
+    /// decoded to. Set once at launch, like `cardMaxPixelSize`.
+    nonisolated(unsafe) private(set) static var nowPlayingMaxPixelSize = 1320
+
+    /// Sizes the tiers that follow the screen. Called by the app delegate at launch, before
+    /// anything has asked for an image.
+    static func setScreenSize(width: CGFloat, scale: CGFloat) {
+        (cardMaxPixelSize, nowPlayingMaxPixelSize) = screenTiers(width: width, scale: scale)
+    }
+
+    static func screenTiers(width: CGFloat, scale: CGFloat) -> (card: Int, nowPlaying: Int) {
+        // 48pt: a grid's 16pt on either side and 16pt between its two columns.
+        let card = Int(((width - 48) / 2 * scale).rounded(.up))
+        return (max(512, card), Int((width * scale).rounded(.up)))
+    }
+
     /// Small round avatars (a 48pt artist row is 144px at 3x).
     static let avatarMaxPixelSize = 256
     /// For sampling dominant colours only (Now Playing background): far smaller than anything shown.
@@ -500,7 +518,10 @@ final class ImageCache: @unchecked Sendable {
     /// as everything else here, so any freshly-signed URL for the same image works.
     func remove(_ url: URL) {
         let key = stableKey(for: url)
-        let tiers: [Int?] = [nil, Self.standardMaxPixelSize, Self.cardMaxPixelSize, Self.avatarMaxPixelSize, Self.colorSamplingMaxPixelSize]
+        let tiers: [Int?] = [
+            nil, Self.nowPlayingMaxPixelSize, Self.standardMaxPixelSize, Self.cardMaxPixelSize,
+            Self.avatarMaxPixelSize, Self.colorSamplingMaxPixelSize,
+        ]
         for tier in tiers {
             let memKey = memoryKey(key, maxPixelSize: tier)
             memory.removeObject(forKey: memKey)
@@ -682,10 +703,11 @@ final class ImageCache: @unchecked Sendable {
     /// cost. For a JPEG (nearly every cover) that's ImageIO's DCT sub-sampling: it decodes at
     /// 1/2, 1/4 or 1/8 scale directly, skipping most of the IDCT work and needing no resample at
     /// all. The factor is the largest power of two that still leaves the result at least
-    /// `maxPixelSize` on its longest side (so it lands between 1x and 2x the target — SwiftUI
-    /// scales that down on the GPU). Other formats far over the cap take ImageIO's thumbnail
-    /// path (which does resample); anything at or near the cap, and `maxPixelSize == nil`, takes
-    /// the plain full-size path.
+    /// `maxPixelSize` on its longest side; the redraw that follows then takes it down to the cap
+    /// exactly. Other formats far over the cap take ImageIO's thumbnail path (which does
+    /// resample). Everything else — a JPEG under 2x the cap, another format near it, and
+    /// `maxPixelSize == nil` — is decoded whole, and the redraw shrinks whatever is still over
+    /// the cap: no bitmap is kept bigger than its tier.
     private func decodedImage(from data: Data, maxPixelSize: Int?) -> UIImage? {
         if let maxPixelSize, let source = CGImageSourceCreateWithData(data as CFData, nil),
            let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
@@ -718,7 +740,7 @@ final class ImageCache: @unchecked Sendable {
             }
         }
         guard let source = UIImage(data: data), let cgImage = source.cgImage else { return nil }
-        return normalizedBitmap(from: cgImage, scale: source.scale, orientation: .up) ?? source
+        return normalizedBitmap(from: cgImage, scale: source.scale, orientation: .up, longestSide: maxPixelSize) ?? source
     }
 
     /// How many times over the cap an image has to be before it's worth downsampling — see
@@ -728,7 +750,7 @@ final class ImageCache: @unchecked Sendable {
     /// Redraws `cgImage` into a plain device-RGB, premultiplied-alpha bitmap — the workaround
     /// described on `decodedImage(from:maxPixelSize:)`.
     /// With `longestSide`, the bitmap is drawn at most that big — in the same pass that makes it a
-    /// plain bitmap, so the sub-sampled decode (between 1x and 2x the target) shrinks to exactly the
+    /// plain bitmap, so a decode that's still over the target (by up to 2x) shrinks to exactly the
     /// target instead of being kept at up to four times the pixels it will ever be shown with.
     private func normalizedBitmap(
         from cgImage: CGImage, scale: CGFloat, orientation: UIImage.Orientation, longestSide: Int? = nil
