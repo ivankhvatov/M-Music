@@ -68,7 +68,8 @@ struct MiniPlayerView: View {
             )
             NowPlayingMarquee(
                 text: player.currentTrack?.artist ?? "",
-                font: .preferred(.caption2)
+                font: .preferred(.caption2),
+                color: .gray
             )
             .foregroundStyle(.gray)
         }

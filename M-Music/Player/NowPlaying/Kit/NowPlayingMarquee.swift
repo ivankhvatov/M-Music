@@ -9,12 +9,15 @@ import SwiftUI
 ///   height of one line, with the text in an overlay), so when an ancestor's size or position is
 ///   animated — expanding, collapsing, dragging the sheet — it follows along like any other view
 ///   instead of snapping to its final position or being left behind.
-/// - **Its scroll is driven by the clock, not by an animation.** The package starts a
+/// - **Its scroll is driven by the clock, and moved by Core Animation.** The package starts a
 ///   `repeatForever` animation once and never again, and SwiftUI drops that whenever the view sits
 ///   at opacity 0, so the title froze after a collapse/expand or a track change made while hidden.
-///   Here the offset is a pure function of the time since the text last changed, recomputed every
-///   frame by a `TimelineView` — nothing to start, stop, drop or restart, and it keeps scrolling
-///   straight through any transition.
+///   Here the position is a pure function of the time since the text last changed: the animation
+///   that moves the text is made to agree with that clock, and made again whenever something may
+///   have taken it away (the view leaving the window, the app the screen). The text is drawn once
+///   and the system slides it, so a scroll costs the app nothing from frame to frame — drawing it
+///   afresh for each one took more of the CPU, and of the battery, than anything else did while a
+///   song played with the player docked.
 ///
 /// The clock starts afresh whenever the text changes and whenever the label starts to scroll — it
 /// does that mid-animation too, as the container narrows past the text's width — and the frame in
@@ -22,11 +25,14 @@ import SwiftUI
 /// (or of the label's last scroll) had got to: that showed as the text jumping sideways for a
 /// moment and then back.
 ///
-/// While `isActive` is false (the chrome is hidden) the timeline is paused, so an always-mounted
-/// but invisible chrome costs no per-frame work.
+/// While `isActive` is false (the chrome is hidden) the text is held where it is, so an
+/// always-mounted but invisible chrome has nothing moving in it.
 struct NowPlayingMarquee: View {
     let text: String
     let font: UIFont
+    /// The color of the text while it scrolls. It has to be the one the surrounding
+    /// `foregroundStyle` gives the text at rest, which UIKit knows nothing of.
+    var color: UIColor = .label
     var fade: CGFloat = 16
     /// Pause at the start of every loop, before scrolling begins.
     var startDelay: TimeInterval = 1.5
@@ -48,7 +54,6 @@ struct NowPlayingMarquee: View {
         let overflows = containerWidth > 0 && metrics.width > containerWidth
         let clockKey = ScrollClock.Key(text: text, scrolls: overflows)
         let gap = metrics.height * 2
-        let travel = metrics.width + gap
         let edge = overflows ? fade : 0
 
         Color.clear
@@ -58,67 +63,33 @@ struct NowPlayingMarquee: View {
                 if containerWidth != width { containerWidth = width }
             }
             .overlay(alignment: .leading) {
-                // While scrolling, the visible window reaches `edge` further left than the
-                // label's own bounds (a negative leading padding), and the text is pushed
-                // right by the same amount — so at rest it starts exactly where plain text
-                // would, and the left fade lives in the extra strip, always on, beginning
-                // before the text's start position instead of eating into it.
-                let label = Color.clear
-                    .overlay(alignment: .leading) {
-                        // Only this is drawn on every frame, and all that changes between
-                        // frames is how far the text is moved: the text itself is an unchanged,
-                        // `Equatable` view that isn't evaluated again. Redrawing everything above
-                        // and around it every frame cost twice the CPU, which is why the scroll
-                        // used to be held to 30 frames a second — and moved in steps of a point,
-                        // visibly, on a display that runs at 60 or 120. It's drawn on every
-                        // display frame.
-                        //
-                        // Moved by a transform rather than an `.offset`: an offset changes where
-                        // the text is placed, and SwiftUI then built its glyphs' display list
-                        // again on every frame; a transform moves the unchanged text as it is,
-                        // at little over half the cost.
-                        TimelineView(.animation(paused: !(overflows && isActive))) { context in
-                            let offset = overflows && clock.key == clockKey
-                                ? scrollOffset(at: context.date, since: clock.start, travel: travel)
-                                : 0
-                            MarqueeText(text: text, font: font, gap: gap, repeats: overflows)
-                                .equatable()
-                                .transformEffect(CGAffineTransform(translationX: edge - offset, y: 0))
-                        }
-                    }
-                // Clipped and faded only when there's something to clip: text that fits is
-                // left alone, since a clip/mask on it does nothing at rest and, while an
-                // ancestor's layout is animating, can slice the text against its own frame.
                 if overflows {
-                    label
-                        .clipped()
-                        .mask(fadeMask(edge: edge))
-                        .padding(.leading, -edge)
+                    // The visible window reaches `edge` further left than the label's own bounds
+                    // (a negative leading padding), and the text starts that far in — so at rest
+                    // it is exactly where plain text would be, and the left fade lives in the
+                    // extra strip, always on, beginning before the text's start position instead
+                    // of eating into it.
+                    ScrollingText(
+                        text: text, font: font, color: color, textWidth: metrics.width, gap: gap,
+                        edge: edge, speed: speed, startDelay: startDelay,
+                        start: clock.key == clockKey ? clock.start : nil, isActive: isActive
+                    )
+                    .padding(.leading, -edge)
                 } else {
-                    label
+                    // Text that fits is left alone: a clip or mask on it does nothing at rest
+                    // and, while an ancestor's layout is animating, can slice the text against
+                    // its own frame.
+                    Color.clear
+                        .overlay(alignment: .leading) {
+                            Text(text)
+                                .font(Font(font))
+                                .lineLimit(1)
+                                .fixedSize()
+                        }
                 }
             }
         .onChange(of: clockKey, initial: true) { _, key in clock = ScrollClock(key: key, start: Date()) }
         .onChange(of: restartToken) { clock.start = Date() }
-    }
-
-    /// The text, twice (a gap apart) when it scrolls — a view of its own so that frames which only
-    /// move it don't evaluate it again.
-    private struct MarqueeText: View, Equatable {
-        let text: String
-        let font: UIFont
-        let gap: CGFloat
-        let repeats: Bool
-
-        var body: some View {
-            HStack(spacing: gap) {
-                Text(text)
-                if repeats { Text(text) }
-            }
-            .font(Font(font))
-            .lineLimit(1)
-            .fixedSize()
-        }
     }
 
     /// When the label's current scroll started, and for what.
@@ -152,25 +123,124 @@ struct NowPlayingMarquee: View {
         metricsCache[key] = size
         return size
     }
+}
 
-    /// 0 while pausing at the start of a loop, then growing at `speed` until one full copy of the
-    /// text plus the gap has gone by — at which point the second copy sits exactly where the first
+/// The label while it scrolls: the text twice, a gap apart, behind soft edges.
+private struct ScrollingText: UIViewRepresentable, Equatable {
+    let text: String
+    let font: UIFont
+    let color: UIColor
+    let textWidth: CGFloat
+    let gap: CGFloat
+    /// The width of the soft edges. The text starts that far in.
+    let edge: CGFloat
+    let speed: CGFloat
+    let startDelay: TimeInterval
+    /// When the scroll's clock started; `nil` until it has, and the text sits at its start.
+    let start: Date?
+    let isActive: Bool
+
+    /// One full copy of the text and the gap: after it the second copy is exactly where the first
     /// started, so the loop is seamless.
-    private func scrollOffset(at date: Date, since start: Date, travel: CGFloat) -> CGFloat {
-        let cycle = startDelay + Double(travel / speed)
-        let elapsed = max(date.timeIntervalSince(start), 0).truncatingRemainder(dividingBy: cycle)
-        return elapsed <= startDelay ? 0 : CGFloat(elapsed - startDelay) * speed
+    var travel: CGFloat { textWidth + gap }
+
+    func makeUIView(context: Context) -> ScrollingTextView { ScrollingTextView() }
+
+    func updateUIView(_ view: ScrollingTextView, context: Context) {
+        view.show(self)
     }
 
-    /// Soft edges, only while scrolling and constant: the left fade sits in the `edge`-wide strip
-    /// before the text's start position, the right one in the last `edge` points.
-    private func fadeMask(edge: CGFloat) -> some View {
-        HStack(spacing: 0) {
-            LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing)
-                .frame(width: edge)
-            Rectangle()
-            LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
-                .frame(width: edge)
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: ScrollingTextView, context: Context) -> CGSize? {
+        proposal.replacingUnspecifiedDimensions()
+    }
+}
+
+private final class ScrollingTextView: UIView {
+    private static let animationKey = "marquee"
+    private let strip = UIView()
+    private let first = UILabel()
+    private let second = UILabel()
+    private let fades = CAGradientLayer()
+    private var shown: ScrollingText?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        second.isAccessibilityElement = false
+        for label in [first, second] {
+            label.lineBreakMode = .byClipping
+            strip.addSubview(label)
         }
+        addSubview(strip)
+        fades.colors = [UIColor.clear, .black, .black, .clear].map(\.cgColor)
+        fades.startPoint = CGPoint(x: 0, y: 0.5)
+        fades.endPoint = CGPoint(x: 1, y: 0.5)
+        layer.mask = fades
+        // Core Animation drops animations while the app is away.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(animate), name: UIApplication.willEnterForegroundNotification, object: nil
+        )
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    func show(_ label: ScrollingText) {
+        guard label != shown else { return }
+        shown = label
+        for view in [first, second] {
+            view.text = label.text
+            view.font = label.font
+            view.textColor = label.color
+        }
+        setNeedsLayout()
+        animate()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard let shown else { return }
+        // `bounds` and `center`, as the strip carries a transform while it scrolls.
+        strip.bounds = CGRect(origin: .zero, size: bounds.size)
+        strip.center = CGPoint(x: bounds.midX, y: bounds.midY)
+        let width = shown.textWidth.rounded(.up) + 1
+        first.frame = CGRect(x: shown.edge, y: 0, width: width, height: bounds.height)
+        second.frame = first.frame.offsetBy(dx: shown.travel, dy: 0)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        fades.frame = bounds
+        let edge = bounds.width > 0 ? Double(shown.edge / bounds.width) : 0
+        fades.locations = [0, NSNumber(value: edge), NSNumber(value: 1 - edge), 1]
+        CATransaction.commit()
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        animate()
+    }
+
+    /// Sets the text moving from wherever the clock has it — or, while nothing should move, holds
+    /// it there.
+    @objc private func animate() {
+        guard let shown else { return }
+        let travel = shown.travel
+        let cycle = shown.startDelay + Double(travel / shown.speed)
+        let elapsed = shown.start.map { max(Date().timeIntervalSince($0), 0) } ?? 0
+        strip.layer.removeAnimation(forKey: Self.animationKey)
+        guard shown.isActive, shown.start != nil, window != nil else {
+            let into = elapsed.truncatingRemainder(dividingBy: cycle)
+            let offset = max(into - shown.startDelay, 0) * Double(shown.speed)
+            strip.transform = CGAffineTransform(translationX: -offset, y: 0)
+            return
+        }
+        strip.transform = .identity
+        // Still for `startDelay`, then along at `speed`, over and over.
+        let scroll = CAKeyframeAnimation(keyPath: "transform.translation.x")
+        scroll.values = [0, 0, -travel]
+        scroll.keyTimes = [0, NSNumber(value: shown.startDelay / cycle), 1]
+        scroll.duration = cycle
+        scroll.repeatCount = .infinity
+        scroll.isRemovedOnCompletion = false
+        scroll.beginTime = strip.layer.convertTime(CACurrentMediaTime(), from: nil) - elapsed
+        strip.layer.add(scroll, forKey: Self.animationKey)
     }
 }
