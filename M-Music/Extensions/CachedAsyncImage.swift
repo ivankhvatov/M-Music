@@ -24,7 +24,9 @@ import UniformTypeIdentifiers
 /// image (host, path, and whatever's left in the query — `id`, `size`, ...).
 ///
 /// The bytes on disk are always whatever the server sent (original size when no `size` param
-/// was requested). What's capped is the *decoded in-memory bitmap*: by default an image is
+/// was requested; for a card-sized or larger request, an original that's already on disk is
+/// used instead of downloading — see `originalKey(for:)`). What's capped is the *decoded
+/// in-memory bitmap*: by default an image is
 /// decoded down to `standardMaxPixelSize` on its longest side, since nothing in a list, card,
 /// carousel or detail header is displayed anywhere near original resolution, and decoding (and
 /// holding) a 3000² cover for a 160pt card is what made opening a screen full of artwork spike
@@ -101,7 +103,9 @@ final class ImageCache: @unchecked Sendable {
         var tick: Int
     }
     private let fileManager = FileManager.default
-    private let session: URLSession
+    private let sessionOverride: URLSession?
+    /// Built on first use — see `lockedSession()`.
+    private var ownSession: URLSession?
     /// The regular cache (`Caches/`) — see the type's doc comment.
     private let regularDirectory: URL?
     /// The permanent cache (`Application Support/`) — see the type's doc comment.
@@ -152,14 +156,14 @@ final class ImageCache: @unchecked Sendable {
     init(
         regularDirectory: URL? = ImageCache.defaultRegularDirectory(),
         permanentDirectory: URL? = ImageCache.defaultPermanentDirectory(),
-        session: URLSession = .shared,
+        session: URLSession? = nil,
         pinnedCostLimit: Int = 96 * 1024 * 1024
     ) {
         self.pinnedCostLimit = pinnedCostLimit
         memory.totalCostLimit = 200 * 1024 * 1024
         self.regularDirectory = regularDirectory
         self.permanentDirectory = permanentDirectory
-        self.session = session
+        self.sessionOverride = session
         memoryWarningObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: nil
         ) { [weak self] _ in self?.dropPinned() }
@@ -396,34 +400,63 @@ final class ImageCache: @unchecked Sendable {
         return image
     }
 
-    /// The original bytes for `url`: from the regular cache if it has them; otherwise — it was
-    /// never fetched, or iOS purged it — from the permanent cache, then the server. Whichever of
-    /// those supplies them, they're written back to the regular cache, so every later load is a
-    /// regular-cache hit.
+    /// The bytes for `url`: from disk if they're there — `url`'s own, or else the original's
+    /// where that can stand in (see `originalKey(for:)`) — and from the server otherwise.
     private func originalData(for url: URL, key: String) async -> Data? {
-        if let data = readRegular(key) { return data }
-        if let data = readPermanent(key) {
-            writeRegular(data, forKey: key)
-            return data
-        }
+        if let data = readStored(key) { return data }
+        if let original = originalKey(for: url), let data = readStored(original) { return data }
         guard let data = await downloadImageData(url) else { return nil }
         writeRegular(data, forKey: key)
         return data
     }
 
-    /// Makes sure `url`'s original bytes are in the regular cache, without decoding anything —
-    /// for warming the cache ahead of a screen that will want the full image (e.g. so opening an
-    /// album from a list doesn't wait on the network), without paying for a decode of an image
-    /// that may never be shown at that size. Cancellable: call it from a `.task`, which cancels it
-    /// when the row scrolls away. Only a few run at a time; `.high` — for images a screen is
-    /// waiting on — goes ahead of every `.low` one still queued.
+    /// `key`'s bytes from the regular cache, else — it was never fetched, or iOS purged it — from
+    /// the permanent one, written back to the regular cache so every later load finds them there.
+    private func readStored(_ key: String) -> Data? {
+        if let data = readRegular(key) { return data }
+        guard let data = readPermanent(key) else { return nil }
+        writeRegular(data, forKey: key)
+        return data
+    }
+
+    private func isStored(_ key: String) -> Bool {
+        fileExists(regularURL(forKey: key)) || fileExists(permanentURL(forKey: key))
+    }
+
+    /// For a cover asked of the server at card size or above: the key of the original image, which
+    /// serves just as well if it's already on disk — saved by an earlier version of the app, or
+    /// as the Now Playing artwork of a download — so that nothing is fetched twice and downloaded
+    /// music keeps its covers offline. `nil` for row thumbnails: decoding an original for each
+    /// of those would cost far more than they do.
+    private func originalKey(for url: URL) -> String? {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let items = components.queryItems,
+              let size = items.first(where: { $0.name == "size" })?.value.flatMap(Int.init),
+              size > Self.largestThumbnailSize
+        else { return nil }
+        components.queryItems = items.filter { $0.name != "size" }
+        return components.url.map { stableKey(for: $0) }
+    }
+
+    /// Row thumbnails are asked for at up to 64pt, 192px at 3x.
+    private static let largestThumbnailSize = 256
+
+    /// Makes sure `url`'s bytes are in the regular cache, without decoding anything — for warming
+    /// the cache ahead of a screen that will want the large cover (e.g. so opening an album from
+    /// a list doesn't wait on the network), without paying for a decode of an image that may never
+    /// be shown at that size. Cancellable: call it from a `.task`, which cancels it when the row
+    /// scrolls away. Only a few run at a time; `.high` — for images a screen is waiting on — goes
+    /// ahead of every `.low` one still queued.
     func prefetchOriginalData(_ url: URL?, priority: AsyncLimiter.Priority = .low) async {
         guard let url else { return }
         let key = stableKey(for: url)
-        if fileExists(regularURL(forKey: key)) { return }
-        if let data = readPermanent(key) {
-            writeRegular(data, forKey: key)
-            return
+        // Anything on disk that will do is brought into the regular cache; nothing is fetched then.
+        for candidate in [key, originalKey(for: url)].compactMap({ $0 }) {
+            if fileExists(regularURL(forKey: candidate)) { return }
+            if let data = readPermanent(candidate) {
+                writeRegular(data, forKey: candidate)
+                return
+            }
         }
 
         await prefetchGate.acquire(priority: priority)
@@ -469,7 +502,7 @@ final class ImageCache: @unchecked Sendable {
         let key = stableKey(for: url)
         let memKey = memoryKey(key, maxPixelSize: maxPixelSize)
         if cachedImage(forKey: memKey) != nil { return true }
-        if !allowNetwork, !fileExists(regularURL(forKey: key)), !fileExists(permanentURL(forKey: key)) {
+        if !allowNetwork, !isStored(key), !(originalKey(for: url).map(isStored) ?? false) {
             return false
         }
         guard paced else { return await load(url, maxPixelSize: maxPixelSize, priority: priority) != nil }
@@ -496,10 +529,20 @@ final class ImageCache: @unchecked Sendable {
     @discardableResult
     func savePermanently(_ url: URL) async -> Bool {
         let key = stableKey(for: url)
+        if isStored(key) { return keepInBothCaches(key) }
+        // The original is here already: keeping it is as good, and costs no download.
+        if let original = originalKey(for: url), isStored(original) { return keepInBothCaches(original) }
+        guard let data = await downloadImageData(url) else { return false }
+        writeRegular(data, forKey: key)
+        writeToPermanent(data, forKey: key)
+        return true
+    }
+
+    /// Copies what one disk cache has of `key` into the other, if that lacks it.
+    private func keepInBothCaches(_ key: String) -> Bool {
         let inRegular = fileExists(regularURL(forKey: key))
         let inPermanent = fileExists(permanentURL(forKey: key))
         if inRegular && inPermanent { return true }
-
         if inRegular, let data = readRegular(key) {
             writeToPermanent(data, forKey: key)
             return fileExists(permanentURL(forKey: key))
@@ -508,10 +551,7 @@ final class ImageCache: @unchecked Sendable {
             writeRegular(data, forKey: key)
             return fileExists(regularURL(forKey: key))
         }
-        guard let data = await downloadImageData(url) else { return false }
-        writeRegular(data, forKey: key)
-        writeToPermanent(data, forKey: key)
-        return true
+        return false
     }
 
     /// Drops `url`'s image from every tier — each in-memory size tier, the regular cache and the
@@ -558,7 +598,8 @@ final class ImageCache: @unchecked Sendable {
         let key = stableKey(for: url)
         let task: Task<Data?, Never> = lock.withLock {
             if let existing = downloadsInFlight[key] { return existing }
-            let created = Task { [session] in await Self.fetchImageData(url, session: session) }
+            let session = lockedSession()
+            let created = Task { await Self.fetchImageData(url, session: session) }
             downloadsInFlight[key] = created
             return created
         }
@@ -568,6 +609,26 @@ final class ImageCache: @unchecked Sendable {
     }
 
     private var downloadsInFlight: [String: Task<Data?, Never>] = [:]
+
+    /// The session artwork is downloaded with. Call with `lock` held.
+    private func lockedSession() -> URLSession {
+        if let existing = sessionOverride ?? ownSession { return existing }
+        let created = URLSession(configuration: Self.sessionConfiguration)
+        ownSession = created
+        return created
+    }
+
+    /// Artwork's own session, with no URL cache: every cover URL carries a fresh random salt, so
+    /// one could never answer a request — the shared session still wrote each image to it, next to
+    /// the copy kept here. And a few connections at most, so that a screenful of covers doesn't
+    /// crowd out the audio stream.
+    static var sessionConfiguration: URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.default
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.httpMaximumConnectionsPerHost = 4
+        return configuration
+    }
 
     private static func fetchImageData(_ url: URL, session: URLSession) async -> Data? {
         guard let (data, response) = try? await session.data(from: url) else { return nil }

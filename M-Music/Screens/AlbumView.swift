@@ -231,9 +231,11 @@ struct AlbumView: View {
                 artworkIds.insert(song.coverArt ?? song.id.raw)
             }
         }
-        // Full size, plus the row-thumbnail sizes song rows and album rows request.
+        // The original, the cards' and header's size, and the row-thumbnail sizes song rows and
+        // album rows request.
         let pixelSizes: [Int?] = [
             nil,
+            ArtworkRequest.coverSize,
             ImageCache.RowArtwork.pixels(ImageCache.RowArtwork.song, scale: displayScale),
             ImageCache.RowArtwork.pixels(ImageCache.RowArtwork.album, scale: displayScale),
         ]
@@ -258,7 +260,9 @@ struct AlbumView: View {
         loadError = nil
         // A newly signed URL is what makes `CachedAsyncImage` reload; its stable cache key was
         // just purged, so this refetches the header artwork from the server.
-        artworkURL = try? client.coverArtURL(forId: fresh.coverArt ?? album.coverArt ?? album.id.raw)
+        artworkURL = try? client.coverArtURL(
+            forId: fresh.coverArt ?? album.coverArt ?? album.id.raw, size: ArtworkRequest.coverSize
+        )
         // The purge above also dropped the permanent copies; if the album still has downloaded
         // songs, save the refreshed artwork there again.
         await DownloadedArtwork.shared.requestSync()
@@ -591,7 +595,7 @@ struct AlbumView: View {
     }
 
     func albumArtwork() -> some View {
-        // Same URL AlbumCardView requests (original size, no `size` param), so this reuses the
+        // Same URL AlbumCardView requests (`ArtworkRequest.coverSize`), so this reuses the
         // image straight from ImageCache instead of re-fetching — the whole point being no lag
         // when this view opens.
         CachedAsyncImage(url: artworkURL, fallbackMaxPixelSize: ImageCache.cardMaxPixelSize, onLoad: { uiImage in

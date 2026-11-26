@@ -403,7 +403,9 @@ struct PlaylistView: View {
         changedAfterRemoval = nil
         // A newly signed URL is what makes `CachedAsyncImage` reload; its stable cache key was just
         // purged, so this refetches the header artwork from the server.
-        artworkURL = try? client.coverArtURL(forId: fresh.coverArt ?? playlist.coverArt ?? playlist.id.raw)
+        artworkURL = try? client.coverArtURL(
+            forId: fresh.coverArt ?? playlist.coverArt ?? playlist.id.raw, size: ArtworkRequest.coverSize
+        )
         await DownloadedArtwork.shared.requestSync()
     }
 
@@ -415,9 +417,11 @@ struct PlaylistView: View {
             displayedPlaylist.coverArt ?? playlist.id.raw, fresh.coverArt ?? playlist.id.raw,
         ]
         for song in songs { artworkIds.insert(ArtworkRequest.artworkId(of: song)) }
-        // Full size, plus the row-thumbnail sizes song rows and playlist rows request.
+        // The original, the cards' and header's size, and the row-thumbnail sizes song rows and
+        // playlist rows request.
         let pixelSizes: [Int?] = [
             nil,
+            ArtworkRequest.coverSize,
             ImageCache.RowArtwork.pixels(ImageCache.RowArtwork.song, scale: displayScale),
             ImageCache.RowArtwork.pixels(ImageCache.RowArtwork.playlist, scale: displayScale),
         ]
@@ -439,7 +443,7 @@ struct PlaylistView: View {
         removedSongCount = 0
         removedDuration = 0
         changedAfterRemoval = nil
-        artworkURL = try? client.coverArtURL(forId: changed.coverArt ?? playlist.id.raw)
+        artworkURL = try? client.coverArtURL(forId: changed.coverArt ?? playlist.id.raw, size: ArtworkRequest.coverSize)
         await loadSongs()
     }
 
@@ -506,7 +510,7 @@ struct PlaylistView: View {
     }
 
     func playlistArtwork() -> some View {
-        // Same URL PlaylistCardView requests (original size, no `size` param), so this reuses the
+        // Same URL PlaylistCardView requests (`ArtworkRequest.coverSize`), so this reuses the
         // image straight from ImageCache instead of triggering a second fetch.
         CachedAsyncImage(url: artworkURL, fallbackMaxPixelSize: ImageCache.cardMaxPixelSize, onLoad: { uiImage in
             if uiImage.size.width > 0, uiImage.size.height > 0 { artworkAspect = uiImage.size.width / uiImage.size.height }

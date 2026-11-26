@@ -378,7 +378,12 @@ struct ImageWarmerManifestTests {
 
     @Test func requestsKeepTheTierTheViewsUse() {
         #expect(ArtworkRequest.albumCard("a").maxPixelSize == ImageCache.cardMaxPixelSize)
-        #expect(ArtworkRequest.albumCard("a").size == nil)
+        #expect(ArtworkRequest.albumCard("a").size == ArtworkRequest.coverSize)
+        // One file serves a cover's card and its header, big enough for both.
+        #expect(ArtworkRequest.albumHeader("a").size == ArtworkRequest.albumCard("a").size)
+        #expect(ArtworkRequest.playlistHeader("a").size == ArtworkRequest.coverSize)
+        #expect(ArtworkRequest.coverSize >= max(ImageCache.standardMaxPixelSize, ImageCache.cardMaxPixelSize))
+        #expect(ArtworkRequest.artistHeader("a").size == ImageCache.cardMaxPixelSize)
         #expect(ArtworkRequest.albumRow("a", scale: 3).size == ImageCache.RowArtwork.pixels(ImageCache.RowArtwork.album, scale: 3))
         #expect(ArtworkRequest.albumRow("a", scale: 3).maxPixelSize == ImageCache.standardMaxPixelSize)
         #expect(ArtworkRequest.albumHeader("a").maxPixelSize == ImageCache.standardMaxPixelSize)
@@ -440,6 +445,66 @@ struct ImageReadinessTests {
         #expect(!readiness.isReady)
         readiness.require([])
         #expect(readiness.isReady)
+    }
+}
+
+/// A large cover asked for server-sized, when the original is already on disk.
+extension ImageCacheTests {
+    @Test func aSizedCoverUsesAnOriginalThatIsAlreadyOnDisk() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        _ = await dirs.makeCache().load(coverURL("al-80"))
+        let image = await dirs.makeCache().load(coverURL("al-80", size: 900))
+        #expect(image != nil)
+        #expect(ImageStub.requestCount == 1)
+    }
+
+    /// Downloads made by an earlier version saved originals only: offline, they must still show.
+    @Test func aSizedCoverFindsAPermanentOriginalAfterThePurge() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        await dirs.makeCache().savePermanently(coverURL("al-81"))
+        dirs.purgeRegular()
+        ImageStub.reset(status: 500)
+
+        let cache = dirs.makeCache()
+        #expect(await cache.preload(coverURL("al-81", size: 900), maxPixelSize: ImageCache.standardMaxPixelSize))
+        await cache.prefetchOriginalData(coverURL("al-81", size: 531))
+        #expect(await dirs.makeCache().load(coverURL("al-81", size: 900)) != nil)
+        #expect(ImageStub.requestCount == 0)
+    }
+
+    @Test func aRowThumbnailIsFetchedEvenWithTheOriginalOnDisk() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        _ = await dirs.makeCache().load(coverURL("al-82"))
+        _ = await dirs.makeCache().load(coverURL("al-82", size: 192))
+        #expect(ImageStub.requestCount == 2)
+    }
+
+    @Test func savingASizedCoverKeepsTheOriginalInsteadOfDownloading() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        _ = await dirs.makeCache().load(coverURL("al-83"))
+        #expect(await dirs.makeCache().savePermanently(coverURL("al-83", size: 900)))
+        #expect(ImageStub.requestCount == 1)
+        #expect(dirs.fileCount(dirs.permanent) == 1)
+    }
+
+    @Test func aSizedCoverWithNothingOnDiskIsDownloadedAsAskedFor() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        _ = await dirs.makeCache().load(coverURL("al-84", size: 900))
+        // The sized file doesn't stand in for the original.
+        _ = await dirs.makeCache().load(coverURL("al-84"))
+        #expect(ImageStub.requestCount == 2)
+        #expect(dirs.fileCount(dirs.regular) == 2)
+    }
+
+    @Test func artworkHasItsOwnSessionWithoutAURLCache() {
+        let configuration = ImageCache.sessionConfiguration
+        #expect(configuration.urlCache == nil)
+        #expect(configuration.httpMaximumConnectionsPerHost == 4)
     }
 }
 

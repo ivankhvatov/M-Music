@@ -44,8 +44,8 @@ struct CoverCard<TransitionID: Hashable>: View, Equatable {
         // (longer side matching the square, not stretched to fill it) instead of forcing a 1:1 crop.
         let image = square
             .overlay {
-                // The original size (no `size` parameter), the same URL the album or playlist
-                // screen requests, so opening it reuses the image straight from `ImageCache`.
+                // The same URL the album or playlist screen requests (`ArtworkRequest.coverSize`),
+                // so opening it reuses the image straight from `ImageCache`.
                 CachedAsyncImage(url: artworkURL, maxPixelSize: ImageCache.cardMaxPixelSize) { image in
                     image
                         .resizable()

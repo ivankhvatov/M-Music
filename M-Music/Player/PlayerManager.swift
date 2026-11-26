@@ -135,8 +135,8 @@ final class PlayerManager: ObservableObject {
     /// Center's "favorite" toggle (`MPRemoteCommandCenter.likeCommand`) as well as `PlayerView`'s
     /// own star button — both call `toggleStarred()` below.
     @Published private(set) var isCurrentTrackStarred = false
-    /// Same id `AlbumView`/`AlbumCardView` use for cover art (original size, no `size` param),
-    /// so the mini/full player reuses whatever's already in `ImageCache` instead of re-fetching.
+    /// The current track's cover at its original size (no `size` param) — what the mini and full
+    /// player show. (Cards and headers ask for covers server-sized: `ArtworkRequest.coverSize`.)
     /// Recomputed once per track load rather than on every access: `SubsonicClient.url(for:_:)`
     /// signs each call with a fresh random token, so a computed property here would return a
     /// different URL string on every read even for the same track — defeating both
