@@ -75,6 +75,12 @@ enum HomeLoadingPolicy {
     /// How many cards of each carousel are on the first screen, about.
     static let cardsPerCarousel = 3
 
+    /// How many playlists are fetched at once to rank them, on a first launch and later.
+    static let playlistFetchLimit = 6
+    static let deferredPlaylistFetchLimit = 3
+    /// How long after Home starts loading a ranking that can wait is recomputed.
+    static let rankingDelay: Duration = .seconds(5)
+
     /// The expensive requests — the starred artists and, above all, the per-playlist play counts —
     /// aren't repeated every time the tab is visited again: only if they've never run, or not for
     /// `interval`.
@@ -129,6 +135,8 @@ struct HomeView: View {
     /// Which albums and playlists are available offline — see `HomeAvailability`.
     @State private var availability = HomeAvailability.online
     @State private var availabilityTask: Task<Void, Never>?
+    /// The re-ranking of the top playlists that waits for the app to settle — see `loadTopPlaylists`.
+    @State private var rankingTask: Task<Void, Never>?
     /// What the screen shows, built off the main actor by `HomeLayoutBuilder` from everything above
     /// and the settings: `body` only loops over it.
     @State private var layout = HomeLayout.empty
@@ -527,8 +535,9 @@ struct HomeView: View {
     /// The top playlists show at once from the last ranking (kept in the library cache), then the
     /// ranking is recomputed — unless it ran recently — and replaces it only if it changed.
     ///
-    /// Subsonic exposes no play count for playlists, so a playlist's count is the sum of its
-    /// songs' play counts, fetched per playlist — a few at a time, not all at once.
+    /// Recomputing asks the server for every playlist, so with a ranking already on screen it
+    /// waits until the first screens are up and nothing is scrolling, and goes gently. With none
+    /// to show (the first launch) it runs at once.
     private func loadTopPlaylists(runExpensive: Bool) async {
         guard visibleCarousels.contains(.topPlaylists) else { return }
         if topPlaylists.isEmpty, let remembered = await Self.rememberedTopPlaylists() {
@@ -538,6 +547,23 @@ struct HomeView: View {
         settle(.topPlaylists)
         guard runExpensive else { return }
 
+        rankingTask?.cancel()
+        guard !topPlaylists.isEmpty else {
+            await rankTopPlaylists(fetching: HomeLoadingPolicy.playlistFetchLimit)
+            return
+        }
+        // Not awaited: nothing else on Home is to wait for it.
+        rankingTask = Task(priority: .utility) {
+            try? await Task.sleep(for: HomeLoadingPolicy.rankingDelay)
+            await ScrollActivity.shared.waitUntilIdle()
+            guard !Task.isCancelled else { return }
+            await rankTopPlaylists(fetching: HomeLoadingPolicy.deferredPlaylistFetchLimit)
+        }
+    }
+
+    /// Subsonic exposes no play count for playlists, so a playlist's count is the sum of its
+    /// songs' play counts, fetched per playlist — `limit` at a time, not all at once.
+    private func rankTopPlaylists(fetching limit: Int) async {
         var playlists: [PlaylistSummary] = []
         for await event in LibraryLoader.load(.allPlaylists(), shown: nil) {
             switch event {
@@ -549,7 +575,7 @@ struct HomeView: View {
         }
         guard !playlists.isEmpty, !Task.isCancelled else { return }
         let client = client
-        let counts = await BoundedConcurrency.map(playlists, limit: Self.playlistFetchLimit) { playlist -> (String, Int) in
+        let counts = await BoundedConcurrency.map(playlists, limit: limit) { playlist -> (String, Int) in
             let songs = (try? await client.getPlaylist(id: playlist.id.raw))?.entry ?? []
             return (playlist.id.raw, songs.reduce(0) { $0 + ($1.playCount ?? 0) })
         }
@@ -566,7 +592,6 @@ struct HomeView: View {
         await LibraryCacheDatabase.shared.set(ids, category: Self.rankingCategory, key: Self.rankingKey)
     }
 
-    private static let playlistFetchLimit = 6
     private static let rankingCategory = "home"
     private static let rankingKey = "topPlaylists"
 
