@@ -166,12 +166,12 @@ actor ImageWarmer {
 
     // MARK: - Now Playing
 
-    /// The expanded player's artwork (full resolution), the colour-sampling thumbnail its gradient
-    /// is built from, and the thumbnails of the queue rows listed beneath it.
+    /// The expanded player's artwork, the colour-sampling thumbnail its gradient is built from,
+    /// and the thumbnails of the queue rows listed beneath it.
     func warmNowPlaying(url: URL?, upcoming: [Child]) async {
         if let url {
             // Not bulk, and the player is what the user sees first: fetching it is fine.
-            await cache.preload(url, maxPixelSize: nil, allowNetwork: true)
+            await cache.preload(url, maxPixelSize: ImageCache.nowPlayingMaxPixelSize, allowNetwork: true)
             await cache.preload(url, maxPixelSize: ImageCache.colorSamplingMaxPixelSize, allowNetwork: true)
         }
         guard !upcoming.isEmpty else { return }

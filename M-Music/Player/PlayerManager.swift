@@ -1389,6 +1389,7 @@ final class PlayerManager: ObservableObject {
               gaplessPreloadedIndex != nextIndex
         else { return }
         let nextTrack = queue[nextIndex]
+        prepareArtwork(for: nextTrack)
 
         if GaplessCacheSettings.isEnabled {
             prepareNextItemViaGaplessCache(nextTrack, at: nextIndex)
@@ -1417,6 +1418,18 @@ final class PlayerManager: ObservableObject {
         // forever.
         let keepIds = Set([queue[currentIndex].id.raw, nextTrack.id.raw])
         Task { await StreamCacheService.shared.trim(keeping: keepIds) }
+    }
+
+    /// Decodes the next track's cover, and the sample its colours are taken from, ahead of the
+    /// change — so a skip or the natural hand-off shows them at once, not the previous cover.
+    private func prepareArtwork(for track: Child) {
+        guard let url = client.cachedCoverArtURL(forId: ArtworkRequest.artworkId(of: track)) else { return }
+        Task(priority: .utility) {
+            let tiers = [ImageCache.nowPlayingMaxPixelSize, ImageCache.colorSamplingMaxPixelSize]
+            for tier in tiers {
+                await ImageCache.shared.preload(url, maxPixelSize: tier, allowNetwork: true, paced: false)
+            }
+        }
     }
 
     /// The `GaplessCacheSettings.isEnabled` path: caches the upcoming track — raw or transcoded —

@@ -389,7 +389,9 @@ struct ImageWarmerManifestTests {
         #expect(ArtworkRequest.albumHeader("a").maxPixelSize == ImageCache.standardMaxPixelSize)
         #expect(ArtworkRequest.artistRow("a", scale: 2).maxPixelSize == ImageCache.avatarMaxPixelSize)
         #expect(ArtworkRequest.artistHeader("a").maxPixelSize == ImageCache.cardMaxPixelSize)
-        #expect(ArtworkRequest.nowPlaying("a").maxPixelSize == nil)
+        // Now Playing shows the original, decoded no wider than the screen.
+        #expect(ArtworkRequest.nowPlaying("a").size == nil)
+        #expect(ArtworkRequest.nowPlaying("a").maxPixelSize == ImageCache.nowPlayingMaxPixelSize)
         #expect(ArtworkRequest.colorSampling("a").maxPixelSize == ImageCache.colorSamplingMaxPixelSize)
     }
 }

@@ -30,7 +30,8 @@ import UniformTypeIdentifiers
 /// decoded down to `standardMaxPixelSize` on its longest side, since nothing in a list, card,
 /// carousel or detail header is displayed anywhere near original resolution, and decoding (and
 /// holding) a 3000² cover for a 160pt card is what made opening a screen full of artwork spike
-/// every core. Pass `maxPixelSize: nil` to get the full-resolution bitmap (Now Playing).
+/// every core. Now Playing asks for `nowPlayingMaxPixelSize`; `maxPixelSize: nil` gives the
+/// full-resolution bitmap.
 final class ImageCache: @unchecked Sendable {
     static let shared = ImageCache()
 
@@ -43,8 +44,8 @@ final class ImageCache: @unchecked Sendable {
     /// tier would mean up to 3x the pixels for nothing, dozens of times over on a screen full of
     /// covers. Set once at launch, by `setScreenSize(width:scale:)`.
     nonisolated(unsafe) private(set) static var cardMaxPixelSize = 512
-    /// The screen's width in pixels — what the lock screen's artwork, shown about that wide, is
-    /// decoded to. Set once at launch, like `cardMaxPixelSize`.
+    /// The screen's width in pixels — what Now Playing's artwork, in the player and on the lock
+    /// screen, is decoded to. Set once at launch, like `cardMaxPixelSize`.
     nonisolated(unsafe) private(set) static var nowPlayingMaxPixelSize = 1320
 
     /// Sizes the tiers that follow the screen. Called by the app delegate at launch, before

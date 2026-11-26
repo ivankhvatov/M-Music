@@ -89,9 +89,10 @@ struct ArtworkRequest: Hashable, Codable, Sendable {
         )
     }
 
-    /// The artwork of the mini player and the expanded player (`TrackArtworkView`): full resolution.
+    /// The artwork of the mini player and the expanded player (`TrackArtworkView`), and of the
+    /// lock screen: the original, decoded as wide as the screen — it's shown no larger.
     static func nowPlaying(_ artworkId: String) -> ArtworkRequest {
-        ArtworkRequest(id: artworkId, size: nil, maxPixelSize: nil)
+        ArtworkRequest(id: artworkId, size: nil, maxPixelSize: ImageCache.nowPlayingMaxPixelSize)
     }
 
     /// What the expanded player samples its gradient colours from.
