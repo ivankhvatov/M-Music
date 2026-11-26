@@ -9,6 +9,8 @@ private final class ImageStub: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var status = 200
     nonisolated(unsafe) static var body = ImageStub.png
     nonisolated(unsafe) static var requestCount = 0
+    /// How long the "server" takes to answer.
+    nonisolated(unsafe) static var delay: TimeInterval = 0
     private static let lock = NSLock()
 
     static let png: Data = {
@@ -24,6 +26,7 @@ private final class ImageStub: URLProtocol, @unchecked Sendable {
         self.status = status
         self.body = body
         requestCount = 0
+        delay = 0
     }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
@@ -32,8 +35,9 @@ private final class ImageStub: URLProtocol, @unchecked Sendable {
     override func startLoading() {
         Self.lock.lock()
         Self.requestCount += 1
-        let (status, body) = (Self.status, Self.body)
+        let (status, body, delay) = (Self.status, Self.body, Self.delay)
         Self.lock.unlock()
+        if delay > 0 { Thread.sleep(forTimeInterval: delay) }
         let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: body)
@@ -470,6 +474,42 @@ extension ImageCacheTests {
 
     private func target(_ id: String) -> ImageWarmer.Target {
         .init(url: coverURL(id), maxPixelSize: ImageCache.standardMaxPixelSize)
+    }
+
+    @Test func preparingAScreenPutsItsImagesInMemory() async {
+        ImageStub.reset()
+        let (warmer, cache) = warmer(Directories())
+        let targets = (0..<6).map { target("prepared-\($0)") }
+        await warmer.prepare(targets: targets, timeout: .seconds(5))
+        for item in targets { #expect(cache.image(for: item.url, maxPixelSize: item.maxPixelSize) != nil) }
+    }
+
+    /// A download under way can't be cancelled; the screen must not wait for it all the same.
+    @Test func preparingAScreenReturnsAtItsTimeLimitAndTheImageStillArrives() async {
+        ImageStub.reset()
+        ImageStub.delay = 1.5
+        defer { ImageStub.delay = 0 }
+        let (warmer, cache) = warmer(Directories())
+        let item = target("slow-1")
+        let start = ContinuousClock.now
+        await warmer.prepare(targets: [item], timeout: .milliseconds(200))
+        #expect(ContinuousClock.now - start < .milliseconds(900))
+        #expect(cache.image(for: item.url, maxPixelSize: item.maxPixelSize) == nil)
+        #expect(await waitUntil { cache.image(for: item.url, maxPixelSize: item.maxPixelSize) != nil })
+    }
+
+    @Test func preparingAScreenStopsWaitingWhenCancelled() async {
+        ImageStub.reset()
+        ImageStub.delay = 1.5
+        defer { ImageStub.delay = 0 }
+        let (warmer, _) = warmer(Directories())
+        let item = target("slow-2")
+        let start = ContinuousClock.now
+        let preparing = Task { await warmer.prepare(targets: [item], timeout: .seconds(10)) }
+        try? await Task.sleep(for: .milliseconds(100))
+        preparing.cancel()
+        await preparing.value
+        #expect(ContinuousClock.now - start < .milliseconds(900))
     }
 
     @Test func eachSourceFinishesItsOwnQueue() async {

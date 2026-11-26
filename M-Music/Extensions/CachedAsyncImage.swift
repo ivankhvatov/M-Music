@@ -415,8 +415,9 @@ final class ImageCache: @unchecked Sendable {
     /// for warming the cache ahead of a screen that will want the full image (e.g. so opening an
     /// album from a list doesn't wait on the network), without paying for a decode of an image
     /// that may never be shown at that size. Cancellable: call it from a `.task`, which cancels it
-    /// when the row scrolls away.
-    func prefetchOriginalData(_ url: URL?) async {
+    /// when the row scrolls away. Only a few run at a time; `.high` — for images a screen is
+    /// waiting on — goes ahead of every `.low` one still queued.
+    func prefetchOriginalData(_ url: URL?, priority: AsyncLimiter.Priority = .low) async {
         guard let url else { return }
         let key = stableKey(for: url)
         if fileExists(regularURL(forKey: key)) { return }
@@ -425,7 +426,7 @@ final class ImageCache: @unchecked Sendable {
             return
         }
 
-        await prefetchGate.acquire()
+        await prefetchGate.acquire(priority: priority)
         defer { Task { await prefetchGate.release() } }
         guard !Task.isCancelled else { return }
         guard let data = await downloadImageData(url) else { return }

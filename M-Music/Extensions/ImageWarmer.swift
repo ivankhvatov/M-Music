@@ -185,34 +185,54 @@ actor ImageWarmer {
     // MARK: - Opening a screen
 
     /// Gets `requests` into memory as fast as it sensibly can, for a screen that's open and holding
-    /// its content back until they are (`ImageReadiness`): the bytes of whatever isn't on disk
-    /// are fetched a few at a time, then everything is decoded without the warm-up pauses. Gives
-    /// up after `timeout` — a slow or unreachable server must never keep a list blank. `screen`
-    /// only names the caller in the timing log (`PerfLog`).
+    /// its content back until they are (`ImageReadiness`): each image that isn't on disk is
+    /// fetched — ahead of any look-ahead fetches — and decoded as soon as its bytes are there,
+    /// without the warm-up pauses and as many at once as the cache allows. Returns after `timeout`
+    /// at the latest — a slow or unreachable server must never keep a list blank — and at once if
+    /// the caller is cancelled. What isn't done at the time limit carries on by itself, for the
+    /// cells that will join it. `screen` only names the caller in the timing log (`PerfLog`).
     func prepare(_ requests: [ArtworkRequest], timeout: Duration = .seconds(2), screen: String = #fileID) async {
+        let targets = requests.compactMap { request in
+            request.url.map { Target(url: $0, maxPixelSize: request.maxPixelSize) }
+        }
+        await prepare(targets: targets, timeout: timeout, screen: screen)
+    }
+
+    func prepare(targets: [Target], timeout: Duration, screen: String = #fileID) async {
         let cache = self.cache
         let logWaitEnd = PerfLog.beginCoversWait(
-            screen: screen, count: requests.count,
-            missing: requests.filter { !cache.isCached($0) }.count, limit: timeout
+            screen: screen, count: targets.count,
+            missing: targets.filter { cache.image(for: $0.url, maxPixelSize: $0.maxPixelSize) == nil }.count,
+            limit: timeout
         )
         defer { logWaitEnd() }
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask {
-                await withTaskGroup(of: Void.self) { downloads in
-                    for request in requests where !cache.isCached(request) {
-                        downloads.addTask { await cache.prefetchOriginalData(request.url) }
+        // Ends when the work is done or the time is up, whichever is first. Not a task group:
+        // one waits for all of its children, and a download that's under way can't be cancelled,
+        // so the time limit held nothing to account.
+        let (ended, end) = AsyncStream.makeStream(of: Void.self)
+        let work = Task {
+            await withTaskGroup(of: Void.self) { group in
+                for target in targets {
+                    group.addTask {
+                        if cache.image(for: target.url, maxPixelSize: target.maxPixelSize) != nil { return }
+                        await cache.prefetchOriginalData(target.url, priority: .high)
+                        // A screen is waiting on these: ahead of any warm-up in the decode queue.
+                        await cache.preload(
+                            target.url, maxPixelSize: target.maxPixelSize, allowNetwork: true,
+                            paced: false, priority: .interactive
+                        )
                     }
                 }
-                for request in requests {
-                    guard !Task.isCancelled else { return }
-                    // A screen is waiting on these: ahead of any warm-up in the decode queue.
-                    await cache.preload(request, allowNetwork: true, paced: false, priority: .interactive)
-                }
             }
-            group.addTask { try? await Task.sleep(for: timeout) }
-            await group.next()
-            group.cancelAll()
+            end.finish()
         }
+        let timeLimit = Task {
+            try? await Task.sleep(for: timeout)
+            end.finish()
+        }
+        for await _ in ended {}
+        timeLimit.cancel()
+        if Task.isCancelled { work.cancel() }
     }
 
     // MARK: - Scrolling
