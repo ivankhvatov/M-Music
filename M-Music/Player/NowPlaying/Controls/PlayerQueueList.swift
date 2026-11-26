@@ -84,6 +84,13 @@ struct PlayerQueueList: View, Equatable {
     @State private var dragSnapshotQueueCount: Int?
     /// Where in the list the user last was, to warm the thumbnails around on resume.
     @State private var lastSeen = LastSeenIndex()
+    /// How many of the upcoming tracks the list holds: the first so many, and more as the scroll
+    /// gets near the last of them (see `rowAppeared`). A queue can be the whole library, and the
+    /// list goes through every row it holds each time anything about the player changes — shown
+    /// or not, as it stays mounted.
+    @State private var rowLimit = rowPage
+    private static let rowPage = 200
+    private static let rowsAheadOfEnd = 80
 
     var body: some View {
         VStack(spacing: 0) {
@@ -118,10 +125,7 @@ struct PlayerQueueList: View, Equatable {
                     .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
                         frames.rows[entry.id] = frame
                     }
-                    .onAppear {
-                        lastSeen.index = index
-                        warmThumbnails(around: index)
-                    }
+                    .onAppear { rowAppeared(at: index) }
                     .listRowInsets(rowInsets)
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
@@ -146,6 +150,7 @@ struct PlayerQueueList: View, Equatable {
         .onGeometryChange(for: CGPoint.self) { $0.frame(in: .global).origin } action: { frames.origin = $0 }
         .overlay(alignment: .topLeading) { draggedRow }
         .sensoryFeedback(.impact(weight: .medium), trigger: reorderTick)
+        .onChange(of: player.queueVersion) { _, _ in lastSeen.forgetWarmed() }
         .onChange(of: player.queueAdvance) { _, advance in
             guard let advance else { return }
             if advance.toIndex > advance.fromIndex {
@@ -565,39 +570,54 @@ struct PlayerQueueList: View, Equatable {
         static let bottomFade: CGFloat = 56
     }
 
-    /// The tracks after the current one. Each gets an id from its track id plus how many times that
-    /// track has already appeared above it (a queue can hold the same song twice) — stable as
-    /// playback advances, which `SongRow` needs: it resolves its artwork URL once, in `init`.
+    /// The tracks after the current one.
+    private var upcoming: [Entry] { rows(after: player.currentIndex) }
+
+    /// The first `rowLimit` tracks after position `index` of the queue. Each gets an id from its
+    /// track id plus how many times that track has already appeared above it (a queue can hold the
+    /// same song twice) — stable as playback advances, which `SongRow` needs: it resolves its
+    /// artwork URL once, in `init`.
     ///
-    /// Built once per queue change (`queueVersion`) or step through the queue (`currentIndex`) and
-    /// reused: it's O(queue length) — filtering, a per-track occurrence count and a string id each,
-    /// on a queue that can hold thousands — and `body` reads it several times and re-runs on every
-    /// `PlayerManager` publish (play/pause, buffering, star, ...), none of which touch the queue.
-    private var upcoming: [Entry] {
+    /// Built once per queue change (`queueVersion`), step through the queue or growth of the list,
+    /// and reused: a per-track occurrence count and a string id each, and `body` reads them several
+    /// times and re-runs on every `PlayerManager` publish (play/pause, buffering, star, ...), none
+    /// of which touch the queue.
+    private func rows(after index: Int?) -> [Entry] {
         let version = player.queueVersion
-        let index = player.currentIndex
-        if let memo = Self.upcomingMemo, memo.version == version, memo.currentIndex == index {
+        if let memo = Self.rowsMemo, memo.version == version, memo.index == index, memo.limit == rowLimit {
             return memo.entries
         }
-        let entries = Self.buildUpcoming(queue: player.queue, currentIndex: index)
-        Self.upcomingMemo = (version, index, entries)
+        let entries = Self.buildRows(queue: player.queue, after: index, limit: rowLimit)
+        Self.rowsMemo = (version, index, rowLimit, entries)
         return entries
     }
 
-    private static var upcomingMemo: (version: Int, currentIndex: Int?, entries: [Entry])?
+    private static var rowsMemo: (version: Int, index: Int?, limit: Int, entries: [Entry])?
 
-    private static func buildUpcoming(queue: [Child], currentIndex: Int?) -> [Entry] {
-        guard let currentIndex, queue.indices.contains(currentIndex) else { return [] }
+    private static func buildRows(queue: [Child], after index: Int?, limit: Int) -> [Entry] {
+        guard let index, queue.indices.contains(index) else { return [] }
         var seen: [String: Int] = [:]
-        return queue[(currentIndex + 1)...].map { track in
+        return queue[(index + 1)...].prefix(limit).map { track in
             let occurrence = seen[track.id.raw, default: 0]
             seen[track.id.raw] = occurrence + 1
             return Entry(id: "\(track.id.raw)#\(occurrence)", track: track)
         }
     }
 
-    /// Warms the thumbnails of the rows around `index` — a row appeared, or the app resumed — so
-    /// scrolling the queue finds them decoded.
+    /// A row scrolled into view. Near the last row the list holds, with more of the queue behind
+    /// it, the next ones are taken on; and every few rows (see `LastSeenIndex.shouldWarm`), the
+    /// thumbnails around are warmed.
+    private func rowAppeared(at index: Int) {
+        lastSeen.index = index
+        let count = displayedUpcoming.count
+        if count == rowLimit, index >= count - Self.rowsAheadOfEnd { rowLimit += Self.rowPage }
+        // By the row's place in the whole queue, so that skipping on warms ahead as scrolling does.
+        let position = (player.currentIndex ?? 0) + index
+        if lastSeen.shouldWarm(at: position, of: count) { warmThumbnails(around: index) }
+    }
+
+    /// Warms the thumbnails of the rows around `index` — rows have appeared there, or the app
+    /// resumed — so scrolling the queue finds them decoded.
     private func warmThumbnails(around index: Int) {
         let rows = displayedUpcoming
         let scale = displayScale
@@ -621,9 +641,10 @@ struct PlayerQueueList: View, Equatable {
         return advance
     }
 
-    /// The rows as they were before that move.
+    /// The rows as they were before that move — as a rule the ones already built, which showed
+    /// until it was made.
     private var heldRows: [Entry]? {
-        heldAdvance.map { Self.buildUpcoming(queue: player.queue, currentIndex: $0.fromIndex) }
+        heldAdvance.map { rows(after: $0.fromIndex) }
     }
 
     /// How many rows, from the top, are out of sight: fading out, going forward; or not yet faded
