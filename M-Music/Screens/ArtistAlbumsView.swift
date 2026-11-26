@@ -526,23 +526,27 @@ struct ArtistAlbumsView: View {
         }
     }
 
-    /// There's no "songs by artist" endpoint in the Subsonic API — Play/Shuffle instead fetch
-    /// every album's tracklist (concurrently) and concatenate them in album order.
+    /// There's no "songs by artist" endpoint in the Subsonic API — Play/Shuffle instead gather
+    /// every album's tracklist and concatenate them in album order: from the library cache where
+    /// it has the whole album, from the server otherwise, a few at a time. Online, a fetch that
+    /// fails fails the lot; offline, an album that isn't cached is left out.
     private func fetchAllSongs() async throws -> [Child] {
-        try await withThrowingTaskGroup(of: (Int, [Child]).self) { group in
-            for (index, album) in albums.enumerated() {
-                group.addTask {
-                    let songs = try await client.getAlbum(id: album.id.raw).song ?? []
-                    return (index, songs)
-                }
+        let client = client
+        let isOnline = networkMonitor.isOnline
+        let tracklists = await BoundedConcurrency.map(albums, limit: Self.albumFetchLimit) { album -> Result<[Child], Error> in
+            let cached = await LibraryCacheDatabase.shared.cachedAlbumSongs(albumId: album.id.raw)?.song
+            // A copy with another number of songs is of an album that has changed since.
+            if let cached, cached.count == album.songCount { return .success(cached) }
+            do {
+                return .success(try await client.getAlbum(id: album.id.raw).song ?? [])
+            } catch {
+                return .failure(error)
             }
-            var results = [[Child]](repeating: [], count: albums.count)
-            for try await (index, songs) in group {
-                results[index] = songs
-            }
-            return results.flatMap { $0 }
         }
+        return try tracklists.flatMap { isOnline ? try $0.get() : (try? $0.get()) ?? [] }
     }
+
+    private static let albumFetchLimit = 6
 
     private func play() {
         runQueue(shuffled: false)

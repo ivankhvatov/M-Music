@@ -270,32 +270,40 @@ struct AlbumView: View {
 
     /// Fetches the rest of this album's artist catalog and splits it into "other versions" of
     /// this same album (same title, different `version` tag) and everything else by that artist.
+    /// While online, a cached copy of the catalog shows at once and the server's replaces it.
     /// Offline, or if the server can't be reached, only the artist's fully downloaded albums are
     /// shown instead, from the library cache. Supplementary content — fails silently rather than
     /// surfacing an error for it.
     private func loadRelatedAlbums() async {
         guard let artistId = album.artistId?.raw else { return }
-        // Fetched, filtered and grouped off the main actor (`nonisolated async`); only the two
-        // finished arrays come back here.
-        guard let related = await Self.relatedAlbums(
-            of: album, artistId: artistId, groupVersions: groupReleaseVersionsEnabled,
-            isOnline: networkMonitor.isOnline, client: client
-        ) else { return }
-        otherVersions = related.otherVersions
-        moreByArtist = related.moreByArtist
+        let isOnline = networkMonitor.isOnline
+        if isOnline, let cached = await LibraryCacheDatabase.shared.cachedArtistAlbums(artistId: artistId) {
+            show(await Self.relatedAlbums(of: album, among: cached, groupVersions: groupReleaseVersionsEnabled))
+        }
+        guard let artistAlbums = await Self.artistAlbums(artistId: artistId, isOnline: isOnline, client: client)
+        else { return }
+        show(await Self.relatedAlbums(of: album, among: artistAlbums, groupVersions: groupReleaseVersionsEnabled))
     }
 
+    private func show(_ related: (otherVersions: [AlbumID3], moreByArtist: [AlbumID3])) {
+        if related.otherVersions != otherVersions { otherVersions = related.otherVersions }
+        if related.moreByArtist != moreByArtist { moreByArtist = related.moreByArtist }
+    }
+
+    private nonisolated static func artistAlbums(
+        artistId: String, isOnline: Bool, client: SubsonicClient
+    ) async -> [AlbumID3]? {
+        if isOnline, let fetched = try? await client.getArtist(id: artistId).album { return fetched }
+        // A cancelled request (the view went away) isn't "server unavailable".
+        guard !Task.isCancelled else { return nil }
+        return await LibraryCacheDatabase.shared.fullyDownloadedAlbums(byArtist: artistId)
+    }
+
+    /// Filtered and grouped off the main actor (`nonisolated async`); only the two finished arrays
+    /// come back to the view.
     private nonisolated static func relatedAlbums(
-        of album: AlbumID3, artistId: String, groupVersions: Bool, isOnline: Bool, client: SubsonicClient
-    ) async -> (otherVersions: [AlbumID3], moreByArtist: [AlbumID3])? {
-        let artistAlbums: [AlbumID3]
-        if isOnline, let fetched = try? await client.getArtist(id: artistId).album {
-            artistAlbums = fetched
-        } else {
-            // A cancelled request (the view went away) isn't "server unavailable".
-            guard !Task.isCancelled else { return nil }
-            artistAlbums = await LibraryCacheDatabase.shared.fullyDownloadedAlbums(byArtist: artistId)
-        }
+        of album: AlbumID3, among artistAlbums: [AlbumID3], groupVersions: Bool
+    ) async -> (otherVersions: [AlbumID3], moreByArtist: [AlbumID3]) {
         let albumName = album.name.lowercased()
         // A Single and an Album/EP sharing this album's title are separate releases, not versions
         // of it — whatever "Group release versions" is set to. They aren't dropped, though: they
