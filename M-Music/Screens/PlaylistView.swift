@@ -281,7 +281,7 @@ struct PlaylistView: View {
             .disabled(!(networkMonitor.isOnline || downloads.isDownloaded(track.id.raw)))
             .onAppear {
                 lastSeen.index = index
-                warmAround(index, in: visibleSongs)
+                if lastSeen.shouldWarm(at: index, of: visibleSongs.count) { warmAround(index, in: visibleSongs) }
             }
             .listRowSeparator(.hidden)
             .listRowBackground(darkenedBackgroundColor)

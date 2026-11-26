@@ -276,7 +276,7 @@ struct PlaylistsListView: View {
         guard let index = rowPositions.position(of: playlist.id.raw),
               displayedPlaylists.indices.contains(index), displayedPlaylists[index].id == playlist.id else { return }
         lastSeen.index = index
-        warmAround(index)
+        if lastSeen.shouldWarm(at: index, of: displayedPlaylists.count) { warmAround(index) }
     }
 
     /// Warms the images around `index` — also after the app resumes, where the user left off.
@@ -290,6 +290,7 @@ struct PlaylistsListView: View {
     /// Tells `ImageWarmer` what this screen shows first, so its artwork is decoded ahead of the
     /// next visit (a search's results aren't what the screen normally opens with).
     private func rememberFirstScreenful() {
+        lastSeen.forgetWarmed()
         rowPositions.update(ids: displayedPlaylists.map { $0.id.raw })
         let requests = artworkRequests(for: displayedPlaylists.prefix(ImageWarmer.manifestLimit))
         imageReadiness.require(requests)
@@ -444,17 +445,13 @@ struct PlaylistRow: View {
             }
         }
         .dimmedIfUnavailable(isAvailable)
-        // Full-size cover's bytes, prefetched to disk in the background (no decode — the row
-        // itself only shows the small thumbnail) — see `artworkURL`'s doc comment. Keyed to
-        // `playlist.id` so scrolling this row's cell to a different playlist (cell reuse)
-        // cancels the stale prefetch and starts the right one.
+        // Once the row has stayed on screen a moment — so not for the ones flung past — the
+        // playlist screen's large cover (and first songs' thumbnails) are readied, so it opens
+        // with its images — see `ImageWarmer`. Keyed to `playlist.id` so scrolling this row's
+        // cell to a different playlist (cell reuse) cancels the stale one.
         .task(id: playlist.id) {
             guard preparesPlaylistScreen else { return }
-            let artworkId = playlist.coverArt ?? playlist.id.raw
-            await ImageCache.shared.prefetchOriginalData(ArtworkRequest.playlistHeader(artworkId).url)
-            // And decoded (with the first songs' thumbnails), once the row has stayed on screen a
-            // moment, so the playlist's own screen opens with its images — see `ImageWarmer`.
-            await ImageWarmer.shared.warmPlaylist(id: playlist.id.raw, artworkId: artworkId)
+            await ImageWarmer.shared.warmPlaylist(id: playlist.id.raw, artworkId: playlist.coverArt ?? playlist.id.raw)
         }
         // See `PlaylistCardView`: `artworkURL` was resolved once, for the artwork it had then.
         .onChange(of: playlist.coverArt) {

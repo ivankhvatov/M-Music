@@ -307,7 +307,7 @@ struct SongsListView: View {
         guard let index = rowPositions.position(of: track.id.raw),
               displayedSongs.indices.contains(index), displayedSongs[index].id == track.id else { return }
         lastSeen.index = index
-        warmAround(index)
+        if lastSeen.shouldWarm(at: index, of: displayedSongs.count) { warmAround(index) }
     }
 
     /// Warms the images around `index` — also after the app resumes, where the user left off.
@@ -321,6 +321,7 @@ struct SongsListView: View {
     /// Tells `ImageWarmer` what this screen shows first, so its artwork is decoded ahead of the
     /// next visit (a search's results aren't what the screen normally opens with).
     private func rememberFirstScreenful() {
+        lastSeen.forgetWarmed()
         rowPositions.update(ids: displayedSongs.map { $0.id.raw })
         let requests = artworkRequests(for: displayedSongs.prefix(ImageWarmer.manifestLimit))
         imageReadiness.require(requests)
@@ -730,12 +731,12 @@ private struct SongTrailingActions: View {
     private let player = PlayerManager.shared
     @ObservedObject private var starStore = StarStore.shared
     @ObservedObject private var downloads = DownloadStore.shared
-    /// The only thing that re-renders on a download's progress ticks — see `DownloadProgressStore`.
-    @ObservedObject private var downloadProgress = DownloadProgressStore.shared
+    /// For the menu's "Downloading…": hears when a download starts or ends, not its progress.
+    @ObservedObject private var downloadActivity = DownloadActivityStore.shared
 
     var body: some View {
         Group {
-            DownloadStatusIndicator(state: downloads.state(for: track.id.raw))
+            SongDownloadStatus(songId: track.id.raw)
             songMenu
         }
         .sheet(item: $songToAdd) { song in

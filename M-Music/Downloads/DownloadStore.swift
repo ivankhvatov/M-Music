@@ -7,7 +7,7 @@ import SwiftUI
 /// The progress of the downloads in flight, kept apart from `DownloadStore` on purpose: it changes
 /// several times a second while anything downloads, and `DownloadStore` is observed by every card,
 /// row and header that shows availability — each tick used to re-render all of them. Only the song
-/// rows with a `DownloadStatusIndicator` observe this.
+/// rows' status indicators (`SongDownloadStatus`) observe this.
 @MainActor
 final class DownloadProgressStore: ObservableObject {
     static let shared = DownloadProgressStore()
@@ -15,7 +15,23 @@ final class DownloadProgressStore: ObservableObject {
     @Published private(set) var progressBySongId: [String: Double] = [:]
 
     func set(_ progress: [String: Double]) {
-        if progress != progressBySongId { progressBySongId = progress }
+        guard progress != progressBySongId else { return }
+        // First, so that a view that hears of both finds them agreeing.
+        DownloadActivityStore.shared.set(Set(progress.keys))
+        progressBySongId = progress
+    }
+}
+
+/// Which songs have a download in flight. Changes only when one starts or ends — all a row's menu
+/// needs to know — where the progress itself changes all the time.
+@MainActor
+final class DownloadActivityStore: ObservableObject {
+    static let shared = DownloadActivityStore()
+
+    @Published private(set) var songIds: Set<String> = []
+
+    func set(_ ids: Set<String>) {
+        if ids != songIds { songIds = ids }
     }
 }
 
@@ -110,10 +126,14 @@ final class DownloadStore: ObservableObject {
     func downloadAlbum(_ songs: [Child]) {
         let missing = songs.filter { !downloadedSongIds.contains($0.id.raw) }
         guard !missing.isEmpty else { return }
+        // Gathered, then published once: one song at a time each assignment copied and compared
+        // the whole dictionary, and announced it.
+        var progress = progressBySongId
         for song in missing {
             failedSongIds.remove(song.id.raw)
-            progressBySongId[song.id.raw] = 0
+            progress[song.id.raw] = 0
         }
+        progressBySongId = progress
         Task { await DownloadService.shared.enqueueAlbum(songs: missing) }
     }
 

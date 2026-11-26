@@ -173,6 +173,7 @@ struct LibraryView: View {
     /// Tells `ImageWarmer` which covers this screen opens with, to decode them ahead of the next
     /// visit, and holds the grid back until they're in memory (see `ImageReadiness`).
     private func rememberFirstScreenful(of albums: [AlbumID3]) {
+        lastSeen.forgetWarmed()
         rowPositions.update(ids: albums.map { $0.id.raw })
         let requests = artworkRequests(for: albums.prefix(ImageWarmer.manifestLimit))
         imageReadiness.require(requests)
@@ -188,7 +189,7 @@ struct LibraryView: View {
         guard let index = rowPositions.position(of: album.id.raw),
               recentAlbums.indices.contains(index), recentAlbums[index].id == album.id else { return }
         lastSeen.index = index
-        warmAround(index)
+        if lastSeen.shouldWarm(at: index, of: recentAlbums.count) { warmAround(index) }
     }
 
     /// Warms the images around `index` — also after the app resumes, where the user left off.

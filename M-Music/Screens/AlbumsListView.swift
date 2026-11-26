@@ -297,7 +297,7 @@ struct AlbumsListView: View {
         guard let index = rowPositions.position(of: album.id.raw),
               displayedAlbums.indices.contains(index), displayedAlbums[index].id == album.id else { return }
         lastSeen.index = index
-        warmAround(index)
+        if lastSeen.shouldWarm(at: index, of: displayedAlbums.count) { warmAround(index) }
     }
 
     /// Warms the images around `index` — also after the app resumes, where the user left off.
@@ -311,6 +311,7 @@ struct AlbumsListView: View {
     /// Tells `ImageWarmer` what this screen shows first, so its artwork is decoded ahead of the
     /// next visit (a search's results aren't what the screen normally opens with).
     private func rememberFirstScreenful() {
+        lastSeen.forgetWarmed()
         rowPositions.update(ids: displayedAlbums.map { $0.id.raw })
         let requests = artworkRequests(for: displayedAlbums.prefix(ImageWarmer.manifestLimit))
         imageReadiness.require(requests)
@@ -509,16 +510,12 @@ struct AlbumRow: View {
             }
         }
         .dimmedIfUnavailable(networkMonitor.isOnline || downloads.hasDownloadedSong(inAlbum: album.id.raw))
-        // Full-size cover's bytes, prefetched to disk in the background (no decode — the row
-        // itself only shows the small thumbnail) — see `artworkURL`'s doc comment. Keyed to
-        // `album.id` so scrolling this row's cell to a different album (cell reuse) cancels the
-        // stale prefetch and starts the right one.
+        // Once the row has stayed on screen a moment — so not for the ones flung past — the
+        // album screen's large cover is fetched and decoded, and that screen opens with it already
+        // in memory (see `ImageWarmer`). Keyed to `album.id` so scrolling this row's cell to a
+        // different album (cell reuse) cancels the stale one and starts the right one.
         .task(id: album.id) {
-            let artworkId = album.coverArt ?? album.id.raw
-            await ImageCache.shared.prefetchOriginalData(ArtworkRequest.albumHeader(artworkId).url)
-            // And decoded, once the row has stayed on screen a moment, so the album's own screen
-            // opens with its header already in memory — see `ImageWarmer`.
-            await ImageWarmer.shared.warmAlbum(id: album.id.raw, artworkId: artworkId)
+            await ImageWarmer.shared.warmAlbum(id: album.id.raw, artworkId: album.coverArt ?? album.id.raw)
         }
     }
 

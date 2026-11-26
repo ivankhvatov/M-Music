@@ -620,6 +620,40 @@ extension ImageCacheTests {
 }
 
 @MainActor
+struct DownloadActivityTests {
+    /// A row's menu hears of downloads starting and ending, never of their progress.
+    @Test func activityChangesOnlyWhenADownloadStartsOrEnds() {
+        var changes = 0
+        let watching = DownloadActivityStore.shared.objectWillChange.sink { changes += 1 }
+        defer { DownloadProgressStore.shared.set([:]); watching.cancel() }
+        DownloadProgressStore.shared.set([:])
+        changes = 0
+        DownloadProgressStore.shared.set(["a": 0])
+        DownloadProgressStore.shared.set(["a": 0.3])
+        DownloadProgressStore.shared.set(["a": 0.9])
+        #expect(changes == 1)
+        #expect(DownloadActivityStore.shared.songIds == ["a"])
+        DownloadProgressStore.shared.set(["a": 0.9, "b": 0])
+        DownloadProgressStore.shared.set([:])
+        #expect(changes == 3)
+        #expect(DownloadActivityStore.shared.songIds.isEmpty)
+    }
+
+    @Test func aListWarmsAheadEveryFewRowsAndWhenItsRowsChange() {
+        let seen = LastSeenIndex()
+        #expect(seen.shouldWarm(at: 0, of: 100))
+        #expect(!seen.shouldWarm(at: LastSeenIndex.warmStride - 1, of: 100))
+        #expect(seen.shouldWarm(at: LastSeenIndex.warmStride, of: 100))
+        // Backwards just the same.
+        #expect(!seen.shouldWarm(at: 2, of: 100))
+        #expect(seen.shouldWarm(at: 0, of: 100))
+        #expect(seen.shouldWarm(at: 1, of: 40))
+        seen.forgetWarmed()
+        #expect(seen.shouldWarm(at: 1, of: 40))
+    }
+}
+
+@MainActor
 struct DownloadProgressStoreTests {
     @Test func progressTicksDoNotPublishFromTheDownloadStore() {
         var downloadStorePublishes = 0

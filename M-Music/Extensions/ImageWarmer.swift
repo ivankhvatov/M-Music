@@ -338,6 +338,7 @@ actor ImageWarmer {
     /// Warms the album screen `artworkId` leads to: its header image.
     func warmAlbum(id: String, artworkId: String) async {
         await warmOnce("album:\(id)") {
+            await cache.prefetchOriginalData(ArtworkRequest.albumHeader(artworkId).url)
             await cache.preload(.albumHeader(artworkId))
         }
     }
@@ -346,6 +347,7 @@ actor ImageWarmer {
     /// from the cached playlist, so nothing here waits on the server).
     func warmPlaylist(id: String, artworkId: String) async {
         await warmOnce("playlist:\(id)") {
+            await cache.prefetchOriginalData(ArtworkRequest.playlistHeader(artworkId).url)
             await cache.preload(.playlistHeader(artworkId))
             guard let songs = await LibraryCacheDatabase.shared.cachedPlaylistSongs(playlistId: id) else { return }
             let scale = await scaleProvider()
@@ -360,6 +362,7 @@ actor ImageWarmer {
     /// cached album list).
     func warmArtist(id: String, artworkId: String) async {
         await warmOnce("artist:\(id)") {
+            await cache.prefetchOriginalData(ArtworkRequest.artistHeader(artworkId).url)
             await cache.preload(.artistHeader(artworkId))
             guard let albums = await LibraryCacheDatabase.shared.cachedArtistAlbums(artistId: id) else { return }
             // The covers that will really be first on that screen, in the user's selected order

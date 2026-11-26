@@ -876,8 +876,8 @@ private struct TrackRow: View {
     private let player = PlayerManager.shared
     @ObservedObject private var starStore = StarStore.shared
     @ObservedObject private var downloads = DownloadStore.shared
-    /// The only thing that re-renders on a download's progress ticks — see `DownloadProgressStore`.
-    @ObservedObject private var downloadProgress = DownloadProgressStore.shared
+    /// For the menu's "Downloading…": hears when a download starts or ends, not its progress.
+    @ObservedObject private var downloadActivity = DownloadActivityStore.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
     /// The song the "Add to playlist" sheet is open for, and what went wrong adding it — as in
@@ -912,7 +912,7 @@ private struct TrackRow: View {
             // while online — everything can still stream.
             .dimmedIfUnavailable(networkMonitor.isOnline || downloads.isDownloaded(track.id.raw))
 
-            DownloadStatusIndicator(state: downloads.state(for: track.id.raw))
+            SongDownloadStatus(songId: track.id.raw)
 
             trackMenu
         }

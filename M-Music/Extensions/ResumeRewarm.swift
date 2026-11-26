@@ -6,6 +6,25 @@ import SwiftUI
 final class LastSeenIndex {
     var index = 0
     var byKey: [String: Int] = [:]
+
+    /// How many rows a list scrolls before it warms ahead again. Each pass covers
+    /// `ImageWarmer.scrollAheadCount` rows around where it is, half on each side, so one every few
+    /// rows stays well ahead of any scroll — one for every row that appeared did the same work
+    /// many times over on the main thread, in the middle of the scroll.
+    static let warmStride = 8
+    private var warmed: (index: Int, count: Int)?
+
+    /// Whether a list of `count` rows that has reached `index` should warm ahead from there.
+    func shouldWarm(at index: Int, of count: Int) -> Bool {
+        if let warmed, warmed.count == count, abs(warmed.index - index) < Self.warmStride { return false }
+        warmed = (index, count)
+        return true
+    }
+
+    /// The rows changed: the next one to appear warms ahead, wherever it is.
+    func forgetWarmed() {
+        warmed = nil
+    }
 }
 
 extension View {
