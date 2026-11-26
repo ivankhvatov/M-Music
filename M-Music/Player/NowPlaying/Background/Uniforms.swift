@@ -35,9 +35,21 @@ struct GradientParams {
 }
 
 extension Uniforms {
+    /// How many of the points the shader needs to visit, for every pixel of every frame: those up
+    /// to the last coloured one. The ones after it have a clear colour and add nothing. Never
+    /// zero, so that no colour at all draws as it always has.
+    static func pointCount(alphas: [Float]) -> Int32 {
+        Int32(max(1, (alphas.lastIndex { $0 > 0 } ?? 0) + 1))
+    }
+
     init(params: GradientParams) {
+        let points = params.points
+        let colors = [
+            points.point0.color.simd, points.point1.color.simd, points.point2.color.simd, points.point3.color.simd,
+            points.point4.color.simd, points.point5.color.simd, points.point6.color.simd, points.point7.color.simd,
+        ]
         self.init(
-            pointCount: 8,
+            pointCount: Self.pointCount(alphas: colors.map(\.w)),
             bias: params.bias,
             power: params.power,
             noise: params.noise,
@@ -49,14 +61,14 @@ extension Uniforms {
             point5: params.points.point5.position.simd,
             point6: params.points.point6.position.simd,
             point7: params.points.point7.position.simd,
-            color0: params.points.point0.color.simd,
-            color1: params.points.point1.color.simd,
-            color2: params.points.point2.color.simd,
-            color3: params.points.point3.color.simd,
-            color4: params.points.point4.color.simd,
-            color5: params.points.point5.color.simd,
-            color6: params.points.point6.color.simd,
-            color7: params.points.point7.color.simd
+            color0: colors[0],
+            color1: colors[1],
+            color2: colors[2],
+            color3: colors[3],
+            color4: colors[4],
+            color5: colors[5],
+            color6: colors[6],
+            color7: colors[7]
         )
     }
 }

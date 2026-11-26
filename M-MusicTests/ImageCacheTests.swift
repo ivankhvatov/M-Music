@@ -621,6 +621,16 @@ extension ImageCacheTests {
     }
 }
 
+struct GradientPointTests {
+    @Test func theShaderVisitsThePointsUpToTheLastColouredOne() {
+        #expect(Uniforms.pointCount(alphas: [1, 1, 1, 0, 0, 0, 0, 0]) == 3)
+        // Fading in or out still counts, and so do any clear ones before it.
+        #expect(Uniforms.pointCount(alphas: [1, 0, 0.01, 0, 0, 0, 0, 0]) == 3)
+        #expect(Uniforms.pointCount(alphas: [1, 1, 1, 1, 1, 1, 1, 1]) == 8)
+        #expect(Uniforms.pointCount(alphas: [0, 0, 0, 0, 0, 0, 0, 0]) == 1)
+    }
+}
+
 @MainActor
 struct DownloadActivityTests {
     /// A row's menu hears of downloads starting and ending, never of their progress.
