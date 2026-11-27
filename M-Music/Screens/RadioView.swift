@@ -97,6 +97,7 @@ struct RadioView: View {
             }
         }
         .listStyle(.plain)
+        .reportsScrollActivity()
     }
 
     /// Warms the artwork of the stations around `index` — a row appeared, or the app resumed.

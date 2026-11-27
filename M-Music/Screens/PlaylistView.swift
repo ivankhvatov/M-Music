@@ -63,6 +63,8 @@ struct PlaylistView: View {
     @State private var changedAfterRemoval: Date?
     /// Where the user last was in the song list, to warm around on resume — see `onAppResume`.
     @State private var lastSeen = LastSeenIndex()
+    /// Which rows to warm as the list scrolls.
+    @State private var prefetcher = ListPrefetcher()
 
     /// Point size artwork renders at in a song row — mirrors `SongsListView.rowArtworkSize`.
     private let rowArtworkSize: CGFloat = ImageCache.RowArtwork.song
@@ -90,7 +92,10 @@ struct PlaylistView: View {
             }
         }
         .darkAppearance()
-        .onAppResume { warmAround(lastSeen.index, in: visibleSongs) }
+        .onAppResume {
+            let songs = visibleSongs
+            warm(ListPrefetcher.plan(from: lastSeen.index, count: songs.count), in: songs)
+        }
         .sheet(isPresented: $showingAddToPlaylist) {
             AddAlbumToPlaylistSheet(songs: songs) { songsToAdd, target in
                 addToPlaylist(songsToAdd, target)
@@ -282,7 +287,7 @@ struct PlaylistView: View {
             .disabled(!(networkMonitor.isOnline || downloads.isDownloaded(track.id.raw)))
             .onAppear {
                 lastSeen.index = index
-                if lastSeen.shouldWarm(at: index, of: visibleSongs.count) { warmAround(index, in: visibleSongs) }
+                if let rows = prefetcher.rows(appearing: index, of: visibleSongs.count) { warm(rows, in: visibleSongs) }
             }
             .listRowSeparator(.hidden)
             .listRowBackground(darkenedBackgroundColor)
@@ -308,11 +313,10 @@ struct PlaylistView: View {
         }
     }
 
-    /// Warms the song thumbnails around `index` — a song row appeared, or the app resumed.
-    private func warmAround(_ index: Int, in songs: [Child]) {
+    /// Warms the thumbnails of `rows` — rows scrolled into view near them, or the app resumed.
+    private func warm(_ rows: [Int], in songs: [Child]) {
         let scale = displayScale
-        let requests = ImageWarmer.neighbors(of: index, in: songs, count: ImageWarmer.scrollAheadCount)
-            .map { ArtworkRequest.songRow(ListArtwork.shared.artworkId(for: $0), scale: scale) }
+        let requests = rows.map { ArtworkRequest.songRow(ListArtwork.shared.artworkId(for: songs[$0]), scale: scale) }
         guard !requests.isEmpty else { return }
         Task { await ImageWarmer.shared.warmAhead(requests, source: "playlist.songs") }
     }

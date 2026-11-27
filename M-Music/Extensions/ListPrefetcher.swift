@@ -7,11 +7,20 @@ import Foundation
 /// rows to warm (`ImageWarmer.warmAhead`), the most needed first.
 @MainActor
 final class ListPrefetcher {
-    /// How many rows ahead of the scroll are warmed — about three screens of them.
-    nonisolated static let ahead = 30
-    /// And how many behind it, for a scroll that turns back.
-    nonisolated static let behind = 6
-    /// How many rows the list moves before the plan is made again.
+    /// How far round the scroll to warm.
+    struct Window: Sendable {
+        /// How many items ahead of the scroll are warmed.
+        let ahead: Int
+        /// And how many behind it, for a scroll that turns back.
+        let behind: Int
+
+        /// A list's rows: about three screens ahead.
+        static let rows = Window(ahead: 30, behind: 6)
+        /// A grid's cards, which are far bigger images: about four screens ahead.
+        static let cards = Window(ahead: 16, behind: 4)
+    }
+
+    /// How many items the list moves before the plan is made again.
     nonisolated static let stride = 4
 
     private var last: Int?
@@ -23,11 +32,11 @@ final class ListPrefetcher {
 
     /// The row at `index`, of `count`, came on screen: the rows to warm now, or `nil` while the
     /// last plan still serves.
-    func rows(appearing index: Int, of count: Int) -> [Int]? {
+    func rows(appearing index: Int, of count: Int, window: Window = .rows) -> [Int]? {
         defer { last = index }
         if let last, index != last {
             let step = index > last ? 1 : -1
-            if abs(index - last) > Self.ahead {
+            if abs(index - last) > window.ahead {
                 // A jump (to the top, say): nothing to tell the direction by yet.
                 (direction, contrary) = (1, 0)
             } else if step == direction {
@@ -42,7 +51,7 @@ final class ListPrefetcher {
             return nil
         }
         planned = (index, direction, count)
-        return Self.plan(from: index, direction: direction, count: count)
+        return Self.plan(from: index, direction: direction, count: count, window: window)
     }
 
     /// The list's rows changed: the next one to appear makes a new plan.
@@ -54,13 +63,15 @@ final class ListPrefetcher {
     /// Near an end of the list, what one side has too few of goes to the other — so a direction
     /// guessed wrong at the top of a list, from the order its first rows happened to appear in,
     /// still has the rows below ready.
-    nonisolated static func plan(from index: Int, direction: Int = 1, count: Int) -> [Int] {
+    nonisolated static func plan(
+        from index: Int, direction: Int = 1, count: Int, window: Window = .rows
+    ) -> [Int] {
         guard index >= 0, index < count else { return [] }
-        let total = ahead + behind
+        let total = window.ahead + window.behind
         let inList = { (row: Int) in row >= 0 && row < count }
         let forward = (1...total).map { index + $0 * direction }.filter(inList)
         let backward = (1...total).map { index - $0 * direction }.filter(inList)
-        let front = min(forward.count, max(ahead, total - backward.count))
+        let front = min(forward.count, max(window.ahead, total - backward.count))
         return [index] + forward.prefix(front) + backward.prefix(total - front)
     }
 }

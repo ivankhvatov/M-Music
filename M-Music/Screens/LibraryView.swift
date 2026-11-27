@@ -17,6 +17,8 @@ struct LibraryView: View {
     @State private var rowPositions = RowPositions()
     /// Where the user last was, to warm around on resume — see `onAppResume`.
     @State private var lastSeen = LastSeenIndex()
+    /// Which cards to warm as the screen scrolls.
+    @State private var prefetcher = ListPrefetcher()
 
     /// Set by the plus menu's "Create playlist"; see `createPlaylistAlerts`.
     @State private var isCreatingPlaylist = false
@@ -33,8 +35,11 @@ struct LibraryView: View {
                         disconnectedContent
                     }
                 }
+                .reportsScrollActivity()
                 .environment(\.colorScheme, colorScheme)
-                .onAppResume { warmAround(lastSeen.index) }
+                .onAppResume {
+                    warm(ListPrefetcher.plan(from: lastSeen.index, count: recentAlbums.count, window: .cards))
+                }
                 .navigationTitle("Library")
                 .screenOnStack()
                 .toolbar {
@@ -173,29 +178,27 @@ struct LibraryView: View {
     /// Tells `ImageWarmer` which covers this screen opens with, to decode them ahead of the next
     /// visit, and holds the grid back until they're in memory (see `ImageReadiness`).
     private func rememberFirstScreenful(of albums: [AlbumID3]) {
-        lastSeen.forgetWarmed()
+        prefetcher.reset()
         rowPositions.update(ids: albums.map { $0.id.raw })
         let requests = artworkRequests(for: albums.prefix(ImageWarmer.manifestLimit))
         imageReadiness.require(requests)
         Task { await ImageWarmer.shared.remember(.library, requests) }
     }
 
-    private func artworkRequests(for albums: ArraySlice<AlbumID3>) -> [ArtworkRequest] {
+    private func artworkRequests(for albums: some Sequence<AlbumID3>) -> [ArtworkRequest] {
         albums.map { ArtworkRequest.albumCard($0.coverArt ?? $0.id.raw) }
     }
 
-    /// A card scrolled into view: warm the ones just below it, so a fast scroll finds them ready.
+    /// A card scrolled into view: warm the ones ahead of it, so a fast scroll finds them ready.
     private func warmAhead(after album: AlbumID3) {
         guard let index = rowPositions.position(of: album.id.raw),
               recentAlbums.indices.contains(index), recentAlbums[index].id == album.id else { return }
         lastSeen.index = index
-        if lastSeen.shouldWarm(at: index, of: recentAlbums.count) { warmAround(index) }
+        if let cards = prefetcher.rows(appearing: index, of: recentAlbums.count, window: .cards) { warm(cards) }
     }
 
-    /// Warms the images around `index` — also after the app resumes, where the user left off.
-    private func warmAround(_ index: Int) {
-        guard recentAlbums.indices.contains(index) else { return }
-        let requests = artworkRequests(for: ArraySlice(ImageWarmer.neighbors(of: index, in: recentAlbums, count: ImageWarmer.scrollAheadCount)))
+    private func warm(_ indices: [Int]) {
+        let requests = artworkRequests(for: indices.map { recentAlbums[$0] })
         guard !requests.isEmpty else { return }
         Task { await ImageWarmer.shared.warmAhead(requests, source: "library") }
     }

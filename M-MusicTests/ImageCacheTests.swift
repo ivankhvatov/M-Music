@@ -664,19 +664,6 @@ struct DownloadActivityTests {
         #expect(changes == 3)
         #expect(DownloadActivityStore.shared.songIds.isEmpty)
     }
-
-    @Test func aListWarmsAheadEveryFewRowsAndWhenItsRowsChange() {
-        let seen = LastSeenIndex()
-        #expect(seen.shouldWarm(at: 0, of: 100))
-        #expect(!seen.shouldWarm(at: LastSeenIndex.warmStride - 1, of: 100))
-        #expect(seen.shouldWarm(at: LastSeenIndex.warmStride, of: 100))
-        // Backwards just the same.
-        #expect(!seen.shouldWarm(at: 2, of: 100))
-        #expect(seen.shouldWarm(at: 0, of: 100))
-        #expect(seen.shouldWarm(at: 1, of: 40))
-        seen.forgetWarmed()
-        #expect(seen.shouldWarm(at: 1, of: 40))
-    }
 }
 
 @MainActor
@@ -1051,10 +1038,10 @@ extension ImageCacheTests {
 @MainActor
 struct ListPrefetcherTests {
     @Test func thePlanIsMostlyAheadAndFillsUpAtTheEnds() {
-        let total = ListPrefetcher.ahead + ListPrefetcher.behind
+        let total = ListPrefetcher.Window.rows.ahead + ListPrefetcher.Window.rows.behind
         let middle = ListPrefetcher.plan(from: 100, count: 200)
-        #expect(middle == [100] + (1...ListPrefetcher.ahead).map { 100 + $0 }
-            + (1...ListPrefetcher.behind).map { 100 - $0 })
+        #expect(middle == [100] + (1...ListPrefetcher.Window.rows.ahead).map { 100 + $0 }
+            + (1...ListPrefetcher.Window.rows.behind).map { 100 - $0 })
         #expect(ListPrefetcher.plan(from: 100, direction: -1, count: 200).prefix(3) == [100, 99, 98])
         #expect(ListPrefetcher().rows(appearing: 0, of: 100) == Array(0...total))
         // Looking up from near the top: the rows below get what the ones above can't use.

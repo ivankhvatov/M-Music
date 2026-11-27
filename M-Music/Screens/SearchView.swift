@@ -32,6 +32,8 @@ private final class SearchLookAhead {
     private var showsHistory = false
     private let positions = RowPositions()
     var lastIndex = 0
+    /// Which rows to warm as the list scrolls.
+    let prefetcher = ListPrefetcher()
 
     var requests: [ArtworkRequest] { showsHistory ? history.requests : results.requests }
 
@@ -415,14 +417,20 @@ struct SearchView: View {
     private func warmAhead(after item: SearchItem) {
         guard let index = lookAhead.position(of: item.id) else { return }
         lookAhead.lastIndex = index
-        warmAround(index)
+        if let rows = lookAhead.prefetcher.rows(appearing: index, of: lookAhead.requests.count) { warm(rows) }
     }
 
-    /// Warms the thumbnails around `index` — also after the app resumes, where the user left off.
+    /// Warms the thumbnails from `index` on — new rows are listed, or the app resumed where the
+    /// user left off.
     private func warmAround(_ index: Int) {
+        lookAhead.prefetcher.reset()
+        warm(ListPrefetcher.plan(from: index, count: lookAhead.requests.count))
+    }
+
+    private func warm(_ rows: [Int]) {
         let requests = lookAhead.requests
-        guard requests.indices.contains(index) else { return }
-        let near = ImageWarmer.neighbors(of: index, in: requests, count: ImageWarmer.scrollAheadCount)
+        let near = rows.filter(requests.indices.contains).map { requests[$0] }
+        guard !near.isEmpty else { return }
         Task { await ImageWarmer.shared.warmAhead(near, source: "search") }
     }
 

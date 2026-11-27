@@ -84,6 +84,8 @@ struct PlayerQueueList: View, Equatable {
     @State private var dragSnapshotQueueCount: Int?
     /// Where in the list the user last was, to warm the thumbnails around on resume.
     @State private var lastSeen = LastSeenIndex()
+    /// Which rows to warm as the list scrolls.
+    @State private var prefetcher = ListPrefetcher()
     /// How many of the upcoming tracks the list holds: the first so many, and more as the scroll
     /// gets near the last of them (see `rowAppeared`). A queue can be the whole library, and the
     /// list goes through every row it holds each time anything about the player changes — shown
@@ -138,7 +140,10 @@ struct PlayerQueueList: View, Equatable {
                     }
                 }
             }
-            .onAppResume { warmThumbnails(around: lastSeen.index) }
+            .onAppResume {
+                let position = (player.currentIndex ?? -1) + 1 + lastSeen.index
+                warmThumbnails(at: ListPrefetcher.plan(from: position, count: player.queue.count))
+            }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .scrollIndicators(.hidden)
@@ -150,7 +155,7 @@ struct PlayerQueueList: View, Equatable {
         .onGeometryChange(for: CGPoint.self) { $0.frame(in: .global).origin } action: { frames.origin = $0 }
         .overlay(alignment: .topLeading) { draggedRow }
         .sensoryFeedback(.impact(weight: .medium), trigger: reorderTick)
-        .onChange(of: player.queueVersion) { _, _ in lastSeen.forgetWarmed() }
+        .onChange(of: player.queueVersion) { _, _ in prefetcher.reset() }
         .onChange(of: player.queueAdvance) { _, advance in
             guard let advance else { return }
             if advance.toIndex > advance.fromIndex {
@@ -605,24 +610,26 @@ struct PlayerQueueList: View, Equatable {
     }
 
     /// A row scrolled into view. Near the last row the list holds, with more of the queue behind
-    /// it, the next ones are taken on; and every few rows (see `LastSeenIndex.shouldWarm`), the
-    /// thumbnails around are warmed.
+    /// it, the next ones are taken on; and every few rows (see `ListPrefetcher`), the thumbnails
+    /// ahead are warmed.
     private func rowAppeared(at index: Int) {
         lastSeen.index = index
         let count = displayedUpcoming.count
         if count == rowLimit, index >= count - Self.rowsAheadOfEnd { rowLimit += Self.rowPage }
         // By the row's place in the whole queue, so that skipping on warms ahead as scrolling does.
-        let position = (player.currentIndex ?? 0) + index
-        if lastSeen.shouldWarm(at: position, of: count) { warmThumbnails(around: index) }
+        let position = (player.currentIndex ?? -1) + 1 + index
+        if let positions = prefetcher.rows(appearing: position, of: player.queue.count) {
+            warmThumbnails(at: positions)
+        }
     }
 
-    /// Warms the thumbnails of the rows around `index` — rows have appeared there, or the app
-    /// resumed — so scrolling the queue finds them decoded.
-    private func warmThumbnails(around index: Int) {
-        let rows = displayedUpcoming
+    /// Warms the thumbnails of the songs at `positions` in the queue — rows have appeared near
+    /// them, or the app resumed — so scrolling the queue finds them decoded.
+    private func warmThumbnails(at positions: [Int]) {
+        let queue = player.queue
         let scale = displayScale
-        let requests = ImageWarmer.neighbors(of: index, in: rows, count: ImageWarmer.scrollAheadCount)
-            .map { ArtworkRequest.songRow(ListArtwork.shared.artworkId(for: $0.track), scale: scale) }
+        let requests = positions.filter(queue.indices.contains)
+            .map { ArtworkRequest.songRow(ListArtwork.shared.artworkId(for: queue[$0]), scale: scale) }
         guard !requests.isEmpty else { return }
         Task { await ImageWarmer.shared.warmAhead(requests, source: "nowPlaying.queue") }
     }
