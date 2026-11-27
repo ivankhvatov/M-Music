@@ -311,7 +311,7 @@ struct PlaylistView: View {
     private func warmAround(_ index: Int, in songs: [Child]) {
         let scale = displayScale
         let requests = ImageWarmer.neighbors(of: index, in: songs, count: ImageWarmer.scrollAheadCount)
-            .map { ArtworkRequest.songRow(ArtworkRequest.artworkId(of: $0), scale: scale) }
+            .map { ArtworkRequest.songRow(ListArtwork.shared.artworkId(for: $0), scale: scale) }
         guard !requests.isEmpty else { return }
         Task { await ImageWarmer.shared.warmAhead(requests, source: "playlist.songs") }
     }
@@ -416,7 +416,10 @@ struct PlaylistView: View {
         var artworkIds: Set<String> = [
             displayedPlaylist.coverArt ?? playlist.id.raw, fresh.coverArt ?? playlist.id.raw,
         ]
-        for song in songs { artworkIds.insert(ArtworkRequest.artworkId(of: song)) }
+        for song in songs {
+            // Its own, and the one its row shows (see `ListArtwork`).
+            artworkIds.formUnion([ArtworkRequest.artworkId(of: song), ListArtwork.shared.artworkId(for: song)])
+        }
         // The original, the cards' and header's size, and the row-thumbnail sizes song rows and
         // playlist rows request.
         let pixelSizes: [Int?] = [

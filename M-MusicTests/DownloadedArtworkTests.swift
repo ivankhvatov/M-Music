@@ -66,6 +66,7 @@ struct DownloadedArtworkTests {
         #expect(urls.map(\.absoluteString) == [
             "http://x.test/a?size=full", "http://x.test/a?size=132",     // song rows: 44pt
             "http://x.test/b?size=\(ArtworkRequest.coverSize)", "http://x.test/b?size=192",     // album rows: 64pt
+            "http://x.test/b?size=132",                                                            // song rows showing it
             "http://x.test/c?size=\(ArtworkRequest.coverSize)", "http://x.test/c?size=192",     // playlist rows: 64pt
             "http://x.test/d?size=\(ArtworkRequest.artistHeaderSize)", "http://x.test/d?size=144",     // artist rows: 48pt
         ])

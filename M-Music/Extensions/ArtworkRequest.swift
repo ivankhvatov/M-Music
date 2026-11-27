@@ -100,7 +100,8 @@ struct ArtworkRequest: Hashable, Codable, Sendable {
         ArtworkRequest(id: artworkId, size: nil, maxPixelSize: ImageCache.colorSamplingMaxPixelSize)
     }
 
-    /// The id a song's artwork is requested by — the same fallback chain `SongRow` and Now Playing use.
+    /// The id of a song's own artwork, which Now Playing shows. A song's row in a list may show its
+    /// album's cover instead — see `ListArtwork`.
     static func artworkId(of track: Child) -> String {
         track.coverArt ?? track.albumId?.raw ?? track.id.raw
     }

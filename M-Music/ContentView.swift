@@ -100,6 +100,8 @@ struct MainView: View {
                 #if DEBUG
                 PerfProbe.startIfRequested()
                 #endif
+                // Which covers song rows show, before any list asks — see `ListArtwork`.
+                Task { await ListArtwork.shared.prepare() }
                 try? await Task.sleep(for: .milliseconds(900))
                 PlayerPresentation.shared.overlayReady = true
                 // Once, at idle — not from each list screen's `.onAppear`, where the cache scans

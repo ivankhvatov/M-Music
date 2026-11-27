@@ -484,6 +484,20 @@ extension ImageCacheTests {
         #expect(ImageStub.requestCount == 2)
     }
 
+    /// Downloads made before song rows showed album covers saved those at the album rows' size only.
+    @Test func aSongRowTakesASavedAlbumRowCoverWhenTheServerCannotBeAsked() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        await dirs.makeCache().savePermanently(coverURL("al-90", size: 192))
+        ImageStub.reset(status: 503)
+        #expect(await dirs.makeCache().load(coverURL("al-90", size: 132, token: "t2")) != nil)
+        #expect(ImageStub.requestCount == 1)        // the right size is asked for first
+        // Not kept as the song row's own file: that one is still fetched once it can be.
+        ImageStub.reset()
+        #expect(await dirs.makeCache().load(coverURL("al-90", size: 132, token: "t3")) != nil)
+        #expect(ImageStub.requestCount == 1)
+    }
+
     @Test func savingASizedCoverKeepsTheOriginalInsteadOfDownloading() async {
         ImageStub.reset()
         let dirs = Directories()

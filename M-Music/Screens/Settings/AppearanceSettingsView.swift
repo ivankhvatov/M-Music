@@ -10,6 +10,7 @@ import SwiftUI
 struct AppearanceSettingsView: View {
     @AppStorage("library.separateReleaseTypes") private var separateReleaseTypesEnabled = false
     @AppStorage("library.groupReleaseVersions") private var groupReleaseVersionsEnabled = false
+    @AppStorage(ArtworkSettings.Keys.useAlbumCoverForSongs) private var useAlbumCoverForSongs = true
     @AppStorage("library.playlistsDisplayStyle") private var playlistsDisplayStyleStorage = LibraryDisplayStyle.grid.storageKey
     @AppStorage("library.albumsDisplayStyle") private var albumsDisplayStyleStorage = LibraryDisplayStyle.grid.storageKey
     @AppStorage(AudioInfoDisplaySettings.Keys.isEnabled) private var showAudioInfo = false
@@ -69,6 +70,8 @@ struct AppearanceSettingsView: View {
                 Section {
                     Toggle("Separate artist's release types", isOn: $separateReleaseTypesEnabled)
                     Toggle("Group release versions", isOn: $groupReleaseVersionsEnabled)
+                    Toggle("Use album cover for songs", isOn: $useAlbumCoverForSongs)
+                        .onChange(of: useAlbumCoverForSongs) { ListArtwork.shared.settingChanged() }
                     Picker("Display playlists as", selection: playlistsDisplayStyle) {
                         ForEach(LibraryDisplayStyle.allCases, id: \.self) { style in
                             Text(style.rawValue).tag(style)

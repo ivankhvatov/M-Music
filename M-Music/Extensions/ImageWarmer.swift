@@ -178,7 +178,7 @@ actor ImageWarmer {
         let scale = await scaleProvider()
         for track in upcoming.prefix(Self.destinationItemLimit) {
             guard !Task.isCancelled else { return }
-            await cache.preload(.songRow(ArtworkRequest.artworkId(of: track), scale: scale))
+            await cache.preload(.songRow(ListArtwork.shared.artworkId(for: track), scale: scale))
         }
     }
 
@@ -353,7 +353,7 @@ actor ImageWarmer {
             let scale = await scaleProvider()
             for song in songs.prefix(Self.destinationItemLimit) {
                 guard !Task.isCancelled else { return }
-                await cache.preload(.songRow(ArtworkRequest.artworkId(of: song), scale: scale))
+                await cache.preload(.songRow(ListArtwork.shared.artworkId(for: song), scale: scale))
             }
         }
     }

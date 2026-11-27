@@ -4240,6 +4240,22 @@
         }
       }
     },
+    "Use album cover for songs" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Album-Cover für Songs verwenden"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Показывать обложку альбома для песен"
+          }
+        }
+      }
+    },
     "Username" : {
       "localizations" : {
         "de" : {

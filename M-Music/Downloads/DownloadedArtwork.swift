@@ -9,7 +9,8 @@ import UIKit
 /// screens show (see `Targets.urls`):
 ///
 /// - the **song's** artwork (song rows, and the original for Now Playing),
-/// - its **album's** artwork (album rows, cards and the header),
+/// - its **album's** artwork (album rows, cards and the header, and song rows that show the
+///   album's cover — see `ListArtwork`),
 /// - its **artist's** picture (artist rows and the header),
 /// - and the artwork of every **playlist** that contains it (playlist rows, cards and headers).
 ///
@@ -36,19 +37,20 @@ actor DownloadedArtwork {
 
         /// Every URL to save: each id's large image — as the screens ask for it: the original for
         /// songs (Now Playing's), a server-sized one for the rest — and its row thumbnail.
+        /// An album's cover is also saved at the song rows' size, for the rows that show it.
         func urls(scale: CGFloat, url: (_ id: String, _ size: Int?) -> URL?) -> [URL] {
-            let kinds: [(ids: Set<String>, large: Int?, points: CGFloat)] = [
-                (songs, nil, ImageCache.RowArtwork.song),
-                (albums, ArtworkRequest.coverSize, ImageCache.RowArtwork.album),
-                (playlists, ArtworkRequest.coverSize, ImageCache.RowArtwork.playlist),
-                (artists, ArtworkRequest.artistHeaderSize, ImageCache.RowArtwork.artist),
+            let kinds: [(ids: Set<String>, large: Int?, rows: [CGFloat])] = [
+                (songs, nil, [ImageCache.RowArtwork.song]),
+                (albums, ArtworkRequest.coverSize, [ImageCache.RowArtwork.album, ImageCache.RowArtwork.song]),
+                (playlists, ArtworkRequest.coverSize, [ImageCache.RowArtwork.playlist]),
+                (artists, ArtworkRequest.artistHeaderSize, [ImageCache.RowArtwork.artist]),
             ]
             var seen = Set<URL>()
             var result: [URL] = []
-            for (ids, large, points) in kinds {
-                let thumbnail = ImageCache.RowArtwork.pixels(points, scale: scale)
+            for (ids, large, rows) in kinds {
+                let thumbnails = rows.map { ImageCache.RowArtwork.pixels($0, scale: scale) }
                 for id in ids.sorted() {
-                    for size in [large, thumbnail] {
+                    for size in [large] + thumbnails.map(Optional.some) {
                         if let resolved = url(id, size), seen.insert(resolved).inserted {
                             result.append(resolved)
                         }
@@ -194,10 +196,12 @@ actor DownloadedArtwork {
     private func resolveAlbums(_ ids: Set<String>) async -> [String: AlbumInfo] {
         var result: [String: AlbumInfo] = [:]
         for albumId in ids {
+            // The cover id the lists request, where it's known.
+            let listed = ListArtwork.shared.cover(ofAlbum: albumId)
             if let cached = await LibraryCacheDatabase.shared.cachedAlbumSongs(albumId: albumId) {
-                result[albumId] = AlbumInfo(coverArt: cached.coverArt, artistId: cached.artistId?.raw)
+                result[albumId] = AlbumInfo(coverArt: listed ?? cached.coverArt, artistId: cached.artistId?.raw)
             } else if let live = await lookup("album:\(albumId)", { try await self.client.getAlbum(id: albumId) }) {
-                result[albumId] = AlbumInfo(coverArt: live.coverArt, artistId: live.artistId?.raw)
+                result[albumId] = AlbumInfo(coverArt: listed ?? live.coverArt, artistId: live.artistId?.raw)
             }
         }
         return result

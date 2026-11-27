@@ -406,9 +406,26 @@ final class ImageCache: @unchecked Sendable {
     private func originalData(for url: URL, key: String) async -> Data? {
         if let data = readStored(key) { return data }
         if let original = originalKey(for: url), let data = readStored(original) { return data }
-        guard let data = await downloadImageData(url) else { return nil }
+        // Not to be had from the server: a saved stand-in will do, kept out of `key` so that the
+        // right file is still fetched once it can be.
+        guard let data = await downloadImageData(url) else { return albumRowStandIn(for: url) }
         writeRegular(data, forKey: key)
         return data
+    }
+
+    /// A song row that shows its album's cover asks for it at the song rows' size. Downloads made
+    /// by an earlier version of the app saved it only at the album rows' (larger) size.
+    private func albumRowStandIn(for url: URL) -> Data? {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let items = components.queryItems,
+              let size = items.first(where: { $0.name == "size" })?.value.flatMap(Int.init),
+              size <= Self.largestThumbnailSize
+        else { return nil }
+        let albumRowSize = Int(CGFloat(size) * RowArtwork.album / RowArtwork.song)
+        components.queryItems = items.map {
+            $0.name == "size" ? URLQueryItem(name: "size", value: String(albumRowSize)) : $0
+        }
+        return components.url.flatMap { readStored(stableKey(for: $0)) }
     }
 
     /// `key`'s bytes from the regular cache, else — it was never fetched, or iOS purged it — from

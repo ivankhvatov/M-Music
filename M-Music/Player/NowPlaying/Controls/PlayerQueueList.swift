@@ -622,7 +622,7 @@ struct PlayerQueueList: View, Equatable {
         let rows = displayedUpcoming
         let scale = displayScale
         let requests = ImageWarmer.neighbors(of: index, in: rows, count: ImageWarmer.scrollAheadCount)
-            .map { ArtworkRequest.songRow(ArtworkRequest.artworkId(of: $0.track), scale: scale) }
+            .map { ArtworkRequest.songRow(ListArtwork.shared.artworkId(for: $0.track), scale: scale) }
         guard !requests.isEmpty else { return }
         Task { await ImageWarmer.shared.warmAhead(requests, source: "nowPlaying.queue") }
     }

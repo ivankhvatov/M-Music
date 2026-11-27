@@ -189,6 +189,10 @@ struct SearchView: View {
         .listStyle(.plain)
         // Whether the field is open can only be read from inside what `searchable` is applied to.
         .background(SearchingReader(isSearching: $isSearching))
+        // Which covers song results show has changed (see `ListArtwork`): what's warmed follows.
+        .onReceive(NotificationCenter.default.publisher(for: ListArtwork.didChange)) { _ in
+            if !isOpening, route == nil { search() }
+        }
         // Background work holds off while the results are scrolled — see `ScrollActivity`.
         .onScrollPhaseChange { _, phase in
             ScrollActivity.shared.set(scrolling: phase != .idle)

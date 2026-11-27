@@ -145,6 +145,7 @@ actor LibraryCacheDatabase {
         // The tokens record "this list is synced as of scan X" — meaningless once the cached
         // list itself is gone.
         await LibraryRevalidation.shared.reset()
+        ListArtwork.shared.reset()
     }
 
     /// What `LibraryCacheStatus` needs out of the cache, and nothing more: which songs each cached
@@ -298,6 +299,7 @@ extension LibraryCacheDatabase {
     nonisolated func cacheAllAlbums(_ albums: [AlbumID3]) async {
         await set(albums, category: LibraryCacheCategory.allAlbums, key: Self.wholeCatalogKey)
         await LibraryCacheIndex.shared.mergeAlbumSongCounts(albums)
+        ListArtwork.shared.update(with: albums, isWholeCatalog: true)
     }
 
     nonisolated func cachedAllAlbums() async -> [AlbumID3]? {
@@ -307,6 +309,7 @@ extension LibraryCacheDatabase {
     nonisolated func cacheRecentAlbums(_ albums: [AlbumID3]) async {
         await set(albums, category: LibraryCacheCategory.recentAlbums, key: Self.wholeCatalogKey)
         await LibraryCacheIndex.shared.mergeAlbumSongCounts(albums)
+        ListArtwork.shared.update(with: albums)
     }
 
     nonisolated func cachedRecentAlbums() async -> [AlbumID3]? {
@@ -325,6 +328,7 @@ extension LibraryCacheDatabase {
         await set(albums, category: LibraryCacheCategory.artistAlbums, key: artistId)
         await LibraryCacheIndex.shared.mergeAlbumSongCounts(albums)
         await LibraryCacheIndex.shared.setAlbumIds(albums.map { $0.id.raw }, forArtist: artistId)
+        ListArtwork.shared.update(with: albums)
     }
 
     nonisolated func cachedArtistAlbums(artistId: String) async -> [AlbumID3]? {
@@ -368,6 +372,7 @@ extension LibraryCacheDatabase {
 
     nonisolated func cacheAlbumSongs(_ album: AlbumWithSongsID3, albumId: String) async {
         await set(album, category: LibraryCacheCategory.albumSongs, key: albumId)
+        ListArtwork.shared.update(albumId: albumId, coverArt: album.coverArt)
     }
 
     /// An artist's albums that are downloaded in full, for browsing offline: the album metadata

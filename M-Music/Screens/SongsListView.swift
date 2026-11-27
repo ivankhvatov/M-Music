@@ -180,6 +180,10 @@ struct SongsListView: View {
             sortButton
         }
         .task { await refresh() }
+        // Which covers the rows show has changed (see `ListArtwork`): what's warmed follows.
+        .onReceive(NotificationCenter.default.publisher(for: ListArtwork.didChange)) { _ in
+            if !displayedSongs.isEmpty { rememberFirstScreenful() }
+        }
         // A burst of keystrokes coalesces into one filter pass (the delay is inside `recompute`).
         .onChange(of: searchText) { recompute(debounced: true) }
         .onChange(of: filterOptionStorage) { recompute() }
@@ -299,7 +303,7 @@ struct SongsListView: View {
 
     private func artworkRequests(for songs: ArraySlice<Child>) -> [ArtworkRequest] {
         let scale = displayScale
-        return songs.map { ArtworkRequest.songRow(ArtworkRequest.artworkId(of: $0), scale: scale) }
+        return songs.map { ArtworkRequest.songRow(ListArtwork.shared.artworkId(for: $0), scale: scale) }
     }
 
     /// A row scrolled into view: warm the ones just below it, so a fast scroll finds them ready.
@@ -384,6 +388,8 @@ struct SongsListView: View {
         if !hasLoadedOnce {
             isLoading = true
         }
+        // Before the first rows ask for their covers.
+        await ListArtwork.shared.prepare()
         await performRefresh()
     }
 
@@ -558,15 +564,18 @@ struct SongRow: View {
     /// Replaces the artist line — the search screen puts the item type there.
     var subtitle: String?
 
-    private let client = SubsonicClient.shared
     @ObservedObject private var downloads = DownloadStore.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
-    /// Resolved once, in `init` — `coverArtURL` signs every call with a fresh random token, so
-    /// recomputing it inline in `body` would hand `CachedAsyncImage` a "new" URL (and restart its
-    /// load task) on every one of this row's re-renders, even though it's the same image every
-    /// time. Mirrors the fix already applied to `AlbumView`'s artwork URL.
-    @State private var artworkURL: URL?
+    /// The same URL on every evaluation for the same cover: `ArtworkRequest.url` is memoized, so
+    /// `CachedAsyncImage` doesn't see a "new" one (and restart its load) on each re-render.
+    private var artworkURL: URL? {
+        // Read here so that a change of what rows show (see `ListArtwork`) redraws this one.
+        _ = ListArtworkChanges.shared.revision
+        return ArtworkRequest.songRow(
+            ListArtwork.shared.artworkId(for: track), scale: displayScale, points: rowArtworkSize
+        ).url
+    }
 
     init(
         track: Child,
@@ -598,7 +607,6 @@ struct SongRow: View {
         self.showsGoToActions = showsGoToActions
         self.showsAddToPlaylist = showsAddToPlaylist
         self.showsTrailingActions = showsTrailingActions
-        _artworkURL = State(initialValue: ArtworkRequest.songRow(ArtworkRequest.artworkId(of: track), scale: displayScale, points: rowArtworkSize).url)
     }
 
     var body: some View {

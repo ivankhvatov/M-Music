@@ -191,7 +191,7 @@ actor SearchEngine {
         case .playlist(let playlist):
             .playlistRow(playlist.coverArt ?? playlist.id.raw, scale: scale, points: points)
         case .song(let song):
-            .songRow(ArtworkRequest.artworkId(of: song), scale: scale, points: points)
+            .songRow(ListArtwork.shared.artworkId(for: song), scale: scale, points: points)
         }
     }
 }
