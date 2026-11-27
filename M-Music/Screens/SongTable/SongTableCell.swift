@@ -13,7 +13,6 @@ final class SongTableCell: UICollectionViewListCell {
         /// Between the text and the trailing controls: `SongRow`'s spacing on both sides of its
         /// spacer, and the spacer's own least width.
         static let textToControls: CGFloat = 32
-        static let titleToArtist: CGFloat = 2
         /// The menu button, around its glyph: the menu opens from it.
         static let menuHeight: CGFloat = 20
     }
@@ -36,6 +35,9 @@ final class SongTableCell: UICollectionViewListCell {
         image: UIImage(systemName: "music.note", withConfiguration: UIImage.SymbolConfiguration(textStyle: .body))
     )
     private let artwork = UIImageView()
+    /// The hairline round the artwork, stroked along its edge as `SongRow` strokes it. A layer's
+    /// own border is drawn inside the edge, and one this thin doesn't show.
+    private let outline = CAShapeLayer()
     private let title = UILabel()
     private let artist = UILabel()
     private let status = SongTableDownloadStatus()
@@ -60,7 +62,10 @@ final class SongTableCell: UICollectionViewListCell {
         placeholder.addSubview(note)
         artwork.layer.cornerRadius = 4
         artwork.layer.masksToBounds = true
-        artwork.layer.borderWidth = 0.1
+        outline.fillColor = nil
+        outline.lineWidth = 0.1
+        // It moves with the artwork, without animating on its own.
+        outline.actions = ["bounds": NSNull(), "position": NSNull(), "path": NSNull(), "hidden": NSNull()]
         title.font = .preferredFont(forTextStyle: .callout)
         title.adjustsFontForContentSizeCategory = true
         title.numberOfLines = 0
@@ -87,6 +92,7 @@ final class SongTableCell: UICollectionViewListCell {
         ])
 
         [placeholder, artwork, title, artist].forEach(content.addSubview)
+        content.layer.addSublayer(outline)
         [content, status, menuButton].forEach(contentView.addSubview)
         // The song is one button to VoiceOver, as a `List` row was; the menu is another.
         content.isAccessibilityElement = true
@@ -101,7 +107,7 @@ final class SongTableCell: UICollectionViewListCell {
     required init?(coder: NSCoder) { fatalError("not used from a storyboard") }
 
     private func updateBorder() {
-        artwork.layer.borderColor = Self.secondary.resolvedColor(with: traitCollection).cgColor
+        outline.strokeColor = Self.secondary.resolvedColor(with: traitCollection).cgColor
     }
 
     // MARK: - Content
@@ -153,6 +159,7 @@ final class SongTableCell: UICollectionViewListCell {
         // Offline and not downloaded: muted, as `dimmedIfUnavailable` draws it.
         artwork.image = isAvailable ? image : image?.muted()
         artwork.isHidden = image == nil
+        outline.isHidden = image == nil
         placeholder.isHidden = image != nil
         setNeedsLayout()
     }
@@ -187,7 +194,15 @@ final class SongTableCell: UICollectionViewListCell {
         let width: CGFloat
         let titleHeight: CGFloat
         let artistHeight: CGFloat
-        var height: CGFloat { titleHeight + (artistHeight > 0 ? Metrics.titleToArtist + artistHeight : 0) }
+        let spacing: CGFloat
+        var height: CGFloat { titleHeight + (artistHeight > 0 ? spacing + artistHeight : 0) }
+    }
+
+    /// What a `VStack` leaves between two `Text`s: the lower one's leading, up to a whole pixel.
+    /// It depends on the text size — 2 points at the standard one, none at the smallest and largest.
+    private var titleToArtist: CGFloat {
+        let scale = max(traitCollection.displayScale, 1)
+        return (max(0, artist.font.leading) * scale).rounded(.up) / scale
     }
 
     private var menuGlyphWidth: CGFloat { ceil(menuButton.image(for: .normal)?.size.width ?? 22) }
@@ -204,12 +219,13 @@ final class SongTableCell: UICollectionViewListCell {
         return TextLayout(
             width: textWidth,
             titleHeight: title.sizeThatFits(fitting).height,
-            artistHeight: artist.isHidden ? 0 : artist.sizeThatFits(fitting).height
+            artistHeight: artist.isHidden ? 0 : artist.sizeThatFits(fitting).height,
+            spacing: titleToArtist
         )
     }
 
     private func rowHeight(in width: CGFloat) -> CGFloat {
-        max(Self.artworkSide, ceil(textLayout(in: width).height)) + 2 * Metrics.top
+        pixel(max(Self.artworkSide, textLayout(in: width).height)) + 2 * Metrics.top
     }
 
     override func preferredLayoutAttributesFitting(
@@ -240,16 +256,21 @@ final class SongTableCell: UICollectionViewListCell {
         } else {
             artwork.frame = artworkFrame
         }
+        outline.frame = artwork.frame
+        if outline.path?.boundingBoxOfPath.size != artwork.bounds.size {
+            outline.path = UIBezierPath(roundedRect: outline.bounds, cornerRadius: 4).cgPath
+        }
         badge?.frame = artworkFrame
 
         let text = textLayout(in: bounds.width)
         // On whole pixels, as `List` put it: a block no taller than the artwork on the one below.
         let centred = (bounds.height - text.height) / 2
         let scale = max(traitCollection.displayScale, 1)
-        let top = text.height < side ? (centred * scale).rounded(.up) / scale : pixel(centred)
+        // The hundredth keeps a value already on a pixel from being pushed to the next.
+        let top = text.height < side ? (centred * scale - 0.01).rounded(.up) / scale : pixel(centred)
         title.frame = CGRect(x: Self.textLeading, y: top, width: text.width, height: text.titleHeight)
         artist.frame = CGRect(
-            x: Self.textLeading, y: top + text.titleHeight + Metrics.titleToArtist,
+            x: Self.textLeading, y: top + text.titleHeight + text.spacing,
             width: text.width, height: text.artistHeight
         )
 
@@ -281,7 +302,7 @@ private extension UIImage {
 }
 
 private extension CIContext {
-    nonisolated(unsafe) static let muting = CIContext()
+    static let muting = CIContext()
 }
 
 /// A button as small as its glyph that is easy to touch all the same.
