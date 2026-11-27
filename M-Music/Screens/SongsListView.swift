@@ -64,13 +64,13 @@ struct SongsListView: View {
     private let client = SubsonicClient.shared
     /// Not `@ObservedObject`: this view only ever calls a method on it (`play(_:)` below), never
     /// reads a `@Published` property in `body` — observing it would re-run this view's full
-    /// filter+sort over the entire library on every playback tick. `SongRow` observes it instead,
-    /// scoped to just the currently-visible rows.
+    /// filter+sort over the entire library on every playback tick. The list watches for the playing
+    /// song itself (`SongTableController`).
     private let player = PlayerManager.shared
-    /// None of these three is `@ObservedObject`: observing them re-ran this whole body — a
-    /// `ForEach` over the entire library, identity-diffed on every pass — on every download
-    /// progress tick, connectivity change or star. The screen reacts through the `.onReceive`s
-    /// below, and the per-row `.disabled` lives in `SongListRow`, which only visible rows build.
+    /// None of these three is `@ObservedObject`: observing them re-ran this whole body — over
+    /// the entire library — on every download progress tick, connectivity change or star. The
+    /// screen reacts through the `.onReceive`s below, and the list watches what its rows show
+    /// (`SongTableController`).
     private let starStore = StarStore.shared
     private let downloads = DownloadStore.shared
     private let networkMonitor = NetworkMonitor.shared
@@ -118,18 +118,15 @@ struct SongsListView: View {
     @State private var sortedSongs: [Child] = []
     /// Keeps the content hidden on first open until the first screenful's images are in memory.
     @State private var imageReadiness = ImageReadiness()
-    /// Where each displayed row is, for warming the ones below a row that scrolls into view.
-    @State private var rowPositions = RowPositions()
     /// Where the user last was, to warm around on resume — see `onAppResume`.
     @State private var lastSeen = LastSeenIndex()
     /// Which rows to warm as the list scrolls.
     @State private var prefetcher = ListPrefetcher()
     /// Sorts/filters off the main actor — see `OffMainDeriver`.
     @State private var deriver = OffMainDeriver()
-
-    /// Point size artwork renders at in a row — the server is asked to downscale to this times
-    /// `displayScale` rather than sending full-size cover art for a 44x44 thumbnail.
-    private let rowArtworkSize: CGFloat = ImageCache.RowArtwork.song
+    /// The song the "Add to playlist" sheet is open for, and what went wrong adding it.
+    @State private var songToAdd: Child?
+    @State private var addError: String?
 
     var body: some View {
         Group {
@@ -154,27 +151,29 @@ struct SongsListView: View {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List {
-                    actionButtons
-                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                        .listRowSeparator(.hidden)
-
-                    ForEach(displayedSongs) { track in
-                        SongListRow(
-                            track: track,
-                            rowArtworkSize: rowArtworkSize,
-                            displayScale: displayScale,
-                            onPlay: { play(track) }
-                        )
-                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                        .onAppear { warmAhead(after: track) }
-                    }
-                }
-                .listStyle(.plain)
-                .reportsScrollActivity()
+                // UIKit's list rather than SwiftUI's — see `SongTable`.
+                SongTable(
+                    songs: displayedSongs,
+                    header: { actionButtons },
+                    onRowAppear: { warmAhead(row: $0) },
+                    onSelect: { play($0) },
+                    onRefresh: { await performRefresh(force: true) },
+                    onAddToPlaylist: { songToAdd = $0 }
+                )
+                .ignoresSafeArea()
             }
         }
-        .refreshable { await performRefresh(force: true) }
+        .sheet(item: $songToAdd) { song in
+            AddToPlaylistSheet(song: song) { playlist in addToPlaylist(song, playlist) }
+        }
+        .alert("Couldn't add the song to the playlist", isPresented: Binding(
+            get: { addError != nil },
+            set: { if !$0 { addError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(addError ?? "")
+        }
         .onAppResume { warm(ListPrefetcher.plan(from: lastSeen.index, count: displayedSongs.count)) }
         .navigationTitle("Songs")
         .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
@@ -310,11 +309,22 @@ struct SongsListView: View {
     }
 
     /// A row scrolled into view: warm the ones ahead of it, so a fast scroll finds them ready.
-    private func warmAhead(after track: Child) {
-        guard let index = rowPositions.position(of: track.id.raw),
-              displayedSongs.indices.contains(index), displayedSongs[index].id == track.id else { return }
+    private func warmAhead(row index: Int) {
+        guard displayedSongs.indices.contains(index) else { return }
         lastSeen.index = index
         if let rows = prefetcher.rows(appearing: index, of: displayedSongs.count) { warm(rows) }
+    }
+
+    /// Adds to the end of the playlist, after the sheet has closed — so a failure (offline, say) is
+    /// reported here.
+    private func addToPlaylist(_ song: Child, _ playlist: PlaylistSummary) {
+        Task {
+            do {
+                try await PlaylistEditor.add(song, to: playlist)
+            } catch {
+                addError = error.localizedDescription
+            }
+        }
     }
 
     private func warm(_ rows: [Int]) {
@@ -330,7 +340,6 @@ struct SongsListView: View {
     /// next visit (a search's results aren't what the screen normally opens with).
     private func rememberFirstScreenful() {
         prefetcher.reset()
-        rowPositions.update(ids: displayedSongs.map { $0.id.raw })
         let requests = artworkRequests(for: displayedSongs.prefix(ImageWarmer.manifestLimit))
         imageReadiness.require(requests)
         guard searchText.isEmpty else { return }
@@ -476,31 +485,6 @@ struct SongsListView: View {
                     .foregroundStyle(Color.accentColor)
             }
         }
-    }
-}
-
-/// One tappable row of the songs list. Owns the observation of download and network state needed to
-/// disable itself, so only the rows actually on screen react to it — the screen itself observes
-/// neither (see `SongsListView`).
-private struct SongListRow: View {
-    let track: Child
-    let rowArtworkSize: CGFloat
-    let displayScale: CGFloat
-    let onPlay: () -> Void
-
-    @ObservedObject private var downloads = DownloadStore.shared
-    @ObservedObject private var networkMonitor = NetworkMonitor.shared
-
-    var body: some View {
-        Button(action: onPlay) {
-            SongRow(
-                track: track, rowArtworkSize: rowArtworkSize, displayScale: displayScale,
-                showsGoToActions: true, showsAddToPlaylist: true
-            )
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(!(networkMonitor.isOnline || downloads.isDownloaded(track.id.raw)))
     }
 }
 
@@ -671,6 +655,7 @@ struct SongRow: View {
                         )
                     )
             } else if showsTrailingActions {
+                SongDownloadStatus(songId: track.id.raw)
                 // The menu is built only once the list is at rest: it's much of what a row costs,
                 // and a touch during a scroll only stops the scroll.
                 DeferredWhileScrolling {
@@ -679,7 +664,6 @@ struct SongRow: View {
                         onRemoveFromPlaylist: onRemoveFromPlaylist
                     )
                 } placeholder: {
-                    SongDownloadStatus(songId: track.id.raw)
                     SongMenuLabel()
                 }
             }
@@ -737,9 +721,9 @@ private struct TapIfAvailable: ViewModifier {
     }
 }
 
-/// The download status indicator + song menu shown at the trailing edge of a full (non-reorder-
-/// handle) `SongRow`. Split out so its `starStore` subscription — used only by the menu's
-/// favorite toggle — and this view's own `downloads` subscription don't exist at all when
+/// The song menu at the trailing edge of a full (non-reorder-handle) `SongRow`. Split out so its
+/// `starStore` subscription — used only by the menu's favorite toggle — and this view's own
+/// `downloads` subscription don't exist at all when
 /// `SongRow` is in reorder-handle mode, where it's reconstructed on every drag gesture callback
 /// for the actively-dragged row. Mirrors `SongNowPlayingOverlay`: a leaf view scoped to exactly
 /// what it reads.
@@ -761,21 +745,18 @@ private struct SongTrailingActions: View {
     @ObservedObject private var downloadActivity = DownloadActivityStore.shared
 
     var body: some View {
-        Group {
-            SongDownloadStatus(songId: track.id.raw)
-            songMenu
-        }
-        .sheet(item: $songToAdd) { song in
-            AddToPlaylistSheet(song: song) { playlist in addToPlaylist(song, playlist) }
-        }
-        .alert("Couldn't add the song to the playlist", isPresented: Binding(
-            get: { addError != nil },
-            set: { if !$0 { addError = nil } }
-        )) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(addError ?? "")
-        }
+        songMenu
+            .sheet(item: $songToAdd) { song in
+                AddToPlaylistSheet(song: song) { playlist in addToPlaylist(song, playlist) }
+            }
+            .alert("Couldn't add the song to the playlist", isPresented: Binding(
+                get: { addError != nil },
+                set: { if !$0 { addError = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(addError ?? "")
+            }
     }
 
     /// Adds to the end of the playlist, after the sheet has closed — so a failure (offline, say) is
