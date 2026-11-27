@@ -135,8 +135,8 @@ final class PlayerManager: ObservableObject {
     /// Center's "favorite" toggle (`MPRemoteCommandCenter.likeCommand`) as well as `PlayerView`'s
     /// own star button — both call `toggleStarred()` below.
     @Published private(set) var isCurrentTrackStarred = false
-    /// Same id `AlbumView`/`AlbumCardView` use for cover art (original size, no `size` param),
-    /// so the mini/full player reuses whatever's already in `ImageCache` instead of re-fetching.
+    /// The current track's cover at its original size (no `size` param) — what the mini and full
+    /// player show. (Cards and headers ask for covers server-sized: `ArtworkRequest.coverSize`.)
     /// Recomputed once per track load rather than on every access: `SubsonicClient.url(for:_:)`
     /// signs each call with a fresh random token, so a computed property here would return a
     /// different URL string on every read even for the same track — defeating both
@@ -215,6 +215,8 @@ final class PlayerManager: ObservableObject {
     /// confirms the swap actually happened, since that path never goes through `startPlayback(...)`
     /// (the engine already resolved the transition internally by the time it runs).
     private var gaplessPreloadedSource: PlaybackSource?
+    /// Whether what was preloaded is a live stream rather than a file — see `preferCachedNextItem`.
+    private var gaplessPreloadedFromNetwork = false
 
     /// The song id `GaplessCacheService.enqueue` was last asked to cache, while that download is
     /// still in flight — cleared once it lands (or is superseded). Lets `prepareNextItem()` cancel
@@ -407,6 +409,13 @@ final class PlayerManager: ObservableObject {
     }
 
     private func subscribeToEngine() {
+        // Ends the timing of a track load — see `PerfLog`.
+        isAdvancingPublisher
+            .filter { $0 }
+            .sink { [weak self] _ in
+                PerfLog.audioStarted(source: self?.playbackSource.map { String(describing: $0) } ?? "unknown")
+            }
+            .store(in: &subscriptions)
         engine.$currentTime
             // Not the value it starts with, which `@Published` hands to a new subscriber at once:
             // the engine hasn't played anything, and its 0 would replace the position restored
@@ -447,6 +456,12 @@ final class PlayerManager: ObservableObject {
         engine.onPlaybackFailed = { [weak self] error in
             Task { @MainActor in self?.recoverFromPlaybackFailure(error: error) }
         }
+        // Once the upcoming track's `StreamCacheService` file lands, the player gets that in place
+        // of the live stream. A turn of the run loop later: `@Published` announces from `willSet`.
+        StreamCacheStatus.shared.$cachedURLs
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.preferCachedNextItem() }
+            .store(in: &subscriptions)
         // Once the upcoming track's gapless-cache download lands, preload it — this is what
         // actually delivers a gapless transition for a cached track, since `prepareNextItem()`
         // itself only kicks off the download (see its doc comment).
@@ -950,6 +965,7 @@ final class PlayerManager: ObservableObject {
     func pause() {
         SleepTimer.shared.cancelWaitingForSongEnd()
         guard hasLoadedItem, isPlaying else { return }
+        PerfLog.trackLoadCancelled()
         // Where the song really is, not where it was at the last update: a pause is where it's
         // picked up from — the lyrics' dots too — including after a relaunch.
         if let exact = engine.exactTime { currentTime = exact }
@@ -985,6 +1001,7 @@ final class PlayerManager: ObservableObject {
             isPlaying = false
             return
         }
+        if autoplay { PerfLog.trackLoadStarted() } else { PerfLog.trackLoadCancelled() }
         // A reconnect after a playback failure reloads the same track mid-way (`startTime > 0`)
         // — that's the same listen, so keep accumulating rather than starting over.
         if startTime == 0 || scrobbleSongId != track.id.raw {
@@ -1169,6 +1186,7 @@ final class PlayerManager: ObservableObject {
         if handedOffGapless, gaplessPreloadedIndex == nextIndex, gaplessPreloadedTrackID == queue[nextIndex].id.raw {
             gaplessPreloadedIndex = nil
             gaplessPreloadedTrackID = nil
+            gaplessPreloadedFromNetwork = false
             let track = queue[nextIndex]
             duration = TimeInterval(track.duration ?? 0)
             currentTime = 0
@@ -1355,31 +1373,22 @@ final class PlayerManager: ObservableObject {
         Float(min(ReplayGainSettings.linearGain(for: track), 1))
     }
 
-    /// Builds the next track's URL ahead of time and hands it to `PlayerEngine` to preload into
-    /// its `AVQueuePlayer` — that's what makes the natural transition into it gapless. Also kicks
-    /// off a `StreamCacheService` prefetch of the live URL (skipped for an already-downloaded
-    /// track) so a later retry of this same call — `handleTimeUpdate` retries it as the current
-    /// track nears its end — has a better chance of finding a local copy already sitting in the
-    /// cache instead of a live network URL, more resilient to a hiccup right at the boundary.
+    /// Gets the next track ready for a gapless transition: hands `PlayerEngine` its file — a
+    /// download, or `StreamCacheService`'s copy — to preload into its `AVQueuePlayer`. With
+    /// neither there yet, it starts the `StreamCacheService` download and waits for the file;
+    /// only in the song's last seconds, or offline, is the live stream queued instead.
     ///
-    /// A live-transcoded next track with no local copy *is* preloaded here like anything else,
-    /// even though unlike a static file, a transcoded stream is generated on the fly for one
-    /// request and can't be meaningfully paused mid-download and resumed later — preloading it
-    /// this far ahead of when it's needed can leave that connection sitting idle long enough to
-    /// go stale, audible as a glitch, a restart, or a dropped track on the transition. An earlier
-    /// version of this method skipped preloading in that case to dodge the glitch, falling back to
-    /// `handleTrackFinishedNaturally()`'s fresh-connection reload instead — trading away gapless
-    /// playback for reliability. `GaplessCacheSettings.isEnabled` ("Cache upcoming track") is the
-    /// real fix for that tradeoff: `prepareNextItemViaGaplessCache` below only ever preloads an
-    /// actual local file, once fully downloaded ahead of time, so it's both gapless and glitch-free.
-    /// With that setting off, gapless playback is preloaded here unconditionally instead, on the
-    /// same terms as before that workaround existed — accepting the occasional live-transcode
-    /// glitch as the cost of staying gapless rather than silently degrading every transition.
+    /// A live-transcoded stream is generated on the fly for one request and can't be paused and
+    /// resumed, so queued far ahead it could sit idle long enough to go stale — audible as a
+    /// glitch at the transition. Waiting for the file keeps that to the fallback.
+    /// `GaplessCacheSettings.isEnabled` ("Cache upcoming track") never queues a stream at all:
+    /// `prepareNextItemViaGaplessCache` below only preloads a finished local file.
     private func prepareNextItem() {
         guard let currentIndex, let nextIndex = upcomingIndex(afterFinishing: true),
               gaplessPreloadedIndex != nextIndex
         else { return }
         let nextTrack = queue[nextIndex]
+        prepareArtwork(for: nextTrack)
 
         if GaplessCacheSettings.isEnabled {
             prepareNextItemViaGaplessCache(nextTrack, at: nextIndex)
@@ -1389,11 +1398,11 @@ final class PlayerManager: ObservableObject {
         let downloadFileURL = downloadURL(for: nextTrack)
         let localURL = downloadFileURL ?? StreamCacheStatus.shared.url(for: nextTrack.id.raw)
 
-        guard let url = try? streamURL(for: nextTrack) else { return }
-        if engine.preloadForGapless(url: url) {
-            notePreloaded(at: nextIndex)
-            gaplessPreloadedSource = downloadFileURL != nil ? .downloaded : .stream
-        }
+        // Only the current and upcoming track are worth keeping cached — without this, every
+        // track prefetched over the course of a long listening session would sit in the cache
+        // forever.
+        let keepIds = Set([queue[currentIndex].id.raw, nextTrack.id.raw])
+        Task { await StreamCacheService.shared.trim(keeping: keepIds) }
 
         if localURL == nil, let liveURL = try? liveStreamURL(for: nextTrack) {
             Task {
@@ -1401,13 +1410,35 @@ final class PlayerManager: ObservableObject {
                     songId: nextTrack.id.raw, url: liveURL, codec: nextTrack.suffix ?? "", bitrate: 0
                 )
             }
+            // The file is on its way. Given the live stream now, the player would fetch the same
+            // track alongside it — it starts buffering what's queued at once. It gets the file
+            // when that lands (`preferCachedNextItem`), or the stream if the song reaches its
+            // last seconds first (`handleTimeUpdate` calls this again then).
+            if NetworkMonitor.shared.hasNetwork, duration - livePosition > Self.streamFallbackLead { return }
         }
 
-        // Only the current and upcoming track are worth keeping cached — without this, every
-        // track prefetched over the course of a long listening session would sit in the cache
-        // forever.
-        let keepIds = Set([queue[currentIndex].id.raw, nextTrack.id.raw])
-        Task { await StreamCacheService.shared.trim(keeping: keepIds) }
+        guard let url = try? streamURL(for: nextTrack) else { return }
+        if engine.preloadForGapless(url: url) {
+            notePreloaded(at: nextIndex)
+            gaplessPreloadedSource = downloadFileURL != nil ? .downloaded : .stream
+            gaplessPreloadedFromNetwork = !url.isFileURL
+        }
+    }
+
+    /// With this much of a song left and the next one's file still not there, the player is given
+    /// its live stream instead: time enough for it to buffer a gapless hand-off.
+    private static let streamFallbackLead: TimeInterval = 15
+
+    /// Decodes the next track's cover, and the sample its colours are taken from, ahead of the
+    /// change — so a skip or the natural hand-off shows them at once, not the previous cover.
+    private func prepareArtwork(for track: Child) {
+        guard let url = client.cachedCoverArtURL(forId: ArtworkRequest.artworkId(of: track)) else { return }
+        Task(priority: .utility) {
+            let tiers = [ImageCache.nowPlayingMaxPixelSize, ImageCache.colorSamplingMaxPixelSize]
+            for tier in tiers {
+                await ImageCache.shared.preload(url, maxPixelSize: tier, allowNetwork: true, paced: false)
+            }
+        }
     }
 
     /// The `GaplessCacheSettings.isEnabled` path: caches the upcoming track — raw or transcoded —
@@ -1472,6 +1503,7 @@ final class PlayerManager: ObservableObject {
         gaplessPreloadedIndex = nil
         gaplessPreloadedTrackID = nil
         gaplessPreloadedSource = nil
+        gaplessPreloadedFromNetwork = false
     }
 
     private func notePreloaded(at index: Int) {
@@ -1518,6 +1550,25 @@ final class PlayerManager: ObservableObject {
             }
             guard !Task.isCancelled, let self else { return }
             self.swapNextItem()
+        }
+    }
+
+    /// The next track's whole file has been downloaded (`StreamCacheService`): the player is
+    /// given it — in place of the live stream, if that was queued meanwhile, so the track isn't
+    /// fetched further and the hand-off no longer depends on the network.
+    ///
+    /// A queued stream is only taken out while there's time: once the player may be preparing the
+    /// item, taking it out is heard (see `nextItemPrepareWindow`), and the stream is left in.
+    private func preferCachedNextItem() {
+        guard !GaplessCacheSettings.isEnabled, hasLoadedItem,
+              let next = upcomingIndex(afterFinishing: true),
+              StreamCacheStatus.shared.url(for: queue[next].id.raw) != nil
+        else { return }
+        if gaplessPreloadedIndex == nil {
+            prepareNextItem()
+        } else if gaplessPreloadedFromNetwork, gaplessPreloadedTrackID == queue[next].id.raw,
+                  duration - livePosition > Self.nextItemPrepareWindow + 1 {
+            swapNextItem()
         }
     }
 
@@ -1593,7 +1644,7 @@ final class PlayerManager: ObservableObject {
         }
         // Retry preparing the next item if it wasn't ready right after loading (e.g. a transient
         // network hiccup) — give it another shot as the current track nears its end.
-        if gaplessPreloadedIndex == nil, duration > 0, duration - time < 15 {
+        if gaplessPreloadedIndex == nil, duration > 0, duration - time < Self.streamFallbackLead {
             prepareNextItem()
         }
     }
@@ -1714,7 +1765,9 @@ final class PlayerManager: ObservableObject {
     private func loadNowPlayingArtwork() {
         guard let artworkURL else { return }
         Task { [weak self] in
-            guard let self, let uiImage = await ImageCache.shared.load(artworkURL) else { return }
+            // As many pixels as the screen is wide: the lock screen shows the cover that large.
+            let tier = ImageCache.nowPlayingMaxPixelSize
+            guard let self, let uiImage = await ImageCache.shared.load(artworkURL, maxPixelSize: tier) else { return }
             await MainActor.run {
                 guard self.artworkURL == artworkURL, var info = MPNowPlayingInfoCenter.default().nowPlayingInfo else { return }
                 info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: uiImage.size) { _ in uiImage }

@@ -18,12 +18,22 @@ struct ArtworkRequest: Hashable, Codable, Sendable {
     /// a view would use.
     var url: URL? { SubsonicClient.shared.cachedCoverArtURL(forId: id, size: size) }
 
+    // MARK: Server sizes
+
+    /// The size album and playlist covers are asked of the server at, for cards and headers
+    /// alike — one file serves both, so opening a screen from its card costs no second download.
+    /// As many pixels as the larger of the two shows: the header's tier, or a grid cell where a
+    /// screen makes that bigger. (`ImageCache` uses an original it already has instead.)
+    static var coverSize: Int { max(ImageCache.standardMaxPixelSize, ImageCache.cardMaxPixelSize) }
+    /// An artist's header picture, which is shown smaller than a card.
+    static var artistHeaderSize: Int { ImageCache.cardMaxPixelSize }
+
     // MARK: Albums
 
-    /// A grid card (`AlbumCardView`): the original image at the card tier. It's also the stand-in
-    /// the album's header shows while its own, larger decode is still running.
+    /// A grid card (`AlbumCardView`): the cover at the card tier. It's also the stand-in the
+    /// album's header shows while its own, larger decode is still running.
     static func albumCard(_ artworkId: String) -> ArtworkRequest {
-        ArtworkRequest(id: artworkId, size: nil, maxPixelSize: ImageCache.cardMaxPixelSize)
+        ArtworkRequest(id: artworkId, size: coverSize, maxPixelSize: ImageCache.cardMaxPixelSize)
     }
 
     /// A list row (`AlbumsListView.AlbumRow`): the server's row-sized thumbnail.
@@ -37,7 +47,7 @@ struct ArtworkRequest: Hashable, Codable, Sendable {
 
     /// The header of the album screen.
     static func albumHeader(_ artworkId: String) -> ArtworkRequest {
-        ArtworkRequest(id: artworkId, size: nil, maxPixelSize: ImageCache.standardMaxPixelSize)
+        ArtworkRequest(id: artworkId, size: coverSize, maxPixelSize: ImageCache.standardMaxPixelSize)
     }
 
     // MARK: Playlists
@@ -65,7 +75,7 @@ struct ArtworkRequest: Hashable, Codable, Sendable {
     }
 
     static func artistHeader(_ artworkId: String) -> ArtworkRequest {
-        ArtworkRequest(id: artworkId, size: nil, maxPixelSize: ImageCache.cardMaxPixelSize)
+        ArtworkRequest(id: artworkId, size: artistHeaderSize, maxPixelSize: ImageCache.cardMaxPixelSize)
     }
 
     // MARK: Songs and Now Playing
@@ -79,9 +89,10 @@ struct ArtworkRequest: Hashable, Codable, Sendable {
         )
     }
 
-    /// The artwork of the mini player and the expanded player (`TrackArtworkView`): full resolution.
+    /// The artwork of the mini player and the expanded player (`TrackArtworkView`), and of the
+    /// lock screen: the original, decoded as wide as the screen — it's shown no larger.
     static func nowPlaying(_ artworkId: String) -> ArtworkRequest {
-        ArtworkRequest(id: artworkId, size: nil, maxPixelSize: nil)
+        ArtworkRequest(id: artworkId, size: nil, maxPixelSize: ImageCache.nowPlayingMaxPixelSize)
     }
 
     /// What the expanded player samples its gradient colours from.

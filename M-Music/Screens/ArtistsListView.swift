@@ -192,7 +192,7 @@ struct ArtistsListView: View {
         guard let index = rowPositions.position(of: artist.id.raw),
               displayedArtists.indices.contains(index), displayedArtists[index].id == artist.id else { return }
         lastSeen.index = index
-        warmAround(index)
+        if lastSeen.shouldWarm(at: index, of: displayedArtists.count) { warmAround(index) }
     }
 
     /// Warms the images around `index` — also after the app resumes, where the user left off.
@@ -206,6 +206,7 @@ struct ArtistsListView: View {
     /// Tells `ImageWarmer` what this screen shows first, so its artwork is decoded ahead of the
     /// next visit (a search's results aren't what the screen normally opens with).
     private func rememberFirstScreenful() {
+        lastSeen.forgetWarmed()
         rowPositions.update(ids: displayedArtists.map { $0.id.raw })
         let requests = artworkRequests(for: displayedArtists.prefix(ImageWarmer.manifestLimit))
         imageReadiness.require(requests)
@@ -384,12 +385,10 @@ struct ArtistRow: View {
         }
         .dimmedIfUnavailable(networkMonitor.isOnline || downloads.hasDownloadedSong(byArtist: artist.name))
         // The artist's own screen opens with its picture and first albums' covers already
-        // decoded: fetched to disk, then decoded once the row has stayed on screen a moment —
-        // see `ImageWarmer`. Keyed to `artist.id` so a reused cell cancels the stale one.
+        // decoded: fetched and decoded once the row has stayed on screen a moment — see
+        // `ImageWarmer`. Keyed to `artist.id` so a reused cell cancels the stale one.
         .task(id: artist.id) {
-            let artworkId = artist.coverArt ?? artist.id.raw
-            await ImageCache.shared.prefetchOriginalData(ArtworkRequest.artistHeader(artworkId).url)
-            await ImageWarmer.shared.warmArtist(id: artist.id.raw, artworkId: artworkId)
+            await ImageWarmer.shared.warmArtist(id: artist.id.raw, artworkId: artist.coverArt ?? artist.id.raw)
         }
     }
 }

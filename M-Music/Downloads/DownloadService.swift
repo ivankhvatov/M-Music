@@ -74,7 +74,6 @@ actor DownloadService {
 
     private var jobByTaskIdentifier: [Int: DownloadJob] = [:]
     private var taskIdentifierBySongId: [String: Int] = [:]
-    private var progressCoalescer: DownloadProgressCoalescer?
     private var continuation: AsyncStream<Update>.Continuation?
     private var backgroundCompletionHandler: (() -> Void)?
     private var didSetup = false
@@ -94,13 +93,6 @@ actor DownloadService {
     private func ensureSetup() {
         guard !didSetup else { return }
         didSetup = true
-        progressCoalescer = DownloadProgressCoalescer(
-            schedule: { work in DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: work) },
-            emit: { [weak self] samples in
-                guard let self else { return }
-                Task { await self.handleProgress(samples) }
-            }
-        )
         Task {
             let tasks = await session.allTasks
             for case let task as URLSessionDownloadTask in tasks {
@@ -231,6 +223,7 @@ actor DownloadService {
     }
 
     fileprivate func handleProgress(_ samples: [DownloadProgressSample]) {
+        ensureSetup()
         for sample in samples {
             guard let job = jobByTaskIdentifier[sample.taskIdentifier], sample.total > 0 else { continue }
             let progress = min(1, max(0, Double(sample.written) / Double(sample.total)))
@@ -318,6 +311,13 @@ actor DownloadService {
     /// this only ever does synchronous, delegate-queue-safe work (moving the downloaded file
     /// somewhere stable before it's deleted) before hopping over with `Task { await ... }`.
     private final class Coordinator: NSObject, URLSessionDownloadDelegate {
+        /// Progress is gathered here, before the hop into the service: the callbacks come many
+        /// times a second for each download, and the service hears once every tenth of one.
+        private let progress = DownloadProgressCoalescer(
+            schedule: { work in DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.1, execute: work) },
+            emit: { samples in Task { await DownloadService.shared.handleProgress(samples) } }
+        )
+
         func urlSession(
             _ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL
         ) {
@@ -346,7 +346,7 @@ actor DownloadService {
             let sample = DownloadProgressSample(
                 taskIdentifier: downloadTask.taskIdentifier, written: totalBytesWritten, total: totalBytesExpectedToWrite
             )
-            Task { await DownloadService.shared.recordProgress(sample) }
+            progress.record(sample)
         }
 
         func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
@@ -358,10 +358,5 @@ actor DownloadService {
         func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
             Task { await DownloadService.shared.handleBackgroundSessionFinishedEvents() }
         }
-    }
-
-    fileprivate func recordProgress(_ sample: DownloadProgressSample) {
-        ensureSetup()
-        progressCoalescer?.record(sample)
     }
 }

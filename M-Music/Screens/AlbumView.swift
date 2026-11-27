@@ -231,9 +231,11 @@ struct AlbumView: View {
                 artworkIds.insert(song.coverArt ?? song.id.raw)
             }
         }
-        // Full size, plus the row-thumbnail sizes song rows and album rows request.
+        // The original, the cards' and header's size, and the row-thumbnail sizes song rows and
+        // album rows request.
         let pixelSizes: [Int?] = [
             nil,
+            ArtworkRequest.coverSize,
             ImageCache.RowArtwork.pixels(ImageCache.RowArtwork.song, scale: displayScale),
             ImageCache.RowArtwork.pixels(ImageCache.RowArtwork.album, scale: displayScale),
         ]
@@ -258,7 +260,9 @@ struct AlbumView: View {
         loadError = nil
         // A newly signed URL is what makes `CachedAsyncImage` reload; its stable cache key was
         // just purged, so this refetches the header artwork from the server.
-        artworkURL = try? client.coverArtURL(forId: fresh.coverArt ?? album.coverArt ?? album.id.raw)
+        artworkURL = try? client.coverArtURL(
+            forId: fresh.coverArt ?? album.coverArt ?? album.id.raw, size: ArtworkRequest.coverSize
+        )
         // The purge above also dropped the permanent copies; if the album still has downloaded
         // songs, save the refreshed artwork there again.
         await DownloadedArtwork.shared.requestSync()
@@ -266,32 +270,40 @@ struct AlbumView: View {
 
     /// Fetches the rest of this album's artist catalog and splits it into "other versions" of
     /// this same album (same title, different `version` tag) and everything else by that artist.
+    /// While online, a cached copy of the catalog shows at once and the server's replaces it.
     /// Offline, or if the server can't be reached, only the artist's fully downloaded albums are
     /// shown instead, from the library cache. Supplementary content — fails silently rather than
     /// surfacing an error for it.
     private func loadRelatedAlbums() async {
         guard let artistId = album.artistId?.raw else { return }
-        // Fetched, filtered and grouped off the main actor (`nonisolated async`); only the two
-        // finished arrays come back here.
-        guard let related = await Self.relatedAlbums(
-            of: album, artistId: artistId, groupVersions: groupReleaseVersionsEnabled,
-            isOnline: networkMonitor.isOnline, client: client
-        ) else { return }
-        otherVersions = related.otherVersions
-        moreByArtist = related.moreByArtist
+        let isOnline = networkMonitor.isOnline
+        if isOnline, let cached = await LibraryCacheDatabase.shared.cachedArtistAlbums(artistId: artistId) {
+            show(await Self.relatedAlbums(of: album, among: cached, groupVersions: groupReleaseVersionsEnabled))
+        }
+        guard let artistAlbums = await Self.artistAlbums(artistId: artistId, isOnline: isOnline, client: client)
+        else { return }
+        show(await Self.relatedAlbums(of: album, among: artistAlbums, groupVersions: groupReleaseVersionsEnabled))
     }
 
+    private func show(_ related: (otherVersions: [AlbumID3], moreByArtist: [AlbumID3])) {
+        if related.otherVersions != otherVersions { otherVersions = related.otherVersions }
+        if related.moreByArtist != moreByArtist { moreByArtist = related.moreByArtist }
+    }
+
+    private nonisolated static func artistAlbums(
+        artistId: String, isOnline: Bool, client: SubsonicClient
+    ) async -> [AlbumID3]? {
+        if isOnline, let fetched = try? await client.getArtist(id: artistId).album { return fetched }
+        // A cancelled request (the view went away) isn't "server unavailable".
+        guard !Task.isCancelled else { return nil }
+        return await LibraryCacheDatabase.shared.fullyDownloadedAlbums(byArtist: artistId)
+    }
+
+    /// Filtered and grouped off the main actor (`nonisolated async`); only the two finished arrays
+    /// come back to the view.
     private nonisolated static func relatedAlbums(
-        of album: AlbumID3, artistId: String, groupVersions: Bool, isOnline: Bool, client: SubsonicClient
-    ) async -> (otherVersions: [AlbumID3], moreByArtist: [AlbumID3])? {
-        let artistAlbums: [AlbumID3]
-        if isOnline, let fetched = try? await client.getArtist(id: artistId).album {
-            artistAlbums = fetched
-        } else {
-            // A cancelled request (the view went away) isn't "server unavailable".
-            guard !Task.isCancelled else { return nil }
-            artistAlbums = await LibraryCacheDatabase.shared.fullyDownloadedAlbums(byArtist: artistId)
-        }
+        of album: AlbumID3, among artistAlbums: [AlbumID3], groupVersions: Bool
+    ) async -> (otherVersions: [AlbumID3], moreByArtist: [AlbumID3]) {
         let albumName = album.name.lowercased()
         // A Single and an Album/EP sharing this album's title are separate releases, not versions
         // of it — whatever "Group release versions" is set to. They aren't dropped, though: they
@@ -591,7 +603,7 @@ struct AlbumView: View {
     }
 
     func albumArtwork() -> some View {
-        // Same URL AlbumCardView requests (original size, no `size` param), so this reuses the
+        // Same URL AlbumCardView requests (`ArtworkRequest.coverSize`), so this reuses the
         // image straight from ImageCache instead of re-fetching — the whole point being no lag
         // when this view opens.
         CachedAsyncImage(url: artworkURL, fallbackMaxPixelSize: ImageCache.cardMaxPixelSize, onLoad: { uiImage in
@@ -864,8 +876,8 @@ private struct TrackRow: View {
     private let player = PlayerManager.shared
     @ObservedObject private var starStore = StarStore.shared
     @ObservedObject private var downloads = DownloadStore.shared
-    /// The only thing that re-renders on a download's progress ticks — see `DownloadProgressStore`.
-    @ObservedObject private var downloadProgress = DownloadProgressStore.shared
+    /// For the menu's "Downloading…": hears when a download starts or ends, not its progress.
+    @ObservedObject private var downloadActivity = DownloadActivityStore.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
     /// The song the "Add to playlist" sheet is open for, and what went wrong adding it — as in
@@ -900,7 +912,7 @@ private struct TrackRow: View {
             // while online — everything can still stream.
             .dimmedIfUnavailable(networkMonitor.isOnline || downloads.isDownloaded(track.id.raw))
 
-            DownloadStatusIndicator(state: downloads.state(for: track.id.raw))
+            SongDownloadStatus(songId: track.id.raw)
 
             trackMenu
         }

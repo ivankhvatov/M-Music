@@ -94,12 +94,14 @@ struct PlayerView: View {
         VStack (alignment: .leading, spacing: 4) {
             NowPlayingMarquee(
                 text: player.currentTrack?.title ?? String(localized: "Not Playing"),
-                font: .preferred(.title2, weight: .semibold)
+                font: .preferred(.title2, weight: .semibold),
+                color: .white
             )
             .foregroundStyle(.white)
             NowPlayingMarquee(
                 text: player.currentTrack?.artist ?? "",
-                font: .preferred(.subheadline)
+                font: .preferred(.subheadline),
+                color: UIColor(Color.transparentWhite)
             )
             .foregroundStyle(.transparentWhite)
             if let audioInfoLine {

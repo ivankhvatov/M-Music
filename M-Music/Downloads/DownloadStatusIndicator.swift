@@ -3,6 +3,18 @@ import SwiftUI
 /// Marks a track's download status inline in a row — a filled download glyph once it's on
 /// disk, or a small circular progress ring while a download is queued/in flight. Shown to the
 /// left of the track's `Menu` in `SongsListView`/`AlbumView`.
+/// A song row's download status, as a view of its own: while anything downloads, this is the only
+/// part of a row that re-renders for each tick of progress.
+struct SongDownloadStatus: View {
+    let songId: String
+    @ObservedObject private var downloads = DownloadStore.shared
+    @ObservedObject private var progress = DownloadProgressStore.shared
+
+    var body: some View {
+        DownloadStatusIndicator(state: downloads.state(for: songId))
+    }
+}
+
 struct DownloadStatusIndicator: View {
     let state: DownloadState
 

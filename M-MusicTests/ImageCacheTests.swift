@@ -9,6 +9,8 @@ private final class ImageStub: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var status = 200
     nonisolated(unsafe) static var body = ImageStub.png
     nonisolated(unsafe) static var requestCount = 0
+    /// How long the "server" takes to answer.
+    nonisolated(unsafe) static var delay: TimeInterval = 0
     private static let lock = NSLock()
 
     static let png: Data = {
@@ -24,6 +26,7 @@ private final class ImageStub: URLProtocol, @unchecked Sendable {
         self.status = status
         self.body = body
         requestCount = 0
+        delay = 0
     }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
@@ -32,8 +35,9 @@ private final class ImageStub: URLProtocol, @unchecked Sendable {
     override func startLoading() {
         Self.lock.lock()
         Self.requestCount += 1
-        let (status, body) = (Self.status, Self.body)
+        let (status, body, delay) = (Self.status, Self.body, Self.delay)
         Self.lock.unlock()
+        if delay > 0 { Thread.sleep(forTimeInterval: delay) }
         let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: body)
@@ -374,13 +378,20 @@ struct ImageWarmerManifestTests {
 
     @Test func requestsKeepTheTierTheViewsUse() {
         #expect(ArtworkRequest.albumCard("a").maxPixelSize == ImageCache.cardMaxPixelSize)
-        #expect(ArtworkRequest.albumCard("a").size == nil)
+        #expect(ArtworkRequest.albumCard("a").size == ArtworkRequest.coverSize)
+        // One file serves a cover's card and its header, big enough for both.
+        #expect(ArtworkRequest.albumHeader("a").size == ArtworkRequest.albumCard("a").size)
+        #expect(ArtworkRequest.playlistHeader("a").size == ArtworkRequest.coverSize)
+        #expect(ArtworkRequest.coverSize >= max(ImageCache.standardMaxPixelSize, ImageCache.cardMaxPixelSize))
+        #expect(ArtworkRequest.artistHeader("a").size == ImageCache.cardMaxPixelSize)
         #expect(ArtworkRequest.albumRow("a", scale: 3).size == ImageCache.RowArtwork.pixels(ImageCache.RowArtwork.album, scale: 3))
         #expect(ArtworkRequest.albumRow("a", scale: 3).maxPixelSize == ImageCache.standardMaxPixelSize)
         #expect(ArtworkRequest.albumHeader("a").maxPixelSize == ImageCache.standardMaxPixelSize)
         #expect(ArtworkRequest.artistRow("a", scale: 2).maxPixelSize == ImageCache.avatarMaxPixelSize)
         #expect(ArtworkRequest.artistHeader("a").maxPixelSize == ImageCache.cardMaxPixelSize)
-        #expect(ArtworkRequest.nowPlaying("a").maxPixelSize == nil)
+        // Now Playing shows the original, decoded no wider than the screen.
+        #expect(ArtworkRequest.nowPlaying("a").size == nil)
+        #expect(ArtworkRequest.nowPlaying("a").maxPixelSize == ImageCache.nowPlayingMaxPixelSize)
         #expect(ArtworkRequest.colorSampling("a").maxPixelSize == ImageCache.colorSamplingMaxPixelSize)
     }
 }
@@ -439,6 +450,66 @@ struct ImageReadinessTests {
     }
 }
 
+/// A large cover asked for server-sized, when the original is already on disk.
+extension ImageCacheTests {
+    @Test func aSizedCoverUsesAnOriginalThatIsAlreadyOnDisk() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        _ = await dirs.makeCache().load(coverURL("al-80"))
+        let image = await dirs.makeCache().load(coverURL("al-80", size: 900))
+        #expect(image != nil)
+        #expect(ImageStub.requestCount == 1)
+    }
+
+    /// Downloads made by an earlier version saved originals only: offline, they must still show.
+    @Test func aSizedCoverFindsAPermanentOriginalAfterThePurge() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        await dirs.makeCache().savePermanently(coverURL("al-81"))
+        dirs.purgeRegular()
+        ImageStub.reset(status: 500)
+
+        let cache = dirs.makeCache()
+        #expect(await cache.preload(coverURL("al-81", size: 900), maxPixelSize: ImageCache.standardMaxPixelSize))
+        await cache.prefetchOriginalData(coverURL("al-81", size: 531))
+        #expect(await dirs.makeCache().load(coverURL("al-81", size: 900)) != nil)
+        #expect(ImageStub.requestCount == 0)
+    }
+
+    @Test func aRowThumbnailIsFetchedEvenWithTheOriginalOnDisk() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        _ = await dirs.makeCache().load(coverURL("al-82"))
+        _ = await dirs.makeCache().load(coverURL("al-82", size: 192))
+        #expect(ImageStub.requestCount == 2)
+    }
+
+    @Test func savingASizedCoverKeepsTheOriginalInsteadOfDownloading() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        _ = await dirs.makeCache().load(coverURL("al-83"))
+        #expect(await dirs.makeCache().savePermanently(coverURL("al-83", size: 900)))
+        #expect(ImageStub.requestCount == 1)
+        #expect(dirs.fileCount(dirs.permanent) == 1)
+    }
+
+    @Test func aSizedCoverWithNothingOnDiskIsDownloadedAsAskedFor() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        _ = await dirs.makeCache().load(coverURL("al-84", size: 900))
+        // The sized file doesn't stand in for the original.
+        _ = await dirs.makeCache().load(coverURL("al-84"))
+        #expect(ImageStub.requestCount == 2)
+        #expect(dirs.fileCount(dirs.regular) == 2)
+    }
+
+    @Test func artworkHasItsOwnSessionWithoutAURLCache() {
+        let configuration = ImageCache.sessionConfiguration
+        #expect(configuration.urlCache == nil)
+        #expect(configuration.httpMaximumConnectionsPerHost == 4)
+    }
+}
+
 extension ImageCacheTests {
     @Test func theMemoizedKeyIsTheComputedKey() {
         let cache = Directories().makeCache()
@@ -470,6 +541,42 @@ extension ImageCacheTests {
 
     private func target(_ id: String) -> ImageWarmer.Target {
         .init(url: coverURL(id), maxPixelSize: ImageCache.standardMaxPixelSize)
+    }
+
+    @Test func preparingAScreenPutsItsImagesInMemory() async {
+        ImageStub.reset()
+        let (warmer, cache) = warmer(Directories())
+        let targets = (0..<6).map { target("prepared-\($0)") }
+        await warmer.prepare(targets: targets, timeout: .seconds(5))
+        for item in targets { #expect(cache.image(for: item.url, maxPixelSize: item.maxPixelSize) != nil) }
+    }
+
+    /// A download under way can't be cancelled; the screen must not wait for it all the same.
+    @Test func preparingAScreenReturnsAtItsTimeLimitAndTheImageStillArrives() async {
+        ImageStub.reset()
+        ImageStub.delay = 1.5
+        defer { ImageStub.delay = 0 }
+        let (warmer, cache) = warmer(Directories())
+        let item = target("slow-1")
+        let start = ContinuousClock.now
+        await warmer.prepare(targets: [item], timeout: .milliseconds(200))
+        #expect(ContinuousClock.now - start < .milliseconds(900))
+        #expect(cache.image(for: item.url, maxPixelSize: item.maxPixelSize) == nil)
+        #expect(await waitUntil { cache.image(for: item.url, maxPixelSize: item.maxPixelSize) != nil })
+    }
+
+    @Test func preparingAScreenStopsWaitingWhenCancelled() async {
+        ImageStub.reset()
+        ImageStub.delay = 1.5
+        defer { ImageStub.delay = 0 }
+        let (warmer, _) = warmer(Directories())
+        let item = target("slow-2")
+        let start = ContinuousClock.now
+        let preparing = Task { await warmer.prepare(targets: [item], timeout: .seconds(10)) }
+        try? await Task.sleep(for: .milliseconds(100))
+        preparing.cancel()
+        await preparing.value
+        #expect(ContinuousClock.now - start < .milliseconds(900))
     }
 
     @Test func eachSourceFinishesItsOwnQueue() async {
@@ -511,6 +618,50 @@ extension ImageCacheTests {
         #expect(await waitUntil { cache.image(for: coverURL("d1")) != nil })
         await warmer.warmAhead(targets: [target("d2")], source: "S")
         #expect(await waitUntil { cache.image(for: coverURL("d2")) != nil })
+    }
+}
+
+struct GradientPointTests {
+    @Test func theShaderVisitsThePointsUpToTheLastColouredOne() {
+        #expect(Uniforms.pointCount(alphas: [1, 1, 1, 0, 0, 0, 0, 0]) == 3)
+        // Fading in or out still counts, and so do any clear ones before it.
+        #expect(Uniforms.pointCount(alphas: [1, 0, 0.01, 0, 0, 0, 0, 0]) == 3)
+        #expect(Uniforms.pointCount(alphas: [1, 1, 1, 1, 1, 1, 1, 1]) == 8)
+        #expect(Uniforms.pointCount(alphas: [0, 0, 0, 0, 0, 0, 0, 0]) == 1)
+    }
+}
+
+@MainActor
+struct DownloadActivityTests {
+    /// A row's menu hears of downloads starting and ending, never of their progress.
+    @Test func activityChangesOnlyWhenADownloadStartsOrEnds() {
+        var changes = 0
+        let watching = DownloadActivityStore.shared.objectWillChange.sink { changes += 1 }
+        defer { DownloadProgressStore.shared.set([:]); watching.cancel() }
+        DownloadProgressStore.shared.set([:])
+        changes = 0
+        DownloadProgressStore.shared.set(["a": 0])
+        DownloadProgressStore.shared.set(["a": 0.3])
+        DownloadProgressStore.shared.set(["a": 0.9])
+        #expect(changes == 1)
+        #expect(DownloadActivityStore.shared.songIds == ["a"])
+        DownloadProgressStore.shared.set(["a": 0.9, "b": 0])
+        DownloadProgressStore.shared.set([:])
+        #expect(changes == 3)
+        #expect(DownloadActivityStore.shared.songIds.isEmpty)
+    }
+
+    @Test func aListWarmsAheadEveryFewRowsAndWhenItsRowsChange() {
+        let seen = LastSeenIndex()
+        #expect(seen.shouldWarm(at: 0, of: 100))
+        #expect(!seen.shouldWarm(at: LastSeenIndex.warmStride - 1, of: 100))
+        #expect(seen.shouldWarm(at: LastSeenIndex.warmStride, of: 100))
+        // Backwards just the same.
+        #expect(!seen.shouldWarm(at: 2, of: 100))
+        #expect(seen.shouldWarm(at: 0, of: 100))
+        #expect(seen.shouldWarm(at: 1, of: 40))
+        seen.forgetWarmed()
+        #expect(seen.shouldWarm(at: 1, of: 40))
     }
 }
 
@@ -706,6 +857,53 @@ extension ImageCacheTests {
         let cache = Directories().makeCache()
         let image = await cache.load(coverURL("al-61"), maxPixelSize: ImageCache.cardMaxPixelSize)
         #expect(image?.cgImage?.width == 300)
+    }
+
+    /// Between the tier and twice it, where JPEG sub-sampling has nothing to skip.
+    @Test func aJpegUnderTwiceItsTierIsShrunkToIt() async {
+        let tier = ImageCache.cardMaxPixelSize
+        ImageStub.reset(body: jpegData(side: tier * 2 - 1))
+        let image = await Directories().makeCache().load(coverURL("al-62"), maxPixelSize: tier)
+        #expect(image?.cgImage?.width == tier)
+        #expect(image?.cgImage?.height == tier)
+    }
+
+    @Test func anotherFormatJustOverItsTierIsShrunkToIt() async {
+        let tier = ImageCache.cardMaxPixelSize
+        let side = tier + tier / 5
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let png = UIGraphicsImageRenderer(size: CGSize(width: side, height: side / 2), format: format).pngData { context in
+            UIColor.orange.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: side, height: side / 2))
+        }
+        ImageStub.reset(body: png)
+        let image = await Directories().makeCache().load(coverURL("al-63"), maxPixelSize: tier)
+        #expect(image?.cgImage?.width == tier)
+        // The shape is kept.
+        #expect(abs((image?.cgImage?.height ?? 0) - tier / 2) <= 1)
+    }
+
+    @Test func aFullResolutionLoadKeepsEveryPixel() async {
+        ImageStub.reset(body: jpegData(side: 1000))
+        let image = await Directories().makeCache().load(coverURL("al-64"), maxPixelSize: nil)
+        #expect(image?.cgImage?.width == 1000)
+    }
+
+    /// The app sets them at launch (`AppDelegate`), and the tests run inside it.
+    @MainActor
+    @Test func theTiersWereSizedForThisScreenAtLaunch() {
+        let expected = ImageCache.screenTiers(width: UIScreen.main.bounds.width, scale: UIScreen.main.scale)
+        #expect(ImageCache.cardMaxPixelSize == expected.card)
+        #expect(ImageCache.nowPlayingMaxPixelSize == expected.nowPlaying)
+    }
+
+    @Test func theScreenSizesTheTiersThatFollowIt() {
+        let large = ImageCache.screenTiers(width: 440, scale: 3)
+        #expect(large.card == 588)
+        #expect(large.nowPlaying == 1320)
+        #expect(ImageCache.screenTiers(width: 390, scale: 3).card == 513)
+        #expect(ImageCache.screenTiers(width: 320, scale: 2).card == 512)
     }
 
     @Test func backgroundDecodesRunOneAtATime() async {

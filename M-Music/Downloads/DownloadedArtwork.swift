@@ -5,12 +5,13 @@ import UIKit
 /// there offline after iOS purges the regular image cache (see `ImageCache`).
 ///
 /// For every downloaded song, all of these are saved — to the regular cache *and* the permanent
-/// one, each with the thumbnail the matching list row requests as well as the full image:
+/// one, each with the thumbnail the matching list row requests as well as the large image the
+/// screens show (see `Targets.urls`):
 ///
-/// - the **song's** artwork (song rows),
-/// - its **album's** artwork (album rows and cards),
-/// - its **artist's** picture (artist rows),
-/// - and the artwork of every **playlist** that contains it (playlist rows and cards).
+/// - the **song's** artwork (song rows, and the original for Now Playing),
+/// - its **album's** artwork (album rows, cards and the header),
+/// - its **artist's** picture (artist rows and the header),
+/// - and the artwork of every **playlist** that contains it (playlist rows, cards and headers).
 ///
 /// It's the same whether the song was downloaded on its own or as part of an album or playlist:
 /// what matters is only that the song is downloaded. Nothing is saved for content that isn't — plain
@@ -33,20 +34,21 @@ actor DownloadedArtwork {
         var playlists: Set<String> = []
         var artists: Set<String> = []
 
-        /// Every URL to save: each id's full image and its row thumbnail.
+        /// Every URL to save: each id's large image — as the screens ask for it: the original for
+        /// songs (Now Playing's), a server-sized one for the rest — and its row thumbnail.
         func urls(scale: CGFloat, url: (_ id: String, _ size: Int?) -> URL?) -> [URL] {
-            let kinds: [(ids: Set<String>, points: CGFloat)] = [
-                (songs, ImageCache.RowArtwork.song),
-                (albums, ImageCache.RowArtwork.album),
-                (playlists, ImageCache.RowArtwork.playlist),
-                (artists, ImageCache.RowArtwork.artist),
+            let kinds: [(ids: Set<String>, large: Int?, points: CGFloat)] = [
+                (songs, nil, ImageCache.RowArtwork.song),
+                (albums, ArtworkRequest.coverSize, ImageCache.RowArtwork.album),
+                (playlists, ArtworkRequest.coverSize, ImageCache.RowArtwork.playlist),
+                (artists, ArtworkRequest.artistHeaderSize, ImageCache.RowArtwork.artist),
             ]
             var seen = Set<URL>()
             var result: [URL] = []
-            for (ids, points) in kinds {
+            for (ids, large, points) in kinds {
                 let thumbnail = ImageCache.RowArtwork.pixels(points, scale: scale)
                 for id in ids.sorted() {
-                    for size in [nil, thumbnail] {
+                    for size in [large, thumbnail] {
                         if let resolved = url(id, size), seen.insert(resolved).inserted {
                             result.append(resolved)
                         }

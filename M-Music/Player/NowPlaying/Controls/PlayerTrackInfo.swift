@@ -29,6 +29,7 @@ struct PlayerTrackTitle: View {
             NowPlayingMarquee(
                 text: player.nowPlayingTitle,
                 font: .preferred(.title3, weight: .semibold),
+                color: .white,
                 isActive: marqueesActive,
                 restartToken: marqueeRestartToken
             )
@@ -36,6 +37,7 @@ struct PlayerTrackTitle: View {
             NowPlayingMarquee(
                 text: player.nowPlayingSubtitle,
                 font: .preferred(.body),
+                color: UIColor(Color.transparentWhite),
                 isActive: marqueesActive,
                 restartToken: marqueeRestartToken
             )

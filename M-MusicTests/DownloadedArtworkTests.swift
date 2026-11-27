@@ -65,9 +65,9 @@ struct DownloadedArtworkTests {
         }
         #expect(urls.map(\.absoluteString) == [
             "http://x.test/a?size=full", "http://x.test/a?size=132",     // song rows: 44pt
-            "http://x.test/b?size=full", "http://x.test/b?size=192",     // album rows: 64pt
-            "http://x.test/c?size=full", "http://x.test/c?size=192",     // playlist rows: 64pt
-            "http://x.test/d?size=full", "http://x.test/d?size=144",     // artist rows: 48pt
+            "http://x.test/b?size=\(ArtworkRequest.coverSize)", "http://x.test/b?size=192",     // album rows: 64pt
+            "http://x.test/c?size=\(ArtworkRequest.coverSize)", "http://x.test/c?size=192",     // playlist rows: 64pt
+            "http://x.test/d?size=\(ArtworkRequest.artistHeaderSize)", "http://x.test/d?size=144",     // artist rows: 48pt
         ])
     }
 
@@ -78,7 +78,7 @@ struct DownloadedArtworkTests {
         let urls = targets.urls(scale: 3) { id, size in
             URL(string: "http://x.test/\(id)?size=\(size.map(String.init) ?? "full")")
         }
-        // full once; the 44pt and 64pt thumbnails differ.
-        #expect(urls.count == 3)
+        // The original (songs), the cards' and header's size, and the 44pt and 64pt thumbnails.
+        #expect(urls.count == 4)
     }
 }

@@ -46,7 +46,9 @@ final class GenreLocalizer {
     let language: String
     @ObservationIgnored private let isEnabled: () -> Bool
     @ObservationIgnored private let cacheURL: URL?
-    @ObservationIgnored private let entries: [String: Entry]
+    @ObservationIgnored private let entriesURL: URL?
+    /// The bundled table, by normalized name: read when the first genre is looked up, not at launch.
+    @ObservationIgnored private lazy var entries: [String: Entry] = Self.table(at: entriesURL)
     /// language → normalized genre → translation.
     @ObservationIgnored private var cache: [String: [String: String]]
     /// Normalized genre → the genre as first seen, waiting for a translation.
@@ -65,16 +67,7 @@ final class GenreLocalizer {
         self.isEnabled = isEnabled
         self.cacheURL = cacheURL
 
-        var entries: [String: Entry] = [:]
-        if let entriesURL, let data = try? Data(contentsOf: entriesURL),
-           let list = try? JSONDecoder().decode([Entry].self, from: data) {
-            for entry in list {
-                for key in [entry.id, entry.en, entry.de, entry.ru] {
-                    entries[Self.normalize(key)] = entry
-                }
-            }
-        }
-        self.entries = entries
+        self.entriesURL = entriesURL
 
         if let cacheURL, let data = try? Data(contentsOf: cacheURL),
            let stored = try? JSONDecoder().decode([String: [String: String]].self, from: data) {
@@ -82,6 +75,19 @@ final class GenreLocalizer {
         } else {
             cache = [:]
         }
+    }
+
+    private static func table(at url: URL?) -> [String: Entry] {
+        guard let url, let data = try? Data(contentsOf: url),
+              let list = try? JSONDecoder().decode([Entry].self, from: data)
+        else { return [:] }
+        var entries: [String: Entry] = [:]
+        for entry in list {
+            for key in [entry.id, entry.en, entry.de, entry.ru] {
+                entries[normalize(key)] = entry
+            }
+        }
+        return entries
     }
 
     nonisolated private static var defaultCacheURL: URL? {

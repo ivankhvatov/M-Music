@@ -32,6 +32,7 @@ struct CompactChrome: View {
                 NowPlayingMarquee(
                     text: player.nowPlayingSubtitle,
                     font: .systemFont(ofSize: 12, weight: .regular),
+                    color: .secondaryLabel,
                     fade: 8,
                     isActive: marqueesActive,
                     restartToken: marqueeRestartToken

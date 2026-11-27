@@ -173,6 +173,7 @@ struct LibraryView: View {
     /// Tells `ImageWarmer` which covers this screen opens with, to decode them ahead of the next
     /// visit, and holds the grid back until they're in memory (see `ImageReadiness`).
     private func rememberFirstScreenful(of albums: [AlbumID3]) {
+        lastSeen.forgetWarmed()
         rowPositions.update(ids: albums.map { $0.id.raw })
         let requests = artworkRequests(for: albums.prefix(ImageWarmer.manifestLimit))
         imageReadiness.require(requests)
@@ -188,7 +189,7 @@ struct LibraryView: View {
         guard let index = rowPositions.position(of: album.id.raw),
               recentAlbums.indices.contains(index), recentAlbums[index].id == album.id else { return }
         lastSeen.index = index
-        warmAround(index)
+        if lastSeen.shouldWarm(at: index, of: recentAlbums.count) { warmAround(index) }
     }
 
     /// Warms the images around `index` — also after the app resumes, where the user left off.
@@ -199,10 +200,10 @@ struct LibraryView: View {
         Task { await ImageWarmer.shared.warmAhead(requests, source: "library") }
     }
 
-    /// Downloads each album's original cover to disk (no decoding) so opening it from here
-    /// doesn't wait on the network — `ImageCache` itself bounds how many run at once.
+    /// Downloads each album's large cover to disk (no decoding) so opening it from here doesn't
+    /// wait on the network — `ImageCache` itself bounds how many run at once.
     private func prefetchArtwork(for albums: [AlbumID3]) {
-        let urls = albums.compactMap { try? client.coverArtURL(forId: $0.coverArt ?? $0.id.raw) }
+        let urls = albums.compactMap { ArtworkRequest.albumHeader($0.coverArt ?? $0.id.raw).url }
         Task {
             await withTaskGroup(of: Void.self) { group in
                 for url in urls {
