@@ -116,16 +116,30 @@ struct MainView: View {
                 // — see `ImageWarmer`.
                 didWarmAtLaunch = true
                 await Self.warmImages()
+                // Then, quietly, the lists' thumbnails that aren't saved yet.
+                await ArtworkBackfill.shared.request()
             }
             .onChange(of: scenePhase) { _, phase in
                 // iOS empties the in-memory image cache while the app is in the background, so a
                 // resume starts with every screen's artwork cold again; what's still decoded is
                 // skipped.
                 switch phase {
-                case .active where didWarmAtLaunch: Task { await Self.warmImages() }
-                case .background: Task { await ImageWarmer.shared.cancel() }
+                case .active where didWarmAtLaunch:
+                    Task {
+                        await Self.warmImages()
+                        await ArtworkBackfill.shared.request()
+                    }
+                case .background:
+                    Task {
+                        await ImageWarmer.shared.cancel()
+                        await ArtworkBackfill.shared.stop()
+                    }
                 default: break
                 }
+            }
+            // Back on Wi-Fi: carry on saving thumbnails (on any other network, nothing starts).
+            .onReceive(NotificationCenter.default.publisher(for: NetworkMonitor.pathDidChange)) { _ in
+                if didWarmAtLaunch { Task { await ArtworkBackfill.shared.request() } }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
                 Task { await ImageWarmer.shared.memoryWasPurged() }

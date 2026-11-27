@@ -1077,3 +1077,76 @@ struct ListPrefetcherTests {
         #expect(top?.prefix(3) == [0, 1, 2])
     }
 }
+
+/// An extension of `ImageCacheTests` for the same reason as the others: the stub's counter is shared.
+extension ImageCacheTests {
+    private func backfill(_ cache: ImageCache, _ ids: [String], allowed: Bool = true) -> ArtworkBackfill {
+        ArtworkBackfill(
+            cache: cache, isAllowed: { allowed },
+            thumbnails: { ids.map { coverURL($0, size: 132) } }, delay: .zero
+        )
+    }
+
+    @Test func theBackgroundFillSavesWhatIsMissingAndDecodesNothing() async {
+        ImageStub.reset()
+        let dirs = Directories()
+        await dirs.makeCache().load(coverURL("f1", size: 132))
+        ImageStub.reset()
+        let cache = dirs.makeCache()
+        let fill = backfill(cache, ["f1", "f2", "f3"])
+        await fill.request()
+        await fill.finish()
+        #expect(ImageStub.requestCount == 2)
+        #expect(cache.isSaved(coverURL("f2", size: 132)))
+        #expect(cache.isSaved(coverURL("f3", size: 132)))
+        #expect(cache.image(for: coverURL("f3", size: 132)) == nil)
+        // The next pass finds everything there.
+        await fill.request()
+        await fill.finish()
+        #expect(ImageStub.requestCount == 2)
+    }
+
+    @Test func nothingIsFilledWhereTheNetworkDoesNotAllowIt() async {
+        ImageStub.reset()
+        let fill = backfill(Directories().makeCache(), ["g1", "g2"], allowed: false)
+        await fill.request()
+        await fill.finish()
+        #expect(ImageStub.requestCount == 0)
+    }
+
+    @Test func theFillGivesUpWhenTheServerKeepsFailing() async {
+        ImageStub.reset(status: 500)
+        let fill = backfill(Directories().makeCache(), (0..<20).map { "h\($0)" })
+        await fill.request()
+        await fill.finish()
+        #expect(ImageStub.requestCount == 6)
+    }
+}
+
+struct ArtworkBackfillPlanTests {
+    @Test func eachRowImageIsPlannedOnce() {
+        let songs = ["s1", "s2"].map { id in
+            Child(
+                id: FlexibleID(id), title: id, album: nil, artist: nil, track: nil, year: nil, genre: nil,
+                coverArt: "mf-\(id)", size: nil, contentType: nil, suffix: nil, duration: nil, bitRate: nil,
+                discNumber: nil, starred: nil, albumId: "a", artistId: nil, replayGain: nil
+            )
+        }
+        let album = AlbumID3(
+            id: "a", name: "a", artist: nil, artistId: nil, coverArt: "al-a", songCount: 2, duration: 2,
+            playCount: nil, created: nil, starred: nil, year: nil, genre: nil, userRating: nil
+        )
+        func plan(_ songs: [Child], albumCovers: Bool) -> [ArtworkRequest] {
+            ArtworkBackfill.requests(
+                songs: songs, albums: [album], artists: [], playlists: [], scale: 3,
+                albumCoversOnSongs: albumCovers, songArtwork: { albumCovers ? "al-a" : $0.coverArt ?? "" }
+            )
+        }
+        #expect(plan(songs, albumCovers: true) == [.songRow("al-a", scale: 3), .albumRow("al-a", scale: 3)])
+        // Before the song list has been fetched, its rows' covers are known all the same.
+        #expect(plan([], albumCovers: true) == [.songRow("al-a", scale: 3), .albumRow("al-a", scale: 3)])
+        #expect(plan(songs, albumCovers: false) == [
+            .songRow("mf-s1", scale: 3), .songRow("mf-s2", scale: 3), .albumRow("al-a", scale: 3),
+        ])
+    }
+}

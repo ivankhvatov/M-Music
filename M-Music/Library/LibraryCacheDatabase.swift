@@ -146,6 +146,7 @@ actor LibraryCacheDatabase {
         // list itself is gone.
         await LibraryRevalidation.shared.reset()
         ListArtwork.shared.reset()
+        await ArtworkBackfill.shared.reset()
     }
 
     /// What `LibraryCacheStatus` needs out of the cache, and nothing more: which songs each cached
@@ -300,6 +301,7 @@ extension LibraryCacheDatabase {
         await set(albums, category: LibraryCacheCategory.allAlbums, key: Self.wholeCatalogKey)
         await LibraryCacheIndex.shared.mergeAlbumSongCounts(albums)
         ListArtwork.shared.update(with: albums, isWholeCatalog: true)
+        await ArtworkBackfill.shared.request()
     }
 
     nonisolated func cachedAllAlbums() async -> [AlbumID3]? {
@@ -318,6 +320,7 @@ extension LibraryCacheDatabase {
 
     nonisolated func cacheAllArtists(_ artists: [ArtistID3]) async {
         await set(artists, category: LibraryCacheCategory.allArtists, key: Self.wholeCatalogKey)
+        await ArtworkBackfill.shared.request()
     }
 
     nonisolated func cachedAllArtists() async -> [ArtistID3]? {
@@ -339,6 +342,7 @@ extension LibraryCacheDatabase {
         await set(playlists, category: LibraryCacheCategory.allPlaylists, key: Self.wholeCatalogKey)
         // A playlist's cover may have changed.
         await DownloadedArtwork.shared.requestSync()
+        await ArtworkBackfill.shared.request()
     }
 
     nonisolated func cachedAllPlaylists() async -> [PlaylistSummary]? {
@@ -364,6 +368,7 @@ extension LibraryCacheDatabase {
 
     nonisolated func cacheAllSongs(_ songs: [Child]) async {
         await set(songs, category: LibraryCacheCategory.allSongs, key: Self.wholeCatalogKey)
+        await ArtworkBackfill.shared.request()
     }
 
     nonisolated func cachedAllSongs() async -> [Child]? {

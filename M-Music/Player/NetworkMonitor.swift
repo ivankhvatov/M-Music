@@ -6,6 +6,8 @@ import Network
 /// `NWPathMonitor`.
 final class NetworkMonitor: ObservableObject {
     static let shared = NetworkMonitor()
+    /// Posted on the main queue when the network path changes.
+    static let pathDidChange = Notification.Name("NetworkMonitor.pathDidChange")
 
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "NetworkMonitor")
@@ -29,6 +31,7 @@ final class NetworkMonitor: ObservableObject {
             // things like returning to the foreground) would re-render every row for nothing.
             DispatchQueue.main.async {
                 if self.isOnline != isOnline { self.isOnline = isOnline }
+                NotificationCenter.default.post(name: Self.pathDidChange, object: self)
             }
         }
         monitor.start(queue: queue)
@@ -40,6 +43,15 @@ final class NetworkMonitor: ObservableObject {
 
     var isOnCellular: Bool {
         lock.withLock { path?.usesInterfaceType(.cellular) ?? false }
+    }
+
+    /// Whether downloads nobody asked for may run: on Wi-Fi or a cable, but not a metered one
+    /// (a phone's hotspot is) and not in Low Data Mode.
+    var allowsBackgroundDownloads: Bool {
+        lock.withLock {
+            guard let path, path.status == .satisfied, !path.isExpensive, !path.isConstrained else { return false }
+            return path.usesInterfaceType(.wifi) || path.usesInterfaceType(.wiredEthernet)
+        }
     }
 
     /// Whether the device currently has any usable network path at all — used to skip

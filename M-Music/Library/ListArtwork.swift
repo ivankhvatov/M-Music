@@ -15,8 +15,12 @@ import Observation
 /// out artwork requests ahead of time listens for `didChange`.
 final class ListArtwork: @unchecked Sendable {
     static let shared = ListArtwork(onChange: {
-        // Downloaded music keeps the covers its rows show — see `DownloadedArtwork`.
-        Task { await DownloadedArtwork.shared.requestSync() }
+        // Downloaded music keeps the covers its rows show — see `DownloadedArtwork` — and the
+        // rest of the library's are saved ahead (`ArtworkBackfill`).
+        Task {
+            await DownloadedArtwork.shared.requestSync()
+            await ArtworkBackfill.shared.request()
+        }
     })
 
     /// Posted on the main actor after the answers have changed.

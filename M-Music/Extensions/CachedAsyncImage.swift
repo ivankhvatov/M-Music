@@ -502,6 +502,11 @@ final class ImageCache: @unchecked Sendable {
         _ = await downloadImageData(url, priority: priority)
     }
 
+    /// Whether `url`'s image is on disk — it, or an original that serves for it.
+    func isSaved(_ url: URL) -> Bool {
+        isStored(stableKey(for: url)) || (originalKey(for: url).map(isStored) ?? false)
+    }
+
     /// Whether `request`'s decoded image is already in memory.
     func isCached(_ request: ArtworkRequest) -> Bool {
         guard let url = request.url else { return false }
