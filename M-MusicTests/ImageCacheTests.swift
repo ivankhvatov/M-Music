@@ -1036,6 +1036,30 @@ extension ImageCacheTests {
 }
 
 @MainActor
+struct ScrollStateTests {
+    @Test func rowsTakeTurnsOnceTheListHasRested() async {
+        let state = ScrollState()
+        defer { state.set(scrolling: false) }
+        let start = ContinuousClock.now
+        async let first = state.waitForTurn()
+        async let second = state.waitForTurn()
+        async let third = state.waitForTurn()
+        let turns = await [first, second, third]
+        #expect(turns == [true, true, true])
+        #expect(ContinuousClock.now - start >= ScrollState.settleDelay + ScrollState.turnSpacing * 2)
+    }
+
+    @Test func aNewScrollTakesTheTurnAway() async {
+        let state = ScrollState()
+        defer { state.set(scrolling: false) }
+        let waiting = Task { await state.waitForTurn() }
+        try? await Task.sleep(for: .milliseconds(20))
+        state.set(scrolling: true)
+        #expect(await waiting.value == false)
+    }
+}
+
+@MainActor
 struct ListPrefetcherTests {
     @Test func thePlanIsMostlyAheadAndFillsUpAtTheEnds() {
         let total = ListPrefetcher.Window.rows.ahead + ListPrefetcher.Window.rows.behind

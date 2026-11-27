@@ -671,6 +671,7 @@ struct SongRow: View {
                         )
                     )
             } else if showsTrailingActions {
+                SongDownloadStatus(songId: track.id.raw)
                 // The menu is built only once the list is at rest: it's much of what a row costs,
                 // and a touch during a scroll only stops the scroll.
                 DeferredWhileScrolling {
@@ -679,7 +680,6 @@ struct SongRow: View {
                         onRemoveFromPlaylist: onRemoveFromPlaylist
                     )
                 } placeholder: {
-                    SongDownloadStatus(songId: track.id.raw)
                     SongMenuLabel()
                 }
             }
@@ -737,9 +737,9 @@ private struct TapIfAvailable: ViewModifier {
     }
 }
 
-/// The download status indicator + song menu shown at the trailing edge of a full (non-reorder-
-/// handle) `SongRow`. Split out so its `starStore` subscription — used only by the menu's
-/// favorite toggle — and this view's own `downloads` subscription don't exist at all when
+/// The song menu at the trailing edge of a full (non-reorder-handle) `SongRow`. Split out so its
+/// `starStore` subscription — used only by the menu's favorite toggle — and this view's own
+/// `downloads` subscription don't exist at all when
 /// `SongRow` is in reorder-handle mode, where it's reconstructed on every drag gesture callback
 /// for the actively-dragged row. Mirrors `SongNowPlayingOverlay`: a leaf view scoped to exactly
 /// what it reads.
@@ -761,21 +761,18 @@ private struct SongTrailingActions: View {
     @ObservedObject private var downloadActivity = DownloadActivityStore.shared
 
     var body: some View {
-        Group {
-            SongDownloadStatus(songId: track.id.raw)
-            songMenu
-        }
-        .sheet(item: $songToAdd) { song in
-            AddToPlaylistSheet(song: song) { playlist in addToPlaylist(song, playlist) }
-        }
-        .alert("Couldn't add the song to the playlist", isPresented: Binding(
-            get: { addError != nil },
-            set: { if !$0 { addError = nil } }
-        )) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(addError ?? "")
-        }
+        songMenu
+            .sheet(item: $songToAdd) { song in
+                AddToPlaylistSheet(song: song) { playlist in addToPlaylist(song, playlist) }
+            }
+            .alert("Couldn't add the song to the playlist", isPresented: Binding(
+                get: { addError != nil },
+                set: { if !$0 { addError = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(addError ?? "")
+            }
     }
 
     /// Adds to the end of the playlist, after the sheet has closed — so a failure (offline, say) is
