@@ -108,10 +108,11 @@ final class HomeWarmCoordinator: @unchecked Sendable {
                   let index = indices[source] else { continue }
             await ImageWarmer.shared.warmAhead(Self.requests(around: index, in: carousel), source: source)
         }
-        for source in near {
-            guard let position = layout.carousels.firstIndex(where: { $0.source == source }) else { continue }
-            await ImageWarmer.shared.warmAhead(Self.requestsOfNeighbors(of: position, in: layout), source: "home.nearby")
-        }
+        // One call for all of them: a source's call replaces what it asked for before.
+        let nearby = layout.carousels.indices
+            .filter { near.contains(layout.carousels[$0].source) }
+            .flatMap { Self.requestsOfNeighbors(of: $0, in: layout) }
+        if !nearby.isEmpty { await ImageWarmer.shared.warmAhead(nearby, source: "home.nearby") }
     }
 
     // MARK: - Pure helpers

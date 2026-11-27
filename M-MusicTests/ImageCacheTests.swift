@@ -945,58 +945,88 @@ extension ImageCacheTests {
 }
 
 extension ImageCacheTests {
-    @Test func askingForTheSameNeighboursAgainStartsNoNewWork() async {
-        ImageStub.reset()
-        let dirs = Directories()
-        let ids = (0..<12).map { "w\($0)" }
-        for id in ids { await dirs.makeCache().load(coverURL(id)) }
-        let cache = dirs.makeCache()
-        let warmer = ImageWarmer(defaults: UserDefaults(suiteName: "w-\(UUID().uuidString)")!, cache: cache, scale: { 3 })
-        let targets = ids.map { ImageWarmer.Target(url: coverURL($0), maxPixelSize: ImageCache.standardMaxPixelSize) }
-
-        await warmer.warmAhead(targets: targets, source: "S")
-        let first = await warmer.prefetchBatchesStarted
-        #expect(first == 1)
-
-        // The next card asks for nearly the same window, and then for exactly the same one.
-        await warmer.warmAhead(targets: Array(targets.dropFirst()), source: "S")
-        await warmer.warmAhead(targets: targets, source: "S")
-        #expect(await warmer.prefetchBatchesStarted == first)
+    private func lookAhead(_ cache: ImageCache) -> ImageWarmer {
+        ImageWarmer(defaults: UserDefaults(suiteName: "w-\(UUID().uuidString)")!, cache: cache, scale: { 3 })
     }
 
-    @Test func aWindowThatMovesOnOnlyRequestsWhatIsNew() async {
-        ImageStub.reset()
-        let dirs = Directories()
-        let ids = (0..<20).map { "m\($0)" }
-        for id in ids { await dirs.makeCache().load(coverURL(id)) }
-        let cache = dirs.makeCache()
-        let warmer = ImageWarmer(defaults: UserDefaults(suiteName: "w-\(UUID().uuidString)")!, cache: cache, scale: { 3 })
-        let targets = ids.map { ImageWarmer.Target(url: coverURL($0), maxPixelSize: ImageCache.standardMaxPixelSize) }
-
-        await warmer.warmAhead(targets: Array(targets[0..<10]), source: "S")
-        await warmer.warmAhead(targets: Array(targets[5..<15]), source: "S")        // five new ones
-        #expect(await warmer.prefetchBatchesStarted == 2)
-        // The window moved past the first five before they were reached: only the rest is warmed.
-        let done = await waitFor { ids[5..<15].allSatisfy { cache.image(for: coverURL($0)) != nil } }
-        #expect(done)
+    private func targets(_ ids: [String]) -> [ImageWarmer.Target] {
+        ids.map { ImageWarmer.Target(url: coverURL($0), maxPixelSize: ImageCache.standardMaxPixelSize) }
     }
 
-    @Test func goingToTheBackgroundMakesEverythingRequestableAgain() async {
+    @Test func askingAgainForWhatIsLoadingStartsNothingNew() async {
+        ImageStub.reset()
+        ImageStub.delay = 0.3
+        defer { ImageStub.delay = 0 }
+        let cache = Directories().makeCache()
+        let warmer = lookAhead(cache)
+        let ids = (0..<5).map { "w\($0)" }
+        await warmer.warmAhead(targets: targets(ids), source: "S")
+        await warmer.warmAhead(targets: targets(ids), source: "S")
+        await warmer.warmAhead(targets: targets(Array(ids.dropFirst())), source: "S")
+        #expect(await warmer.aheadLoadsStarted == 5)
+        #expect(await waitFor { ids.dropFirst().allSatisfy { cache.image(for: coverURL($0)) != nil } })
+    }
+
+    @Test func whatTheScrollHasLeftBehindIsNotDownloaded() async {
+        ImageStub.reset()
+        ImageStub.delay = 0.3
+        defer { ImageStub.delay = 0 }
+        let cache = Directories().makeCache()
+        let warmer = lookAhead(cache)
+        let passed = (0..<10).map { "p\($0)" }
+        await warmer.warmAhead(targets: targets(passed), source: "S")
+        try? await Task.sleep(for: .milliseconds(100))
+        await warmer.warmAhead(targets: targets(["next"]), source: "S")
+        #expect(await waitFor { cache.image(for: coverURL("next")) != nil })
+        try? await Task.sleep(for: .milliseconds(500))
+        // The three that were under way, and the one wanted now; the seven queued were dropped.
+        #expect(ImageStub.requestCount == 4)
+    }
+
+    @Test func anImageTheCacheHasLostIsWarmedAgain() async {
         ImageStub.reset()
         let dirs = Directories()
         await dirs.makeCache().load(coverURL("b1"))
         let cache = dirs.makeCache(pinnedCostLimit: 0)           // nothing pinned: a purge loses it
-        let warmer = ImageWarmer(defaults: UserDefaults(suiteName: "w-\(UUID().uuidString)")!, cache: cache, scale: { 3 })
-        let targets = [ImageWarmer.Target(url: coverURL("b1"), maxPixelSize: ImageCache.standardMaxPixelSize)]
+        let warmer = lookAhead(cache)
 
-        await warmer.warmAhead(targets: targets, source: "S")
-        _ = await waitFor { cache.image(for: coverURL("b1")) != nil }
-        await warmer.cancel()
+        await warmer.warmAhead(targets: targets(["b1"]), source: "S")
+        #expect(await waitFor { cache.image(for: coverURL("b1")) != nil })
         cache.simulateSystemPurge()
-        await warmer.memoryWasPurged()
+        await warmer.warmAhead(targets: targets(["b1"]), source: "S")
+        #expect(await waitFor { cache.image(for: coverURL("b1")) != nil })
+    }
 
-        await warmer.warmAhead(targets: targets, source: "S")
-        #expect(await warmer.prefetchBatchesStarted == 2)
+    @Test func aShortSetOfThumbnailsIsAllDecodedAndALongOneIsLeftAlone() async {
+        ImageStub.reset()
+        let cache = Directories().makeCache()
+        let warmer = lookAhead(cache)
+        // Rows sharing covers: each is asked for once.
+        let few = targets((0..<20).map { "few-\($0 % 4)" })
+        await warmer.warmWholeList(source: "L", targets: { few })
+        #expect(await waitFor { few.allSatisfy { cache.image(for: $0.url, maxPixelSize: $0.maxPixelSize) != nil } })
+        #expect(ImageStub.requestCount == 4)
+
+        ImageStub.reset()
+        let many = targets((0...ImageWarmer.wholeListLimit).map { "many-\($0)" })
+        await warmer.warmWholeList(source: "L", targets: { many })
+        try? await Task.sleep(for: .milliseconds(200))
+        #expect(ImageStub.requestCount == 0)
+    }
+
+    @Test func anImageThatCannotBeHadIsNotAskedForByEveryRow() async {
+        ImageStub.reset(status: 404)
+        let warmer = lookAhead(Directories().makeCache())
+        await warmer.warmAhead(targets: targets(["gone"]), source: "S")
+        #expect(await waitFor { ImageStub.requestCount == 1 })
+        try? await Task.sleep(for: .milliseconds(200))
+        await warmer.warmAhead(targets: targets(["gone"]), source: "S")
+        try? await Task.sleep(for: .milliseconds(200))
+        #expect(ImageStub.requestCount == 1)
+        // Coming back to the app gives it another chance.
+        await warmer.cancel()
+        await warmer.warmAhead(targets: targets(["gone"]), source: "S")
+        #expect(await waitFor { ImageStub.requestCount == 2 })
     }
 
     private func waitFor(_ condition: () -> Bool) async -> Bool {
@@ -1005,5 +1035,48 @@ extension ImageCacheTests {
             try? await Task.sleep(for: .milliseconds(10))
         }
         return condition()
+    }
+}
+
+@MainActor
+struct ListPrefetcherTests {
+    @Test func thePlanIsMostlyAheadAndFillsUpAtTheEnds() {
+        let total = ListPrefetcher.ahead + ListPrefetcher.behind
+        let middle = ListPrefetcher.plan(from: 100, count: 200)
+        #expect(middle == [100] + (1...ListPrefetcher.ahead).map { 100 + $0 }
+            + (1...ListPrefetcher.behind).map { 100 - $0 })
+        #expect(ListPrefetcher.plan(from: 100, direction: -1, count: 200).prefix(3) == [100, 99, 98])
+        #expect(ListPrefetcher().rows(appearing: 0, of: 100) == Array(0...total))
+        // Looking up from near the top: the rows below get what the ones above can't use.
+        let top = ListPrefetcher.plan(from: 3, direction: -1, count: 100)
+        #expect(Set(top) == Set(0...total))
+        #expect(top.prefix(4) == [3, 2, 1, 0])
+        #expect(ListPrefetcher.plan(from: 50, count: 52).count == 1 + total)
+        #expect(ListPrefetcher.plan(from: 2, count: 4).sorted() == [0, 1, 2, 3])
+        #expect(ListPrefetcher.plan(from: 0, count: 0).isEmpty)
+    }
+
+    @Test func itPlansAgainEveryFewRowsAndWhenTheRowsChange() {
+        let prefetcher = ListPrefetcher()
+        #expect(prefetcher.rows(appearing: 10, of: 100) != nil)
+        for index in 11..<(10 + ListPrefetcher.stride) {
+            #expect(prefetcher.rows(appearing: index, of: 100) == nil)
+        }
+        #expect(prefetcher.rows(appearing: 10 + ListPrefetcher.stride, of: 100) != nil)
+        #expect(prefetcher.rows(appearing: 11 + ListPrefetcher.stride, of: 99) != nil)
+        prefetcher.reset()
+        #expect(prefetcher.rows(appearing: 11 + ListPrefetcher.stride, of: 99) != nil)
+    }
+
+    @Test func theLookAheadTurnsRoundWithTheScroll() {
+        let prefetcher = ListPrefetcher()
+        for index in 40...50 { _ = prefetcher.rows(appearing: index, of: 200) }
+        // One row out of order changes nothing.
+        #expect(prefetcher.rows(appearing: 49, of: 200) == nil)
+        let turned = prefetcher.rows(appearing: 48, of: 200)
+        #expect(turned?.prefix(3) == [48, 47, 46])
+        // A jump to the top looks down the list again.
+        let top = prefetcher.rows(appearing: 0, of: 200)
+        #expect(top?.prefix(3) == [0, 1, 2])
     }
 }

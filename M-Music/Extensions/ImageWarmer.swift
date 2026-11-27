@@ -62,8 +62,6 @@ actor ImageWarmer {
     static let carouselAheadCount = 16
     /// How many covers of each neighbouring Home carousel are warmed before it's reached.
     static let neighborCarouselCards = 8
-    /// How many images a look-ahead worker decodes at the same time.
-    static let aheadParallelism = 2
     /// How many of a destination's own items (an artist's albums, a playlist's songs) are warmed.
     static let destinationItemLimit = 12
 
@@ -72,18 +70,24 @@ actor ImageWarmer {
     private let scaleProvider: @Sendable () async -> CGFloat
 
     private var warmPass: Task<Void, Never>?
-    private struct AheadQueue {
-        var pending: [Target] = []
-        var isRunning = false
+    private struct AheadLoad {
+        let id: Int
+        let task: Task<Void, Never>
     }
-    /// Each look-ahead source's queue — see `warmAhead`.
-    private var aheadQueues: [String: AheadQueue] = [:]
-    /// Everything a look-ahead has asked for since the cache may last have lost images — see
-    /// `warmAhead`. Bounded; cleared when the app goes to the background or memory is purged.
-    private var requested: Set<Target> = []
-    private static let requestedLimit = 4000
-    /// How many prefetch batches `warmAhead` has started, for tests.
-    private(set) var prefetchBatchesStarted = 0
+    /// Each look-ahead source's loads under way — see `warmAhead`.
+    private var aheadLoads: [String: [Target: AheadLoad]] = [:]
+    /// When a look-ahead's image last couldn't be had.
+    private var failedAhead: [Target: ContinuousClock.Instant] = [:]
+    private static let retryDelay: Duration = .seconds(30)
+    private static let failureLimit = 500
+    /// How many loads `warmAhead` has started, for tests.
+    private(set) var aheadLoadsStarted = 0
+    /// Each list's `warmWholeList` under way.
+    private var wholeListPasses: [String: Task<Void, Never>] = [:]
+    /// The most distinct thumbnails a list may have for all of them to be decoded: at a song row's
+    /// size, some 40 MB.
+    static let wholeListLimit = 600
+    private static let wholeListParallelism = 3
     /// The warm-up of each screen's newly changed first screenful (see `remember`).
     private var refreshTasks: [Screen: Task<Void, Never>] = [:]
     /// Destinations already warmed since the memory layer was last (possibly) emptied.
@@ -152,16 +156,20 @@ actor ImageWarmer {
     /// gone, so the next row to ask warms its destination again.
     func memoryWasPurged() {
         warmedDestinations.removeAll()
-        requested.removeAll()
+        failedAhead.removeAll()
     }
 
     /// Stops a warm-up in progress (the app went to the background).
     func cancel() {
         warmPass?.cancel()
         warmPass = nil
-        for source in aheadQueues.keys { aheadQueues[source]?.pending = [] }
-        // The cache may lose images while the app is away: everything is up for requesting again.
-        requested.removeAll()
+        for loads in aheadLoads.values {
+            for load in loads.values { load.task.cancel() }
+        }
+        aheadLoads.removeAll()
+        failedAhead.removeAll()
+        for pass in wholeListPasses.values { pass.cancel() }
+        wholeListPasses.removeAll()
     }
 
     // MARK: - Now Playing
@@ -237,16 +245,14 @@ actor ImageWarmer {
 
     // MARK: - Scrolling
 
-    /// Warms the images of the rows or cards just after one that scrolled into view, so a fast
-    /// scroll finds them already decoded instead of starting each load as its row appears.
+    /// Warms the images of the rows or cards about to scroll into view, so a fast scroll finds them
+    /// already decoded instead of starting each load as its row appears.
     ///
-    /// Each `source` (a carousel, a list) has its own queue and its own worker. A call replaces
-    /// what that source still has queued — the newest position is the one that matters — but never
-    /// cancels what the worker is decoding right now, and never touches another source's queue:
-    /// cancelling on every call meant that during a steady swipe (a new card appears every few
-    /// tens of milliseconds) each run was cut off before its first image was done, and carousels
-    /// cancelled each other's. The worker fetches what isn't on disk, then decodes, one image at a
-    /// time (the cache's decode gate bounds the CPU).
+    /// Each `source` (a carousel, a list) has loads of its own. A call says what that source wants
+    /// now, the most wanted first: loads of what it no longer wants are cancelled (a download that
+    /// hasn't started is dropped — see `ArtworkDownloadQueue`), the ones still wanted carry on and
+    /// the new ones start. Each image is decoded as soon as its bytes are there, during the scroll
+    /// too: the download queue decides what comes first, and the cache's decode gate bounds the CPU.
     func warmAhead(_ requests: [ArtworkRequest], source: String) {
         warmAhead(targets: requests.compactMap { request in
             request.url.map { Target(url: $0, maxPixelSize: request.maxPixelSize) }
@@ -260,76 +266,70 @@ actor ImageWarmer {
     }
 
     func warmAhead(targets: [Target], source: String) {
-        var queue = aheadQueues[source] ?? AheadQueue()
-
-        // A card appearing asks for the neighbours of its position, and the previous card asked
-        // for nearly the same ones: only what hasn't been requested since the cache was last
-        // emptied is looked at — no cache lookups, file-system checks or tasks for the rest. (The
-        // repeats used to cost more CPU than decoding the images did.)
-        let fresh = targets.filter { !requested.contains($0) }
-        let freshSet = Set(fresh)
-        let stillPending = Set(queue.pending)
-        let window = Set(targets)
-        // What the previous call queued but this window has moved past is up for requesting again.
-        for dropped in queue.pending where !window.contains(dropped) { requested.remove(dropped) }
-        if requested.count > Self.requestedLimit { requested.removeAll() }
-        requested.formUnion(fresh)
-
-        let missing = targets.filter { target in
-            if stillPending.contains(target) { return true }
-            guard freshSet.contains(target) else { return false }
-            return cache.image(for: target.url, maxPixelSize: target.maxPixelSize) == nil
+        var loads = aheadLoads[source] ?? [:]
+        let wanted = Set(targets)
+        for (target, load) in loads where !wanted.contains(target) {
+            load.task.cancel()
+            loads[target] = nil
         }
-        // Bytes first (the cache's prefetch gate keeps a few downloads running at a time, in this
-        // order): a worker that downloaded each image only when its turn to decode came couldn't
-        // keep up with a swipe. One task for the call's new targets, not one per target.
-        let missingSet = Set(missing)
-        let toFetch = fresh.filter { missingSet.contains($0) }
-        if !toFetch.isEmpty {
-            prefetchBatchesStarted += 1
-            Task(priority: .utility) { [cache] in
-                _ = await BoundedConcurrency.map(toFetch, limit: 4) { target -> Bool in
-                    await cache.prefetchOriginalData(target.url, priority: .ahead)
-                    return true
-                }
+        let now = ContinuousClock.now
+        for target in targets {
+            guard loads[target] == nil, cache.image(for: target.url, maxPixelSize: target.maxPixelSize) == nil
+            else { continue }
+            // One that couldn't be had isn't asked for again by every row that scrolls past it.
+            if let failed = failedAhead[target], now - failed < Self.retryDelay { continue }
+            aheadLoadsStarted += 1
+            let id = aheadLoadsStarted
+            let task = Task(priority: .userInitiated) { [cache] in
+                let loaded = await cache.preload(
+                    target.url, maxPixelSize: target.maxPixelSize, allowNetwork: true,
+                    paced: false, priority: .prefetch
+                )
+                self.finishedAhead(target, source: source, id: id, loaded: loaded)
             }
+            loads[target] = AheadLoad(id: id, task: task)
         }
-        queue.pending = missing
-        let start = !queue.isRunning && !missing.isEmpty
-        if start { queue.isRunning = true }
-        aheadQueues[source] = queue
-        guard start else { return }
-        Task(priority: .userInitiated) { await self.runAheadWorker(source) }
+        aheadLoads[source] = loads
     }
 
-    /// The next few targets of `source`'s queue, nearest first; empty — and the worker marked as
-    /// stopped — once it has run dry.
-    private func takeAhead(_ source: String, count: Int) -> [Target] {
-        guard var queue = aheadQueues[source], !queue.pending.isEmpty else {
-            aheadQueues[source]?.isRunning = false
-            return []
-        }
-        let batch = Array(queue.pending.prefix(count))
-        queue.pending.removeFirst(batch.count)
-        aheadQueues[source] = queue
-        return batch
+    /// Decodes every one of a list's thumbnails while there's nothing better to do, if there are
+    /// few enough of them (`wholeListLimit`) — however fast the list is then scrolled, nothing is
+    /// left to load. With album covers on song rows (`ListArtwork`), a library of thousands of
+    /// songs has only a few hundred. `requests` is worked out here, off the main actor. A new call
+    /// for the same `source` replaces the one under way.
+    func warmWholeList(source: String, requests: @Sendable @escaping () -> [ArtworkRequest]) {
+        warmWholeList(source: source, targets: {
+            var seen = Set<ArtworkRequest>()
+            let distinct = requests().filter { seen.insert($0).inserted }
+            // Too many: not worth signing thousands of URLs to find that out below.
+            guard distinct.count <= Self.wholeListLimit else { return [] }
+            return distinct.compactMap { request in
+                request.url.map { Target(url: $0, maxPixelSize: request.maxPixelSize) }
+            }
+        })
     }
 
-    private func runAheadWorker(_ source: String) async {
-        let cache = self.cache
-        // No suspension between `takeAhead` finding the queue empty and clearing `isRunning`, so a
-        // call can never slip in between and be left without a worker.
-        while true {
-            let batch = takeAhead(source, count: Self.aheadParallelism)
-            if batch.isEmpty { return }
-            await withTaskGroup(of: Void.self) { group in
-                for target in batch {
-                    group.addTask {
-                        if cache.image(for: target.url, maxPixelSize: target.maxPixelSize) != nil { return }
-                        await cache.preload(target.url, maxPixelSize: target.maxPixelSize, allowNetwork: true, paced: false)
-                    }
-                }
+    func warmWholeList(source: String, targets: @Sendable @escaping () -> [Target]) {
+        wholeListPasses[source]?.cancel()
+        wholeListPasses[source] = Task(priority: .utility) { [cache] in
+            var seen = Set<Target>()
+            let distinct = targets().filter { seen.insert($0).inserted }
+            guard distinct.count <= Self.wholeListLimit, !Task.isCancelled else { return }
+            _ = await BoundedConcurrency.map(distinct, limit: Self.wholeListParallelism) { target -> Bool in
+                await cache.preload(target.url, maxPixelSize: target.maxPixelSize, allowNetwork: true, paced: false)
             }
+        }
+    }
+
+    private func finishedAhead(_ target: Target, source: String, id: Int, loaded: Bool) {
+        // Not one that has been cancelled, or replaced since.
+        guard aheadLoads[source]?[target]?.id == id else { return }
+        aheadLoads[source]?[target] = nil
+        if loaded {
+            failedAhead[target] = nil
+        } else {
+            if failedAhead.count >= Self.failureLimit { failedAhead.removeAll() }
+            failedAhead[target] = .now
         }
     }
 

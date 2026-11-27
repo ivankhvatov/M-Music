@@ -122,6 +122,8 @@ struct SongsListView: View {
     @State private var rowPositions = RowPositions()
     /// Where the user last was, to warm around on resume — see `onAppResume`.
     @State private var lastSeen = LastSeenIndex()
+    /// Which rows to warm as the list scrolls.
+    @State private var prefetcher = ListPrefetcher()
     /// Sorts/filters off the main actor — see `OffMainDeriver`.
     @State private var deriver = OffMainDeriver()
 
@@ -172,7 +174,7 @@ struct SongsListView: View {
             }
         }
         .refreshable { await performRefresh(force: true) }
-        .onAppResume { warmAround(lastSeen.index) }
+        .onAppResume { warm(ListPrefetcher.plan(from: lastSeen.index, count: displayedSongs.count)) }
         .navigationTitle("Songs")
         .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
         .toolbar {
@@ -306,18 +308,19 @@ struct SongsListView: View {
         return songs.map { ArtworkRequest.songRow(ListArtwork.shared.artworkId(for: $0), scale: scale) }
     }
 
-    /// A row scrolled into view: warm the ones just below it, so a fast scroll finds them ready.
+    /// A row scrolled into view: warm the ones ahead of it, so a fast scroll finds them ready.
     private func warmAhead(after track: Child) {
         guard let index = rowPositions.position(of: track.id.raw),
               displayedSongs.indices.contains(index), displayedSongs[index].id == track.id else { return }
         lastSeen.index = index
-        if lastSeen.shouldWarm(at: index, of: displayedSongs.count) { warmAround(index) }
+        if let rows = prefetcher.rows(appearing: index, of: displayedSongs.count) { warm(rows) }
     }
 
-    /// Warms the images around `index` — also after the app resumes, where the user left off.
-    private func warmAround(_ index: Int) {
-        guard displayedSongs.indices.contains(index) else { return }
-        let requests = artworkRequests(for: ArraySlice(ImageWarmer.neighbors(of: index, in: displayedSongs, count: ImageWarmer.scrollAheadCount)))
+    private func warm(_ rows: [Int]) {
+        let scale = displayScale
+        let requests = rows.map { row in
+            ArtworkRequest.songRow(ListArtwork.shared.artworkId(for: displayedSongs[row]), scale: scale)
+        }
         guard !requests.isEmpty else { return }
         Task { await ImageWarmer.shared.warmAhead(requests, source: "songs") }
     }
@@ -325,12 +328,19 @@ struct SongsListView: View {
     /// Tells `ImageWarmer` what this screen shows first, so its artwork is decoded ahead of the
     /// next visit (a search's results aren't what the screen normally opens with).
     private func rememberFirstScreenful() {
-        lastSeen.forgetWarmed()
+        prefetcher.reset()
         rowPositions.update(ids: displayedSongs.map { $0.id.raw })
         let requests = artworkRequests(for: displayedSongs.prefix(ImageWarmer.manifestLimit))
         imageReadiness.require(requests)
         guard searchText.isEmpty else { return }
-        Task { await ImageWarmer.shared.remember(.songs, requests) }
+        let songs = displayedSongs
+        let scale = displayScale
+        Task {
+            await ImageWarmer.shared.remember(.songs, requests)
+            await ImageWarmer.shared.warmWholeList(source: "songs") {
+                songs.map { ArtworkRequest.songRow(ListArtwork.shared.artworkId(for: $0), scale: scale) }
+            }
+        }
     }
 
     private nonisolated static func sorted(_ songs: [Child], _ spec: DerivationSpec) -> [Child] {

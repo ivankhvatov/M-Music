@@ -298,7 +298,9 @@ final class ImageCache: @unchecked Sendable {
         return result
     }
 
-    enum LoadPriority { case interactive, background }
+    /// `.interactive`: something showing, or about to show, the image waits. `.prefetch`: a row
+    /// about to scroll into view will want it. `.background`: warming ahead that waits its turn.
+    enum LoadPriority { case interactive, prefetch, background }
 
     /// Returns the in-flight load for `memKey` — counting the caller among its waiters — or
     /// creates and registers a new one, atomically, so two concurrent callers for the same key
@@ -306,30 +308,33 @@ final class ImageCache: @unchecked Sendable {
     /// locking stays a plain, provably-safe critical section instead of straddling `async`
     /// suspension points.
     ///
-    /// Interactive and background loads of the same image are separate entries (the background
-    /// one is registered under a suffixed key): an interactive caller never joins a background
-    /// load that may be sitting far back in the decode queue, and starts its own at the front.
-    /// Whichever decodes first stores the image; the other then finds it in memory and skips the
-    /// decode. A background caller does join an interactive load, which is at least as fast.
+    /// Loads of the same image at different priorities are separate entries (the lower ones are
+    /// registered under suffixed keys): a caller never joins a load slower than its own — a
+    /// background one may be sitting far back in the decode queue, or waiting for a scroll to end.
+    /// Whichever decodes first stores the image; the others then find it in memory and skip the
+    /// decode. A caller does join a faster load.
     private func joinOrStart(
         memKey: NSString, key: String, url: URL, maxPixelSize: Int?, priority: LoadPriority
     ) -> (InFlight, String) {
         let interactiveKey = memKey as String
-        let backgroundKey = interactiveKey + "|bg"
+        // Fastest first; the caller's own is the last of them it may join.
+        let joinable: [String] = switch priority {
+        case .interactive: [interactiveKey]
+        case .prefetch: [interactiveKey, interactiveKey + "|pf"]
+        case .background: [interactiveKey, interactiveKey + "|pf", interactiveKey + "|bg"]
+        }
         return lock.withLock {
-            if let existing = inFlightTasks[interactiveKey] {
-                existing.waiters += 1
-                return (existing, interactiveKey)
-            }
-            if priority == .background, let existing = inFlightTasks[backgroundKey] {
-                existing.waiters += 1
-                return (existing, backgroundKey)
+            for key in joinable {
+                if let existing = inFlightTasks[key] {
+                    existing.waiters += 1
+                    return (existing, key)
+                }
             }
             let task = Task<UIImage?, Never> { [weak self] in
                 await self?.fetch(url, key: key, memKey: memKey, maxPixelSize: maxPixelSize, priority: priority)
             }
             let entry = InFlight(task: task)
-            let entryKey = priority == .interactive ? interactiveKey : backgroundKey
+            let entryKey = joinable[joinable.count - 1]
             inFlightTasks[entryKey] = entry
             return (entry, entryKey)
         }
@@ -353,7 +358,11 @@ final class ImageCache: @unchecked Sendable {
     ) async -> UIImage? {
         // Network and disk reads happen outside the decode gate: they aren't CPU-bound, and
         // gating them would just let a slow download hold up unrelated decodes.
-        let downloadPriority: ArtworkDownloadQueue.Priority = priority == .interactive ? .visible : .destination
+        let downloadPriority: ArtworkDownloadQueue.Priority = switch priority {
+        case .interactive: .visible
+        case .prefetch: .ahead
+        case .background: .destination
+        }
         guard let data = await originalData(for: url, key: key, priority: downloadPriority) else { return nil }
 
         // Warm-up decodes are rationed: one at a time on their own lane, which then rests for as
@@ -365,7 +374,7 @@ final class ImageCache: @unchecked Sendable {
             await ScrollActivity.shared.waitUntilIdle()
             await backgroundLane.acquire()
         }
-        await decodeGate.acquire(priority: isBackground ? .low : .high)
+        await decodeGate.acquire(priority: priority == .interactive ? .high : .low)
         // Cancelled while waiting its turn (nobody wants this image any more), or already decoded
         // by the other class of load meanwhile: give the slots straight back, with no decode and
         // no cooldown.
@@ -400,8 +409,11 @@ final class ImageCache: @unchecked Sendable {
                 await lane.release()
             }
         } else {
+            // A look-ahead's thumbnails decode in a millisecond or so, and a scroll wants one
+            // after another: its rest is no longer than the decode was.
+            let rest = priority == .prefetch ? min(spent, Self.decodeCooldown) : Self.decodeCooldown
             Task {
-                try? await Task.sleep(for: Self.decodeCooldown)
+                try? await Task.sleep(for: rest)
                 await gate.release()
             }
         }
