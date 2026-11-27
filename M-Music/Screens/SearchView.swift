@@ -193,11 +193,7 @@ struct SearchView: View {
         .onReceive(NotificationCenter.default.publisher(for: ListArtwork.didChange)) { _ in
             if !isOpening, route == nil { search() }
         }
-        // Background work holds off while the results are scrolled — see `ScrollActivity`.
-        .onScrollPhaseChange { _, phase in
-            ScrollActivity.shared.set(scrolling: phase != .idle)
-        }
-        .onDisappear { ScrollActivity.shared.set(scrolling: false) }
+        .reportsScrollActivity()
         .overlay {
             if results.isEmpty, !trimmedQuery.isEmpty, settledQuery == trimmedQuery {
                 ContentUnavailableView.search(text: trimmedQuery)

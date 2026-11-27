@@ -171,6 +171,7 @@ struct SongsListView: View {
                     }
                 }
                 .listStyle(.plain)
+                .reportsScrollActivity()
             }
         }
         .refreshable { await performRefresh(force: true) }
@@ -670,10 +671,17 @@ struct SongRow: View {
                         )
                     )
             } else if showsTrailingActions {
-                SongTrailingActions(
-                    track: track, showsGoToActions: showsGoToActions, showsAddToPlaylist: showsAddToPlaylist,
-                    onRemoveFromPlaylist: onRemoveFromPlaylist
-                )
+                // The menu is built only once the list is at rest: it's much of what a row costs,
+                // and a touch during a scroll only stops the scroll.
+                DeferredWhileScrolling {
+                    SongTrailingActions(
+                        track: track, showsGoToActions: showsGoToActions, showsAddToPlaylist: showsAddToPlaylist,
+                        onRemoveFromPlaylist: onRemoveFromPlaylist
+                    )
+                } placeholder: {
+                    SongDownloadStatus(songId: track.id.raw)
+                    SongMenuLabel()
+                }
             }
         }
     }
@@ -862,12 +870,19 @@ private struct SongTrailingActions: View {
                 }
             }
         } label: {
-            Image(systemName: "ellipsis")
-                .foregroundStyle(.primary)
-                .font(.system(size: 18))
-                .frame(height: 20)
-                .contentShape(Rectangle())
+            SongMenuLabel()
         }
+    }
+}
+
+/// The song menu's button, as it looks — also in a row that doesn't have the menu yet.
+private struct SongMenuLabel: View {
+    var body: some View {
+        Image(systemName: "ellipsis")
+            .foregroundStyle(.primary)
+            .font(.system(size: 18))
+            .frame(height: 20)
+            .contentShape(Rectangle())
     }
 }
 

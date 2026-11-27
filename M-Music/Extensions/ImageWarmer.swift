@@ -292,8 +292,8 @@ actor ImageWarmer {
         aheadLoads[source] = loads
     }
 
-    /// Decodes every one of a list's thumbnails while there's nothing better to do, if there are
-    /// few enough of them (`wholeListLimit`) — however fast the list is then scrolled, nothing is
+    /// Decodes every one of a list's thumbnails behind whatever the screen and the scroll want, if
+    /// there are few enough of them (`wholeListLimit`) — however fast the list is then scrolled, nothing is
     /// left to load. With album covers on song rows (`ListArtwork`), a library of thousands of
     /// songs has only a few hundred. `requests` is worked out here, off the main actor. A new call
     /// for the same `source` replaces the one under way.
@@ -316,7 +316,9 @@ actor ImageWarmer {
             let distinct = targets().filter { seen.insert($0).inserted }
             guard distinct.count <= Self.wholeListLimit, !Task.isCancelled else { return }
             _ = await BoundedConcurrency.map(distinct, limit: Self.wholeListParallelism) { target -> Bool in
-                await cache.preload(target.url, maxPixelSize: target.maxPixelSize, allowNetwork: true, paced: false)
+                await cache.preload(
+                    target.url, maxPixelSize: target.maxPixelSize, allowNetwork: true, paced: false, priority: .list
+                )
             }
         }
     }

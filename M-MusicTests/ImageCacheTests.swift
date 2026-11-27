@@ -1014,6 +1014,16 @@ extension ImageCacheTests {
         #expect(ImageStub.requestCount == 0)
     }
 
+    @Test func aWholeListIsDecodedDuringAScrollToo() async {
+        ImageStub.reset()
+        ScrollActivity.shared.set(scrolling: true)
+        defer { ScrollActivity.shared.set(scrolling: false) }
+        let cache = Directories().makeCache()
+        let list = targets(["during-1", "during-2"])
+        await lookAhead(cache).warmWholeList(source: "L", targets: { list })
+        #expect(await waitFor { list.allSatisfy { cache.image(for: $0.url, maxPixelSize: $0.maxPixelSize) != nil } })
+    }
+
     @Test func anImageThatCannotBeHadIsNotAskedForByEveryRow() async {
         ImageStub.reset(status: 404)
         let warmer = lookAhead(Directories().makeCache())

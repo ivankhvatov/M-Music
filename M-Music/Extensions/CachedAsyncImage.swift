@@ -299,8 +299,10 @@ final class ImageCache: @unchecked Sendable {
     }
 
     /// `.interactive`: something showing, or about to show, the image waits. `.prefetch`: a row
-    /// about to scroll into view will want it. `.background`: warming ahead that waits its turn.
-    enum LoadPriority { case interactive, prefetch, background }
+    /// about to scroll into view will want it. `.list`: the rest of a short list, behind the two
+    /// above but during a scroll too. `.background`: warming ahead that waits its turn, and for
+    /// scrolling to stop.
+    enum LoadPriority { case interactive, prefetch, list, background }
 
     /// Returns the in-flight load for `memKey` — counting the caller among its waiters — or
     /// creates and registers a new one, atomically, so two concurrent callers for the same key
@@ -321,7 +323,8 @@ final class ImageCache: @unchecked Sendable {
         let joinable: [String] = switch priority {
         case .interactive: [interactiveKey]
         case .prefetch: [interactiveKey, interactiveKey + "|pf"]
-        case .background: [interactiveKey, interactiveKey + "|pf", interactiveKey + "|bg"]
+        case .list: [interactiveKey, interactiveKey + "|pf", interactiveKey + "|ls"]
+        case .background: [interactiveKey, interactiveKey + "|pf", interactiveKey + "|ls", interactiveKey + "|bg"]
         }
         return lock.withLock {
             for key in joinable {
@@ -361,7 +364,7 @@ final class ImageCache: @unchecked Sendable {
         let downloadPriority: ArtworkDownloadQueue.Priority = switch priority {
         case .interactive: .visible
         case .prefetch: .ahead
-        case .background: .destination
+        case .list, .background: .destination
         }
         guard let data = await originalData(for: url, key: key, priority: downloadPriority) else { return nil }
 
@@ -409,9 +412,9 @@ final class ImageCache: @unchecked Sendable {
                 await lane.release()
             }
         } else {
-            // A look-ahead's thumbnails decode in a millisecond or so, and a scroll wants one
-            // after another: its rest is no longer than the decode was.
-            let rest = priority == .prefetch ? min(spent, Self.decodeCooldown) : Self.decodeCooldown
+            // A list's thumbnails decode in a millisecond or so, and a scroll wants one after
+            // another: the rest after one loaded ahead is no longer than the decode was.
+            let rest = priority == .interactive ? Self.decodeCooldown : min(spent, Self.decodeCooldown)
             Task {
                 try? await Task.sleep(for: rest)
                 await gate.release()

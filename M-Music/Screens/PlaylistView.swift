@@ -150,6 +150,7 @@ struct PlaylistView: View {
                 .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 16, trailing: 16))
         }
         .listStyle(.plain)
+        .reportsScrollActivity()
         .scrollContentBackground(.hidden)
         .background(darkenedBackgroundColor.ignoresSafeArea())
         .scrollBounceBehavior(.basedOnSize)

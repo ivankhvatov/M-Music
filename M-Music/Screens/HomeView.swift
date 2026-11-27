@@ -209,11 +209,7 @@ struct HomeView: View {
                     .onAppear { PerfLog.homeContentShown() }
                 }
             }
-            // Background work holds off while this screen is scrolled — see `ScrollActivity`.
-            .onScrollPhaseChange { _, phase in
-                ScrollActivity.shared.set(scrolling: phase != .idle)
-            }
-            .onDisappear { ScrollActivity.shared.set(scrolling: false) }
+            .reportsScrollActivity()
             .navigationTitle("Home")
             .screenOnStack()
             .toolbar {
