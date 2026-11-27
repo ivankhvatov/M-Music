@@ -215,7 +215,7 @@ actor ImageWarmer {
                 for target in targets {
                     group.addTask {
                         if cache.image(for: target.url, maxPixelSize: target.maxPixelSize) != nil { return }
-                        await cache.prefetchOriginalData(target.url, priority: .high)
+                        await cache.prefetchOriginalData(target.url, priority: .visible)
                         // A screen is waiting on these: ahead of any warm-up in the decode queue.
                         await cache.preload(
                             target.url, maxPixelSize: target.maxPixelSize, allowNetwork: true,
@@ -289,7 +289,7 @@ actor ImageWarmer {
             prefetchBatchesStarted += 1
             Task(priority: .utility) { [cache] in
                 _ = await BoundedConcurrency.map(toFetch, limit: 4) { target -> Bool in
-                    await cache.prefetchOriginalData(target.url)
+                    await cache.prefetchOriginalData(target.url, priority: .ahead)
                     return true
                 }
             }

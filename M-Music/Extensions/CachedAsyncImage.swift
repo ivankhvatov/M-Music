@@ -145,9 +145,8 @@ final class ImageCache: @unchecked Sendable {
     /// The one lane warm-up decodes go through before the gate — see `fetch`.
     private let backgroundLane = AsyncLimiter(limit: 1)
     private static let decodeCooldown: Duration = .milliseconds(10)
-    /// Same idea for `prefetchOriginalData`'s downloads — not CPU-heavy, but a screen full of
-    /// rows shouldn't open dozens of simultaneous connections either.
-    private let prefetchGate = AsyncLimiter(limit: 4)
+    /// Every download goes through here: one per image, a few at a time, what's on screen first.
+    private var downloadQueue: ArtworkDownloadQueue!
     /// `preload`'s own gate: warm-ups queue up here one at a time, so at most one of them is ever
     /// waiting at the `decodeGate` — an on-screen cell's decode is never stuck behind a backlog of
     /// them — and the pause after each keeps a long warm-up from pinning a core.
@@ -165,6 +164,14 @@ final class ImageCache: @unchecked Sendable {
         self.regularDirectory = regularDirectory
         self.permanentDirectory = permanentDirectory
         self.sessionOverride = session
+        downloadQueue = ArtworkDownloadQueue(
+            fetch: { [weak self] url in
+                guard let self else { return nil }
+                let session = self.lock.withLock { self.lockedSession() }
+                return await Self.fetchImageData(url, session: session)
+            },
+            store: { [weak self] data, key in self?.writeRegular(data, forKey: key) }
+        )
         memoryWarningObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: nil
         ) { [weak self] _ in self?.dropPinned() }
@@ -346,7 +353,8 @@ final class ImageCache: @unchecked Sendable {
     ) async -> UIImage? {
         // Network and disk reads happen outside the decode gate: they aren't CPU-bound, and
         // gating them would just let a slow download hold up unrelated decodes.
-        guard let data = await originalData(for: url, key: key) else { return nil }
+        let downloadPriority: ArtworkDownloadQueue.Priority = priority == .interactive ? .visible : .destination
+        guard let data = await originalData(for: url, key: key, priority: downloadPriority) else { return nil }
 
         // Warm-up decodes are rationed: one at a time on their own lane, which then rests for as
         // long as the decode took (see below). Cards that are showing, or are about to, skip the
@@ -403,14 +411,13 @@ final class ImageCache: @unchecked Sendable {
 
     /// The bytes for `url`: from disk if they're there — `url`'s own, or else the original's
     /// where that can stand in (see `originalKey(for:)`) — and from the server otherwise.
-    private func originalData(for url: URL, key: String) async -> Data? {
+    private func originalData(for url: URL, key: String, priority: ArtworkDownloadQueue.Priority) async -> Data? {
         if let data = readStored(key) { return data }
         if let original = originalKey(for: url), let data = readStored(original) { return data }
         // Not to be had from the server: a saved stand-in will do, kept out of `key` so that the
         // right file is still fetched once it can be.
-        guard let data = await downloadImageData(url) else { return albumRowStandIn(for: url) }
-        writeRegular(data, forKey: key)
-        return data
+        if let data = await downloadImageData(url, priority: priority) { return data }
+        return Task.isCancelled ? nil : albumRowStandIn(for: url)
     }
 
     /// A song row that shows its album's cover asks for it at the song rows' size. Downloads made
@@ -463,9 +470,8 @@ final class ImageCache: @unchecked Sendable {
     /// the cache ahead of a screen that will want the large cover (e.g. so opening an album from
     /// a list doesn't wait on the network), without paying for a decode of an image that may never
     /// be shown at that size. Cancellable: call it from a `.task`, which cancels it when the row
-    /// scrolls away. Only a few run at a time; `.high` — for images a screen is waiting on — goes
-    /// ahead of every `.low` one still queued.
-    func prefetchOriginalData(_ url: URL?, priority: AsyncLimiter.Priority = .low) async {
+    /// scrolls away. `priority` is who is waiting — see `ArtworkDownloadQueue`.
+    func prefetchOriginalData(_ url: URL?, priority: ArtworkDownloadQueue.Priority = .destination) async {
         guard let url else { return }
         let key = stableKey(for: url)
         // Anything on disk that will do is brought into the regular cache; nothing is fetched then.
@@ -477,11 +483,8 @@ final class ImageCache: @unchecked Sendable {
             }
         }
 
-        await prefetchGate.acquire(priority: priority)
-        defer { Task { await prefetchGate.release() } }
         guard !Task.isCancelled else { return }
-        guard let data = await downloadImageData(url) else { return }
-        writeRegular(data, forKey: key)
+        _ = await downloadImageData(url, priority: priority)
     }
 
     /// Whether `request`'s decoded image is already in memory.
@@ -550,8 +553,8 @@ final class ImageCache: @unchecked Sendable {
         if isStored(key) { return keepInBothCaches(key) }
         // The original is here already: keeping it is as good, and costs no download.
         if let original = originalKey(for: url), isStored(original) { return keepInBothCaches(original) }
-        guard let data = await downloadImageData(url) else { return false }
-        writeRegular(data, forKey: key)
+        // Saved even if whoever asked goes away, and behind everything that someone is waiting for.
+        guard let data = await downloadImageData(url, priority: .bulk, cancellable: false) else { return false }
         writeToPermanent(data, forKey: key)
         return true
     }
@@ -595,6 +598,7 @@ final class ImageCache: @unchecked Sendable {
     /// it can't be mistaken for another server's artwork, and it's what keeps downloaded content's
     /// artwork available offline.
     func invalidateAll() {
+        downloadQueue.cancelAll()
         memory.removeAllObjects()
         dropPinned()
         guard let regularDirectory else { return }
@@ -609,24 +613,13 @@ final class ImageCache: @unchecked Sendable {
     /// cover as a JSON error) would be written to disk — and, for downloaded content, to the
     /// permanent cache — as if it were the artwork, and never retried.
     ///
-    /// One download per image at a time: a card that needs an image a warm-up is already fetching
-    /// waits for that download instead of starting a second one. A caller that stops waiting
-    /// doesn't cancel it — someone else may be waiting too, and the bytes are kept on disk.
-    private func downloadImageData(_ url: URL) async -> Data? {
-        let key = stableKey(for: url)
-        let task: Task<Data?, Never> = lock.withLock {
-            if let existing = downloadsInFlight[key] { return existing }
-            let session = lockedSession()
-            let created = Task { await Self.fetchImageData(url, session: session) }
-            downloadsInFlight[key] = created
-            return created
-        }
-        let data = await task.value
-        lock.withLock { if downloadsInFlight[key] == task { downloadsInFlight[key] = nil } }
-        return data
+    /// The bytes are in the regular cache by the time they're returned. One download per image at
+    /// a time, and the queue decides when it runs — see `ArtworkDownloadQueue`.
+    private func downloadImageData(
+        _ url: URL, priority: ArtworkDownloadQueue.Priority, cancellable: Bool = true
+    ) async -> Data? {
+        await downloadQueue.data(for: url, key: stableKey(for: url), priority: priority, cancellable: cancellable)
     }
-
-    private var downloadsInFlight: [String: Task<Data?, Never>] = [:]
 
     /// The session artwork is downloaded with. Call with `lock` held.
     private func lockedSession() -> URLSession {
@@ -645,6 +638,8 @@ final class ImageCache: @unchecked Sendable {
         configuration.urlCache = nil
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.httpMaximumConnectionsPerHost = 4
+        // A request that gets nowhere mustn't hold one of the few download slots for a minute.
+        configuration.timeoutIntervalForRequest = 30
         return configuration
     }
 
