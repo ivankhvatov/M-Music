@@ -1,262 +1,6 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "Couldn't delete the station" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Der Sender konnte nicht gelöscht werden"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Не удалось удалить радиостанцию"
-          }
-        }
-      }
-    },
-    "Delete station" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sender löschen"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Удалить радиостанцию"
-          }
-        }
-      }
-    },
-    "Delete the station from the library?" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sender aus der Mediathek löschen?"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Удалить радиостанцию из медиатеки?"
-          }
-        }
-      }
-    },
-    "Recently Searched" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Zuletzt gesucht"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Недавние запросы"
-          }
-        }
-      }
-    },
-    "Clear" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Löschen"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Очистить"
-          }
-        }
-      }
-    },
-    "Top" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Oben"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Сверху"
-          }
-        }
-      }
-    },
-    "Bottom" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Unten"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Снизу"
-          }
-        }
-      }
-    },
-    "Search bar" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Suchleiste"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Строка поиска"
-          }
-        }
-      }
-    },
-    "Top puts the search field under the title. Bottom uses the system search field in the tab bar." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "„Oben“ setzt das Suchfeld unter den Titel. „Unten“ verwendet das System-Suchfeld in der Tab-Leiste."
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "«Сверху» размещает поле поиска под заголовком. «Снизу» использует системное поле поиска в панели вкладок."
-          }
-        }
-      }
-    },
-    "Song" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Song"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Трек"
-          }
-        }
-      }
-    },
-    "Playlist" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Playlist"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Плейлист"
-          }
-        }
-      }
-    },
-    "EP" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "EP"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "EP"
-          }
-        }
-      }
-    },
-    "Single" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Single"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Сингл"
-          }
-        }
-      }
-    },
-    "Compilation" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sammlung"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Сборник"
-          }
-        }
-      }
-    },
-    "Live album" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Live-Album"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Концертный альбом"
-          }
-        }
-      }
-    },
-    "Instrumental" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Instrumental"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Инструментал"
-          }
-        }
-      }
-    },
     "-%@" : {
 
     },
@@ -1168,6 +912,22 @@
         }
       }
     },
+    "Bottom" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unten"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Снизу"
+          }
+        }
+      }
+    },
     "Cache" : {
       "localizations" : {
         "de" : {
@@ -1296,6 +1056,22 @@
         }
       }
     },
+    "Clear" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Löschen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Очистить"
+          }
+        }
+      }
+    },
     "Clear Cache" : {
       "localizations" : {
         "de" : {
@@ -1308,6 +1084,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Очистить кэш"
+          }
+        }
+      }
+    },
+    "Compilation" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sammlung"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сборник"
           }
         }
       }
@@ -1468,6 +1260,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Не удалось удалить плейлист"
+          }
+        }
+      }
+    },
+    "Couldn't delete the station" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Sender konnte nicht gelöscht werden"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удалось удалить радиостанцию"
           }
         }
       }
@@ -1696,6 +1504,22 @@
         }
       }
     },
+    "Delete station" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sender löschen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удалить радиостанцию"
+          }
+        }
+      }
+    },
     "Delete the album from this device?" : {
       "localizations" : {
         "de" : {
@@ -1772,6 +1596,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Удалить плейлист?"
+          }
+        }
+      }
+    },
+    "Delete the station from the library?" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sender aus der Mediathek löschen?"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удалить радиостанцию из медиатеки?"
           }
         }
       }
@@ -2044,6 +1884,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Введите адрес вашего сервера Navidrome, например https://music.example.com или http://192.168.1.10:4533"
+          }
+        }
+      }
+    },
+    "EP" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "EP"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "EP"
           }
         }
       }
@@ -2355,6 +2211,22 @@
         }
       }
     },
+    "Instrumental" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Instrumental"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Инструментал"
+          }
+        }
+      }
+    },
     "Instrumentals" : {
       "localizations" : {
         "de" : {
@@ -2469,6 +2341,22 @@
     },
     "LIVE" : {
 
+    },
+    "Live album" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live-Album"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Концертный альбом"
+          }
+        }
+      }
     },
     "Live albums" : {
       "localizations" : {
@@ -2594,6 +2482,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Режим"
+          }
+        }
+      }
+    },
+    "More" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mehr"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ещё"
           }
         }
       }
@@ -3065,6 +2969,22 @@
         }
       }
     },
+    "Playlist" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Playlist"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Плейлист"
+          }
+        }
+      }
+    },
     "Playlist name" : {
       "localizations" : {
         "de" : {
@@ -3238,6 +3158,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Недавно воспроизведенные"
+          }
+        }
+      }
+    },
+    "Recently Searched" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zuletzt gesucht"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Недавние запросы"
           }
         }
       }
@@ -3482,6 +3418,22 @@
         }
       }
     },
+    "Search bar" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suchleiste"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Строка поиска"
+          }
+        }
+      }
+    },
     "sec" : {
       "localizations" : {
         "de" : {
@@ -3690,6 +3642,22 @@
         }
       }
     },
+    "Single" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Single"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сингл"
+          }
+        }
+      }
+    },
     "Singles" : {
       "localizations" : {
         "de" : {
@@ -3718,6 +3686,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Некоторые песни уже есть в плейлисте"
+          }
+        }
+      }
+    },
+    "Song" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Song"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Трек"
           }
         }
       }
@@ -3946,6 +3930,22 @@
         }
       }
     },
+    "Top" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Oben"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сверху"
+          }
+        }
+      }
+    },
     "Top playlists" : {
       "localizations" : {
         "de" : {
@@ -3958,6 +3958,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Популярные плейлисты"
+          }
+        }
+      }
+    },
+    "Top puts the search field under the title. Bottom uses the system search field in the tab bar." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„Oben“ setzt das Suchfeld unter den Titel. „Unten“ verwendet das System-Suchfeld in der Tab-Leiste."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "«Сверху» размещает поле поиска под заголовком. «Снизу» использует системное поле поиска в панели вкладок."
           }
         }
       }
